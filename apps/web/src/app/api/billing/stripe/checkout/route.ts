@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { db, subscriptionRequests } from "@mtk/database";
-import { eq } from "drizzle-orm";
+import { db, subscriptionRequests, users } from "@mtk/database";
+import { and, eq } from "drizzle-orm";
 import { getMyTenant } from "@/app/actions/tenants";
+import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
 
 /**
  * POST /api/billing/stripe/checkout
@@ -18,12 +19,6 @@ const schema = z.object({
   plan: z.enum(["starter", "pro", "enterprise"]),
   period: z.enum(["monthly", "annual"]).default("monthly"),
 });
-
-const PLAN_PRICES_PKR: Record<string, number> = {
-  starter: 4999,
-  pro: 14999,
-  enterprise: 49999,
-};
 
 /** Annual billing is charged as 10 months (2 months free). */
 const ANNUAL_MONTHS_FREE = 2;
@@ -49,8 +44,22 @@ export async function POST(request: Request) {
 
     const tenant = await getMyTenant();
     if (!tenant) return NextResponse.json({ error: "No league found" }, { status: 404 });
+    const [actor] = await db.select({ id: users.id }).from(users)
+      .where(eq(users.clerkId, userId)).limit(1);
+    if (!actor || tenant.ownerId !== actor.id) {
+      return NextResponse.json({ error: "Only the league owner can manage billing" }, { status: 403 });
+    }
 
-    const monthly = PLAN_PRICES_PKR[plan];
+    const [pending] = await db.select({ id: subscriptionRequests.id }).from(subscriptionRequests)
+      .where(and(
+        eq(subscriptionRequests.tenantId, tenant.id),
+        eq(subscriptionRequests.status, "pending"),
+      )).limit(1);
+    if (pending) {
+      return NextResponse.json({ error: "A payment request is already awaiting review" }, { status: 409 });
+    }
+
+    const monthly = PLAN_PRICES[plan];
     const months = period === "annual" ? 12 - ANNUAL_MONTHS_FREE : 1;
     const amount = monthly * months;
 
@@ -61,7 +70,7 @@ export async function POST(request: Request) {
       .insert(subscriptionRequests)
       .values({
         tenantId: tenant.id,
-        userId,
+        userId: actor.id,
         requestedPlan: plan,
         currentPlan: tenant.plan,
         amount: String(amount),

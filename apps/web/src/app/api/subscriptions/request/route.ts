@@ -15,16 +15,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db, tenants, users, subscriptionRequests } from "@mtk/database";
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
-
-/**
- * Standardized plan prices (PKR per league).
- */
-const PLAN_PRICES: Record<string, number> = {
-  free: 0,
-  starter: 4999,
-  pro: 14999,
-  enterprise: 49999,
-};
+import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
 
 // Valid plans and payment methods are validated by createRequestSchema below.
 
@@ -93,6 +84,31 @@ export async function POST(req: NextRequest) {
     }
 
     const { requestedPlan, paymentMethod, paymentProofUrl, transactionReference } = validated.data;
+
+    // Receipts must be the short-lived signed URLs produced by our private
+    // payment-proofs bucket, namespaced to this authenticated Clerk account.
+    // This prevents arbitrary external URLs from being stored and opened by
+    // reviewers as part of the payment approval flow.
+    const configuredStorageUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!configuredStorageUrl) {
+      return NextResponse.json({ error: "Receipt storage is not configured" }, { status: 503 });
+    }
+    let proofUrl: URL;
+    let storageUrl: URL;
+    try {
+      proofUrl = new URL(paymentProofUrl);
+      storageUrl = new URL(configuredStorageUrl);
+    } catch {
+      return NextResponse.json({ error: "Invalid payment receipt URL" }, { status: 400 });
+    }
+    const expectedReceiptPrefix = `/storage/v1/object/sign/payment-proofs/receipts/${userId}/`;
+    if (
+      proofUrl.origin !== storageUrl.origin ||
+      !proofUrl.pathname.startsWith(expectedReceiptPrefix) ||
+      !proofUrl.searchParams.has("token")
+    ) {
+      return NextResponse.json({ error: "Receipt must be uploaded through SSL's private receipt uploader" }, { status: 400 });
+    }
 
     // Check for existing pending request (prevent duplicates)
     const [existingPending] = await db

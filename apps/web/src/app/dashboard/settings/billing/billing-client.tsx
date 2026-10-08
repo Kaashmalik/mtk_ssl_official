@@ -501,6 +501,11 @@ export function BillingPageClient({ tenant, clerkUserId: _clerkUserId }: Billing
             <p className="text-blue-600 text-xs mt-2">
               ⏱ Your request will be reviewed within 24–48 hours. You&apos;ll get a confirmation on your billing page.
             </p>
+            <p className="text-blue-700 text-xs">
+              Questions about payment? Message MTK on WhatsApp at{" "}
+              <a className="font-semibold underline" href="https://wa.me/923038111297" target="_blank" rel="noreferrer">03038111297</a>.
+              Send your league name and plan; SSL will activate paid features only after payment verification.
+            </p>
           </div>
         </CardContent>
       </Card>

@@ -14,6 +14,7 @@ import { verifySuperAdmin } from "@/lib/admin-auth";
 import { db, subscriptionRequests, tenants, subscriptions, payments, users, commissionRates, invoices, notifications } from "@mtk/database";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { z } from "zod";
+import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
 
 /**
  * Issues a sequential invoice number and an invoice row for a settled payment.
@@ -73,21 +74,21 @@ async function issueInvoice(input: {
   }
 }
 
-/**
- * Standardized plan prices (PKR per league).
- */
-const PLAN_PRICES: Record<string, number> = {
-  free: 0,
-  starter: 4999,
-  pro: 14999,
-  enterprise: 49999,
-};
-
 const approveRejectSchema = z.object({
   id: z.string().uuid(),
   action: z.enum(["approve", "reject"]),
   adminNotes: z.string().optional(),
 });
+
+function addBillingMonths(start: Date, months: number): Date {
+  const result = new Date(start);
+  const day = result.getDate();
+  result.setDate(1);
+  result.setMonth(result.getMonth() + months);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, lastDay));
+  return result;
+}
 
 export async function GET(req: NextRequest) {
   const adminId = await verifySuperAdmin();
@@ -217,13 +218,16 @@ export async function PATCH(req: NextRequest) {
         .limit(1);
       if (!tenant) throw new Error("Tenant missing for subscription request");
 
-      const amount = PLAN_PRICES[request.requestedPlan];
-      if (amount === undefined || Number(request.amount) !== amount) {
-        throw new Error("Subscription request amount does not match the configured plan price");
+      const parsedPlan = z.enum(["starter", "pro", "enterprise"]).safeParse(request.requestedPlan);
+      if (!parsedPlan.success) throw new Error("Invalid requested subscription plan");
+      const monthlyPlanPrice = PLAN_PRICES[parsedPlan.data];
+      const billedAmount = Number(request.amount);
+      const periodMonths = billedAmount === monthlyPlanPrice * 10 ? 12 : billedAmount === monthlyPlanPrice ? 1 : 0;
+      if (!Number.isFinite(billedAmount) || periodMonths === 0) {
+        throw new Error("Subscription request amount is invalid for this plan");
       }
 
-      const periodEnd = new Date(now);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
+      const periodEnd = addBillingMonths(now, periodMonths);
       await tx.update(tenants)
         .set({ plan: request.requestedPlan as "free" | "starter" | "pro" | "enterprise", updatedAt: now })
         .where(eq(tenants.id, tenant.id));
@@ -239,7 +243,7 @@ export async function PATCH(req: NextRequest) {
         await tx.update(subscriptions).set({
           plan: request.requestedPlan,
           status: "active",
-          monthlyAmount: String(amount),
+          monthlyAmount: String(monthlyPlanPrice),
           paymentMethod: request.paymentMethod === "stripe" ? "stripe" :
             request.paymentMethod.startsWith("jazzcash") ? "jazzcash" :
               request.paymentMethod.startsWith("easypaisa") ? "easypaisa" : "bank_transfer",
@@ -252,7 +256,7 @@ export async function PATCH(req: NextRequest) {
           tenantId: tenant.id,
           plan: request.requestedPlan,
           status: "active",
-          monthlyAmount: String(amount),
+          monthlyAmount: String(monthlyPlanPrice),
           currency: "PKR",
           paymentMethod: request.paymentMethod === "stripe" ? "stripe" :
             request.paymentMethod.startsWith("jazzcash") ? "jazzcash" :
@@ -265,14 +269,14 @@ export async function PATCH(req: NextRequest) {
 
       const [commission] = await tx.select().from(commissionRates)
         .where(eq(commissionRates.plan, request.requestedPlan)).limit(1);
-      const commissionAmount = amount * (commission ? Number(commission.rate) / 100 : 0);
+      const commissionAmount = billedAmount * (commission ? Number(commission.rate) / 100 : 0);
       const paymentMethod = request.paymentMethod === "stripe" ? "stripe" :
         request.paymentMethod.startsWith("jazzcash") ? "jazzcash" :
           request.paymentMethod.startsWith("easypaisa") ? "easypaisa" : "bank_transfer";
       const [payment] = await tx.insert(payments).values({
         tenantId: tenant.id,
         userId: request.userId,
-        amount: String(amount),
+        amount: String(billedAmount),
         currency: "PKR",
         paymentMethod,
         status: "completed",
@@ -291,7 +295,7 @@ export async function PATCH(req: NextRequest) {
         subscriptionId,
         now,
         periodEnd,
-        amount,
+        amount: billedAmount,
         tenant,
       };
     });

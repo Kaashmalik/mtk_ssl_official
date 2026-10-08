@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { db, subscriptionRequests, tenants, subscriptions, payments } from "@mtk/database";
 import { and, eq } from "drizzle-orm";
+import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
         metadata?: Record<string, string>;
         amount_total?: number;
         currency?: string;
+        payment_status?: string;
       };
     };
   };
@@ -70,76 +72,69 @@ export async function POST(request: Request) {
       const session = event.data.object;
       const requestId = session.metadata?.requestId ?? session.client_reference_id ?? null;
 
-      if (requestId) {
-        const [request] = await db
-          .select()
-          .from(subscriptionRequests)
-          .where(
-            and(
-              eq(subscriptionRequests.id, requestId),
-              eq(subscriptionRequests.status, "pending"),
-            ),
-          )
-          .limit(1);
+      if (requestId && session.payment_status === "paid") {
+        await db.transaction(async (tx) => {
+          const [request] = await tx.select().from(subscriptionRequests)
+            .where(eq(subscriptionRequests.id, requestId)).for("update").limit(1);
+          if (!request || request.status !== "pending") return;
 
-        if (request) {
           const now = new Date();
-          const periodEnd = new Date(now);
-          const months = request.paymentMethod === "stripe" ? 1 : 1;
-          periodEnd.setMonth(periodEnd.getMonth() + months);
-
-          await db
-            .update(subscriptionRequests)
-            .set({
-              status: "approved",
-              transactionReference: session.id ?? `stripe_${Date.now()}`,
-              reviewedAt: now,
-              updatedAt: now,
-              adminNotes: "Auto-approved via Stripe webhook",
-            })
-            .where(eq(subscriptionRequests.id, request.id));
-
-          await db
-            .update(tenants)
-            .set({ plan: request.requestedPlan as "starter" | "pro" | "enterprise", updatedAt: now })
-            .where(eq(tenants.id, request.tenantId));
-
-          const [existingSub] = await db
-            .select()
-            .from(subscriptions)
-            .where(eq(subscriptions.tenantId, request.tenantId))
-            .limit(1);
-
-          if (existingSub) {
-            await db
-              .update(subscriptions)
-              .set({
-                plan: request.requestedPlan,
-                status: "active",
-                currentPeriodStart: now,
-                currentPeriodEnd: periodEnd,
-                updatedAt: now,
-              })
-              .where(eq(subscriptions.id, existingSub.id));
-          } else {
-            await db.insert(subscriptions).values({
-              tenantId: request.tenantId,
-              plan: request.requestedPlan,
-              status: "active",
-              monthlyAmount: request.amount,
-              currency: "PKR",
-              paymentMethod: "stripe",
-              currentPeriodStart: now,
-              currentPeriodEnd: periodEnd,
-            });
+          if (request.expiresAt <= now) {
+            await tx.update(subscriptionRequests).set({ status: "expired", updatedAt: now })
+              .where(and(eq(subscriptionRequests.id, request.id), eq(subscriptionRequests.status, "pending")));
+            return;
           }
 
-          const amountTotal = session.amount_total ?? Number(request.amount) * 100;
-          await db.insert(payments).values({
+          const plan = request.requestedPlan as keyof typeof PLAN_PRICES;
+          const monthlyAmount = PLAN_PRICES[plan];
+          if (!monthlyAmount) throw new Error("Stripe request has an unknown plan");
+          const billedAmount = session.amount_total === undefined ? Number(request.amount) : session.amount_total / 100;
+          if (billedAmount !== Number(request.amount)) throw new Error("Stripe amount does not match subscription request");
+          const periodMonths = billedAmount === monthlyAmount * 10 ? 12 : billedAmount === monthlyAmount ? 1 : 0;
+          if (!periodMonths) throw new Error("Stripe amount is not a valid monthly or annual plan price");
+          const periodEnd = new Date(now);
+          const day = periodEnd.getDate();
+          periodEnd.setDate(1);
+          periodEnd.setMonth(periodEnd.getMonth() + periodMonths);
+          periodEnd.setDate(Math.min(day, new Date(periodEnd.getFullYear(), periodEnd.getMonth() + 1, 0).getDate()));
+
+          const [claimed] = await tx.update(subscriptionRequests).set({
+            status: "approved",
+            transactionReference: session.id ?? `stripe_${Date.now()}`,
+            reviewedAt: now,
+            updatedAt: now,
+            adminNotes: "Auto-approved via verified Stripe webhook",
+          }).where(and(
+            eq(subscriptionRequests.id, request.id),
+            eq(subscriptionRequests.status, "pending"),
+          )).returning({ id: subscriptionRequests.id });
+          if (!claimed) return;
+
+          await tx.update(tenants).set({ plan, updatedAt: now })
+            .where(eq(tenants.id, request.tenantId));
+          const [existingSub] = await tx.select().from(subscriptions)
+            .where(eq(subscriptions.tenantId, request.tenantId)).limit(1);
+          const subscriptionValues = {
+            plan,
+            status: "active" as const,
+            monthlyAmount: String(monthlyAmount),
+            currency: (session.currency ?? "pkr").toUpperCase(),
+            paymentMethod: "stripe" as const,
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            updatedAt: now,
+          };
+          if (existingSub) {
+            await tx.update(subscriptions).set(subscriptionValues)
+              .where(eq(subscriptions.id, existingSub.id));
+          } else {
+            await tx.insert(subscriptions).values({ tenantId: request.tenantId, ...subscriptionValues });
+          }
+
+          await tx.insert(payments).values({
             tenantId: request.tenantId,
             userId: request.userId,
-            // Stripe reports minor units; PKR is zero-decimal but divide defensively.
-            amount: String(amountTotal / 100),
+            amount: String(billedAmount),
             currency: (session.currency ?? "pkr").toUpperCase(),
             paymentMethod: "stripe",
             status: "completed",
@@ -149,7 +144,7 @@ export async function POST(request: Request) {
             paymentType: "subscription",
             description: `Stripe checkout: ${request.currentPlan} → ${request.requestedPlan}`,
           });
-        }
+        });
       }
     }
 
