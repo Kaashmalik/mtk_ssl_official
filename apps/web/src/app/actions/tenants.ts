@@ -144,6 +144,8 @@ export async function createTenant(input: CreateTenantInput) {
       tenantId: createdTenant.id,
       role: "league_owner",
       isPrimary: true,
+    }).onConflictDoNothing({
+      target: [userTenantRoles.userId, userTenantRoles.tenantId],
     })
 
     // Keep the legacy membership array synchronized until all consumers have

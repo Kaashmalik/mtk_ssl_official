@@ -36,6 +36,7 @@ vi.mock("@mtk/database", async (importOriginal) => {
     limit: vi.fn().mockImplementation(() => []),
     insert: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
+    onConflictDoNothing: vi.fn().mockReturnThis(),
     returning: vi.fn().mockImplementation(() => []),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
@@ -134,6 +135,15 @@ describe("Server Actions Unit Tests", () => {
       const response = await createTenant({ name: "My League", slug: "my-league" });
       expect(response.success).toBe(true);
       expect(response.tenant).toEqual(mockNewTenant);
+      expect(db.transaction).toHaveBeenCalledOnce();
+      expect((db as any).values).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        ownerId: "mock-db-user-id",
+        plan: "free",
+      }));
+      expect((db as any).values).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        plan: "free",
+        monthlyAmount: "0",
+      }));
     });
   });
 
