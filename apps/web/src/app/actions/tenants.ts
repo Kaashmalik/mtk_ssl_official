@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db } from "@mtk/database"
 import { tenants, tenantBranding, subscriptions, users, userTenantRoles } from "@mtk/database"
-import { eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 
@@ -40,13 +40,24 @@ export async function getMyTenant() {
     .limit(1)
   if (!user) return null
 
-  const [tenant] = await db
+  const [membership] = await db
+    .select({ tenant: tenants })
+    .from(userTenantRoles)
+    .innerJoin(tenants, eq(userTenantRoles.tenantId, tenants.id))
+    .where(eq(userTenantRoles.userId, user.id))
+    .orderBy(desc(userTenantRoles.isPrimary), desc(userTenantRoles.createdAt))
+    .limit(1)
+
+  if (membership) return membership.tenant
+
+  // Compatibility for older tenant rows whose owner role has not been backfilled.
+  const [ownedTenant] = await db
     .select()
     .from(tenants)
     .where(eq(tenants.ownerId, user.id))
     .limit(1)
 
-  return tenant ?? null
+  return ownedTenant ?? null
 }
 
 /**

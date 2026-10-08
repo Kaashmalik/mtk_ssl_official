@@ -94,7 +94,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   team_manager: [
     "tournament:read",
     "team:read", "team:update", "team:manage_roster",
-    "player:create", "player:read", "player:update",
+    "player:read",
     "match:read",
     "scorecard:read",
     "stats:read",

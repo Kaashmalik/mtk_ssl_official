@@ -30,7 +30,9 @@ vi.mock("@mtk/database", async (importOriginal) => {
   const mockDb = {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockImplementation(() => []),
     insert: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
@@ -102,7 +104,7 @@ describe("Server Actions Unit Tests", () => {
       const mockTenant = { id: MOCK_TENANT_ID, ownerId: "mock-db-user-id" };
       vi.mocked((db as any).limit)
         .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
-        .mockReturnValueOnce([mockTenant] as any);
+        .mockReturnValueOnce([{ tenant: mockTenant }] as any);
 
       const tenant = await getMyTenant();
       expect(tenant).toEqual(mockTenant);
@@ -144,7 +146,7 @@ describe("Server Actions Unit Tests", () => {
       // getMyTenant resolves Clerk identity to the database UUID, then tenant.
       vi.mocked((db as any).limit)
         .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
-        .mockReturnValueOnce([mockTenant] as any);
+        .mockReturnValueOnce([{ tenant: mockTenant }] as any);
 
       const mockNewPlayer = { id: "player-123", name: "John Doe", tenantId: MOCK_TENANT_ID };
 
@@ -173,7 +175,7 @@ describe("Server Actions Unit Tests", () => {
       // getMyTenant resolves user + tenant before loading both teams.
       vi.mocked((db as any).limit)
         .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
-        .mockReturnValueOnce([mockTenant] as any)
+        .mockReturnValueOnce([{ tenant: mockTenant }] as any)
         .mockReturnValueOnce([mockTeamA] as any)
         .mockReturnValueOnce([mockTeamB] as any);
 

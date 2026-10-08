@@ -60,7 +60,7 @@ export function RegisterTeamForm({
 
   const openTournaments = tournaments.filter((t) => t.registrationOpen)
   const squadCandidates = useMemo(
-    () => players.filter((p) => !teamId || p.teamId === teamId || p.teamId === null),
+    () => players.filter((p) => teamId && p.teamId === teamId),
     [players, teamId],
   )
 
@@ -93,7 +93,6 @@ export function RegisterTeamForm({
           tournamentId,
           teamId,
           squadPlayerIds: selectedPlayers,
-          registrationFee: "0",
           notes: notes.trim() || null,
         })
         toast.success("Registration submitted")
