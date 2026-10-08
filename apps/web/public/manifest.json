@@ -1,0 +1,46 @@
+{
+  "name": "Shakir Super League",
+  "short_name": "SSL",
+  "description": "Pakistan's #1 Cricket Tournament & League Management Platform",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0a",
+  "theme_color": "#22c55e",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["sports", "entertainment"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Live Matches",
+      "short_name": "Live",
+      "url": "/dashboard/matches?status=live"
+    },
+    {
+      "name": "Scoring Console",
+      "short_name": "Scoring",
+      "url": "/dashboard/scoring"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+# Gitleaks configuration — SSL Platform
+# https://github.com/gitleaks/gitleaks
+
+title = "SSL Platform Secret Scanning"
+
+[extend]
+# Inherit the default ruleset, then add allow-list entries below.
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Allow-list: known-safe patterns that would otherwise trip the scanner.
+# Add entries ONLY for confirmed false positives, never for real secrets.
+# ---------------------------------------------------------------------------
+
+[[allowlist]]
+description = "Ignore .env.example placeholder values (sk_*_your_*, eyj...)"
+paths = ['''.env.example''']
+
+[[allowlist]]
+description = "Ignore documentation files containing example keys"
+paths = [
+  '''^README.*\.md$''',
+  '''^DEPLOY.*\.md$''',
+  '''^ENV_SETUP.*\.md$''',
+  '''^SUPABASE_SETUP.*\.md$''',
+  '''^docs/.*\.md$''',
+]
+
+[[allowlist]]
+description = "Ignore the impersonation-token example in env example"
+regexes = [
+  '''IMPERSONATION_TOKEN_SECRET=your_64_char_random_string_here_MINIMUM''',
+]
+
+[[allowlist]]
+description = "Ignore mock/test JWT tokens in test fixtures"
+paths = ['''.*\.test\.ts$''', '''.*\.spec\.ts$''']

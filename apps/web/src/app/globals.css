@@ -1,0 +1,390 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Color tokens — mapped to CSS vars for dark mode switching */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-live: var(--live);
+  --color-live-foreground: var(--live-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-cricket-pitch: var(--cricket-pitch);
+  --color-cricket-ball: var(--cricket-ball);
+  --color-boundary-glow: var(--boundary-glow);
+  --color-six-glow: var(--six-glow);
+  --color-wicket-red: var(--wicket-red);
+  --color-glass-border: var(--glass-border);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-bg-subtle: var(--glass-bg-subtle);
+
+  /* Radius System */
+  --radius: 0.75rem;
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.33);
+  --radius-xl: calc(var(--radius) * 1.66);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-full: 9999px;
+
+  /* Elevation / Shadow System */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.03);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.06), 0 1px 2px -1px oklch(0 0 0 / 0.06);
+  --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.07), 0 2px 4px -2px oklch(0 0 0 / 0.05);
+  --shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.08), 0 4px 6px -4px oklch(0 0 0 / 0.04);
+  --shadow-xl: 0 20px 25px -5px oklch(0 0 0 / 0.08), 0 8px 10px -6px oklch(0 0 0 / 0.04);
+  --shadow-2xl: 0 25px 50px -12px oklch(0 0 0 / 0.15);
+  --shadow-glow: 0 0 20px -5px oklch(0.6 0.16 145 / 0.3);
+
+  /* Animation */
+  --animate-shimmer: shimmer 2s linear infinite;
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-slide-up: slide-up 0.4s ease-out;
+  --animate-slide-down: slide-down 0.3s ease-out;
+  --animate-scale-in: scale-in 0.2s ease-out;
+  --animate-pulse-live: pulse-live 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-count-up: count-up 0.8s ease-out;
+  --animate-spin-slow: spin 3s linear infinite;
+  
+  @keyframes shimmer {
+    from { background-position: 0 0; }
+    to { background-position: -200% 0; }
+  }
+  @keyframes accordion-down {
+    from { height: 0; }
+    to { height: var(--radix-accordion-content-height); }
+  }
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height); }
+    to { height: 0; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slide-down {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes pulse-live {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  @keyframes count-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* ============================================
+   OKLCH Color Palette — "Liquid Glass" 2026
+   ============================================ */
+:root {
+  /* Base Colors */
+  --background: oklch(0.985 0.004 200);
+  --foreground: oklch(0.12 0.02 260);
+
+  /* Card & Surfaces */
+  --card: oklch(0.995 0.002 200);
+  --card-foreground: oklch(0.12 0.02 260);
+  --popover: oklch(0.995 0.002 200);
+  --popover-foreground: oklch(0.12 0.02 260);
+
+  /* Primary — Vivid Cricket Green */
+  --primary: oklch(0.6 0.2 145);
+  --primary-foreground: oklch(0.99 0 0);
+
+  /* Secondary — Cricket Blue */
+  --secondary: oklch(0.96 0.01 240);
+  --secondary-foreground: oklch(0.3 0.05 240);
+
+  /* Muted */
+  --muted: oklch(0.965 0.005 200);
+  --muted-foreground: oklch(0.5 0.02 260);
+
+  /* Accent */
+  --accent: oklch(0.965 0.02 150);
+  --accent-foreground: oklch(0.25 0.06 150);
+
+  /* Destructive — Red */
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  /* Semantic Colors */
+  --success: oklch(0.6 0.19 145);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.75 0.16 75);
+  --warning-foreground: oklch(0.2 0.04 75);
+  --info: oklch(0.6 0.15 240);
+  --info-foreground: oklch(0.99 0 0);
+  --live: oklch(0.62 0.25 30);
+  --live-foreground: oklch(0.99 0 0);
+
+  /* Borders & Inputs */
+  --border: oklch(0.935 0.01 200);
+  --input: oklch(0.935 0.01 200);
+  --ring: oklch(0.55 0.18 150 / 0.4);
+
+  /* Charts */
+  --chart-1: oklch(0.6 0.2 150);
+  --chart-2: oklch(0.55 0.15 200);
+  --chart-3: oklch(0.5 0.12 260);
+  --chart-4: oklch(0.7 0.15 80);
+  --chart-5: oklch(0.65 0.2 340);
+
+  /* Cricket-Specific Tokens */
+  --cricket-pitch: oklch(0.65 0.18 135);
+  --cricket-ball: oklch(0.5 0.22 25);
+  --boundary-glow: oklch(0.7 0.2 80);
+  --six-glow: oklch(0.65 0.25 300);
+  --wicket-red: oklch(0.55 0.24 25);
+
+  /* Glassmorphism — Liquid Glass */
+  --glass-border: oklch(1 0 0 / 0.5);
+  --glass-bg: oklch(1 0 0 / 0.65);
+  --glass-bg-subtle: oklch(1 0 0 / 0.4);
+  --glass-shadow: 0 8px 32px 0 oklch(0.3 0.02 260 / 0.08);
+  --glass-blur-sm: blur(8px);
+  --glass-blur-md: blur(16px);
+  --glass-blur-lg: blur(24px);
+
+  /* Sidebar */
+  --sidebar-width: 280px;
+  --sidebar-collapsed-width: 64px;
+}
+
+.dark {
+  --background: oklch(0.14 0.015 260);
+  --foreground: oklch(0.96 0.005 200);
+
+  --card: oklch(0.17 0.015 260);
+  --card-foreground: oklch(0.96 0.005 200);
+
+  --popover: oklch(0.17 0.015 260);
+  --popover-foreground: oklch(0.96 0.005 200);
+
+  /* Neon Green for Dark — vibrant and clear */
+  --primary: oklch(0.7 0.16 145);
+  --primary-foreground: oklch(0.1 0.04 150);
+
+  --secondary: oklch(0.22 0.025 260);
+  --secondary-foreground: oklch(0.96 0.005 200);
+
+  --muted: oklch(0.22 0.025 260);
+  --muted-foreground: oklch(0.65 0.015 260);
+
+  --accent: oklch(0.22 0.04 150);
+  --accent-foreground: oklch(0.96 0.005 200);
+
+  --destructive: oklch(0.52 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --success: oklch(0.65 0.16 145);
+  --success-foreground: oklch(0.1 0 0);
+  --warning: oklch(0.72 0.14 75);
+  --warning-foreground: oklch(0.15 0.04 75);
+  --info: oklch(0.58 0.13 240);
+  --info-foreground: oklch(0.99 0 0);
+  --live: oklch(0.6 0.22 30);
+  --live-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.27 0.015 260);
+  --input: oklch(0.27 0.015 260);
+  --ring: oklch(0.68 0.14 150 / 0.4);
+
+  --cricket-pitch: oklch(0.5 0.14 135);
+  --cricket-ball: oklch(0.55 0.2 25);
+  --boundary-glow: oklch(0.65 0.18 80);
+  --six-glow: oklch(0.6 0.22 300);
+  --wicket-red: oklch(0.5 0.22 25);
+
+  --glass-border: oklch(1 0 0 / 0.08);
+  --glass-bg: oklch(0.15 0.02 260 / 0.6);
+  --glass-bg-subtle: oklch(0.15 0.02 260 / 0.35);
+  --glass-shadow: 0 8px 32px 0 oklch(0 0 0 / 0.4);
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    background-image: 
+      radial-gradient(ellipse at 15% 50%, oklch(0.92 0.03 150 / 0.12) 0%, transparent 30%),
+      radial-gradient(ellipse at 85% 20%, oklch(0.94 0.02 240 / 0.08) 0%, transparent 30%),
+      radial-gradient(ellipse at 50% 90%, oklch(0.93 0.02 80 / 0.06) 0%, transparent 20%);
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-image: 
+      radial-gradient(ellipse at 15% 50%, oklch(0.2 0.08 150 / 0.12) 0%, transparent 30%),
+      radial-gradient(ellipse at 85% 20%, oklch(0.18 0.04 260 / 0.1) 0%, transparent 30%),
+      radial-gradient(ellipse at 50% 90%, oklch(0.2 0.05 300 / 0.06) 0%, transparent 20%);
+  }
+
+  /* Global Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-full); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ============================================
+   Utility Classes
+   ============================================ */
+@layer utilities {
+  /* Liquid Glass Panels */
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur-md);
+    -webkit-backdrop-filter: var(--glass-blur-md);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  .glass-panel-subtle {
+    background: var(--glass-bg-subtle);
+    backdrop-filter: var(--glass-blur-sm);
+    -webkit-backdrop-filter: var(--glass-blur-sm);
+    border: 1px solid var(--glass-border);
+  }
+
+  /* Neo-morphic Card */
+  .neo-card {
+    background: var(--card);
+    box-shadow: 
+      5px 5px 10px oklch(0 0 0 / 0.04),
+      -5px -5px 10px oklch(1 0 0 / 0.7);
+    border: none;
+  }
+  .dark .neo-card {
+    box-shadow: 
+      5px 5px 10px oklch(0 0 0 / 0.25),
+      -5px -5px 10px oklch(1 0 0 / 0.03);
+  }
+
+  /* Premium Gradients */
+  .gradient-mesh {
+    background-image:
+      radial-gradient(at 0% 0%, oklch(0.7 0.15 150 / 0.3) 0%, transparent 50%),
+      radial-gradient(at 100% 0%, oklch(0.65 0.1 240 / 0.2) 0%, transparent 50%),
+      radial-gradient(at 100% 100%, oklch(0.7 0.12 80 / 0.15) 0%, transparent 50%),
+      radial-gradient(at 0% 100%, oklch(0.6 0.15 300 / 0.1) 0%, transparent 50%);
+  }
+  .gradient-aurora {
+    background: linear-gradient(
+      135deg,
+      oklch(0.6 0.15 150) 0%,
+      oklch(0.55 0.12 200) 25%,
+      oklch(0.6 0.1 260) 50%,
+      oklch(0.65 0.15 300) 75%,
+      oklch(0.6 0.15 150) 100%
+    );
+    background-size: 200% 200%;
+    animation: aurora-shift 8s ease-in-out infinite;
+  }
+  @keyframes aurora-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* Cricket-specific */
+  .boundary-glow {
+    box-shadow: 0 0 20px oklch(0.7 0.2 80 / 0.4), 0 0 40px oklch(0.7 0.2 80 / 0.2);
+  }
+  .six-glow {
+    box-shadow: 0 0 20px oklch(0.65 0.25 300 / 0.5), 0 0 60px oklch(0.65 0.25 300 / 0.2);
+  }
+  .wicket-shake {
+    animation: shake 0.5s ease-in-out;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-4px); }
+    40% { transform: translateX(4px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+  .live-pulse {
+    animation: live-dot 2s ease-in-out infinite;
+  }
+  @keyframes live-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.15); }
+  }
+
+  /* Fluid Typography */
+  .text-fluid-h1 { font-size: clamp(2rem, 5vw, 3.5rem); }
+  .text-fluid-h2 { font-size: clamp(1.5rem, 4vw, 2.5rem); }
+  .text-fluid-h3 { font-size: clamp(1.25rem, 3vw, 1.75rem); }
+  
+  /* Text Balance */
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+
+  /* Scrollbar styling */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { 
+    background: var(--border); 
+    border-radius: var(--radius-full); 
+  }
+}

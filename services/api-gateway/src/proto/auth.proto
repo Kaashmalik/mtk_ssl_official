@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+  rpc GetUserRoles(GetUserRolesRequest) returns (GetUserRolesResponse);
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+  string tenant_id = 2;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  repeated string tenant_ids = 3;
+  repeated string roles = 4;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  User user = 2;
+  string error = 3;
+}
+
+message CheckPermissionRequest {
+  string user_id = 1;
+  string tenant_id = 2;
+  string resource = 3;
+  string action = 4;
+}
+
+message CheckPermissionResponse {
+  bool allowed = 1;
+}
+
+message GetUserRolesRequest {
+  string user_id = 1;
+  string tenant_id = 2;
+}
+
+message GetUserRolesResponse {
+  repeated string roles = 1;
+}

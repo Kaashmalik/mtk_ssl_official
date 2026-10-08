@@ -1,0 +1,49 @@
+# Supabase Local Development Configuration
+# Reference: https://supabase.com/docs/guides/cli/local-development
+
+project_id = "shakir-super-league"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+
+[db.pooler]
+enabled = true
+port = 6543
+# pool_size = 20
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = [
+  "http://localhost:3001",
+  "http://localhost:3002",
+  "ssl://*",
+  "https://ssl.cricket/*"
+]
+jwt_expiry = 3600
+enable_signup = true
+# double_confirm_changes = false
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_confirmations = false
+enable_signup = true
+
+[storage]
+enabled = true
+file_size_limit = "50MB"
+
+[studio]
+enabled = true
+port = 54323
+
+[analytics]
+enabled = false

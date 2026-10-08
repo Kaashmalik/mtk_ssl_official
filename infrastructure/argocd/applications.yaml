@@ -1,0 +1,90 @@
+# ArgoCD Application Set for SSL Services
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: ssl-services
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - name: api-gateway
+            namespace: ssl-gateway
+            path: infrastructure/kubernetes/apps/api-gateway
+          - name: auth-service
+            namespace: ssl-auth
+            path: infrastructure/kubernetes/apps/auth-service
+          - name: scoring-service
+            namespace: ssl-scoring
+            path: infrastructure/kubernetes/apps/scoring-service
+          - name: tournament-service
+            namespace: ssl-tournament
+            path: infrastructure/kubernetes/apps/tournament-service
+          - name: analytics-service
+            namespace: ssl-analytics
+            path: infrastructure/kubernetes/apps/analytics-service
+          - name: payment-service
+            namespace: ssl-payment
+            path: infrastructure/kubernetes/apps/payment-service
+          - name: notification-service
+            namespace: ssl-notification
+            path: infrastructure/kubernetes/apps/notification-service
+
+  template:
+    metadata:
+      name: 'ssl-{{name}}'
+      labels:
+        app.kubernetes.io/name: '{{name}}'
+        app.kubernetes.io/part-of: ssl-platform
+    spec:
+      project: ssl-production
+      source:
+        repoURL: https://github.com/Kaashmalik/mtk-ssl.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+---
+# ArgoCD Project
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ssl-production
+  namespace: argocd
+spec:
+  description: SSL Production Applications
+  sourceRepos:
+    - https://github.com/Kaashmalik/mtk-ssl.git
+    - https://charts.bitnami.com/bitnami
+    - https://helm.elastic.co
+  destinations:
+    - namespace: 'ssl-*'
+      server: https://kubernetes.default.svc
+    - namespace: 'monitoring'
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

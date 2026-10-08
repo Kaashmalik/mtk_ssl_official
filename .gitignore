@@ -1,0 +1,73 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Testing
+coverage
+*.log
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Production
+*.tsbuildinfo
+next-env.d.ts
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.stackdump
+
+# Local env files
+.env
+.env*
+!.env.example
+
+# MCP config (may contain tokens — keep local only)
+.mcp.json
+.mcp.local.json
+.cursor/mcp.json
+
+
+# Vercel
+.vercel
+
+# Turbo
+.turbo
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Supabase
+.branches
+.temp
+
+# Expo
+.expo/
+.expo-shared/
+
+# OS
+Thumbs.db
+
+.env*.local
+
+# Playwright E2E artifacts
+test-results/
+playwright-report/

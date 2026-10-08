@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/specification/main/schemas/mcp.schema.json",
+  "_comment": "Copy this file to .mcp.json (gitignored) and fill in real values. Never commit real tokens.",
+  "mcpServers": {
+    "supabase": {
+      "_comment": "Remote hosted Supabase MCP — recommended. Get a token at https://supabase.com/dashboard/account/tokens",
+      "url": "https://mcp.supabase.com/mcp",
+      "headers": {
+        "Authorization": "Bearer sbp_REPLACE_WITH_YOUR_PERSONAL_ACCESS_TOKEN"
+      }
+    },
+
+    "postgres": {
+      "_comment": "Optional: direct Postgres MCP, useful for raw queries / Drizzle cross-check. Matches DATABASE_URL used by @mtk/database.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:54322/postgres"
+      }
+    },
+
+    "filesystem": {
+      "_comment": "Read-only filesystem access scoped to the repo — lets the assistant read supabase/migrations/*.sql without granting write.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "D:/MalikTech/mtk-ssl"
+      ]
+    }
+  }
+}

@@ -1,0 +1,102 @@
+# ============================================================================
+# Dockerfile for services with workspace dependencies (@mtk/database)
+# Used by: api, scoring-service, tournament-service
+# ============================================================================
+# Build context must be the monorepo root (../../)
+# Usage in docker-compose: context: . dockerfile: services/${SERVICE}/Dockerfile
+# ============================================================================
+
+ARG NODE_VERSION=22
+
+# --- Stage 1: Install all dependencies ---
+FROM node:${NODE_VERSION}-alpine AS deps
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+# Copy monorepo root files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY tsconfig.json ./
+COPY turbo.json ./
+
+# Copy workspace package.json files (needed for pnpm to resolve workspaces)
+COPY packages/database/package.json ./packages/database/
+COPY packages/database/tsconfig.json ./packages/database/
+COPY packages/observability/package.json ./packages/observability/
+COPY packages/config/package.json ./packages/config/
+COPY packages/ui/package.json ./packages/ui/
+
+# Copy service package.json
+COPY services/${SERVICE_NAME}/package.json ./services/${SERVICE_NAME}/
+
+# Install all dependencies (including workspace packages)
+RUN pnpm install --frozen-lockfile
+
+# --- Stage 2: Build workspace packages + service ---
+FROM node:${NODE_VERSION}-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN apk add --no-cache python3 make g++
+WORKDIR /app
+
+# Copy everything
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY tsconfig.json ./
+COPY turbo.json ./
+
+# Copy workspace packages (source)
+COPY packages/database/ ./packages/database/
+COPY packages/observability/ ./packages/observability/
+COPY packages/config/ ./packages/config/
+COPY packages/ui/ ./packages/ui/
+
+# Copy service source
+COPY services/${SERVICE_NAME}/ ./services/${SERVICE_NAME}/
+
+# Install all deps
+RUN pnpm install --frozen-lockfile
+
+# Build workspace packages first, then the service
+RUN pnpm --filter @mtk/database build && \
+    pnpm --filter @ssl/${SERVICE_NAME} build
+
+# --- Stage 3: Production ---
+FROM node:${NODE_VERSION}-alpine AS runner
+RUN apk add --no-cache tini curl
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nestjs
+
+# Copy only built artifacts and production dependencies
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/database/dist ./packages/database/dist
+COPY --from=builder /app/packages/database/node_modules ./packages/database/node_modules
+COPY --from=builder /app/packages/observability/dist ./packages/observability/dist
+COPY --from=builder /app/packages/observability/node_modules ./packages/observability/node_modules
+COPY --from=builder /app/services/${SERVICE_NAME}/dist ./dist
+COPY --from=builder /app/services/${SERVICE_NAME}/node_modules ./node_modules-service
+
+# Copy package.json for potential runtime resolution
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/packages/database/package.json ./packages/database/
+COPY --from=builder /app/services/${SERVICE_NAME}/package.json ./
+
+# Copy proto files if they exist (for gRPC services)
+COPY --from=builder /app/services/${SERVICE_NAME}/proto* ./
+
+# Copy webpack config if exists
+COPY --from=builder /app/services/${SERVICE_NAME}/webpack.config* ./
+
+USER nestjs
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
+
+EXPOSE ${PORT:-3000}
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/main.js"]

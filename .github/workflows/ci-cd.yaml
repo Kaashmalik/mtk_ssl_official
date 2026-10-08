@@ -1,0 +1,350 @@
+# SSL CI/CD Pipeline
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: gcr.io
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+jobs:
+  # ============================================
+  # LINT AND TYPE CHECK
+  # ============================================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm type-check
+
+  # ============================================
+  # UNIT TESTS
+  # ============================================
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  # ============================================
+  # SECURITY SCAN (blocking — fails the pipeline on critical findings)
+  # ============================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # required for SARIF upload to GitHub Security tab
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for secret scanning
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ---- 1. Secret scanning (gitleaks) — ALWAYS BLOCKING ----
+      # Catches accidentally committed API keys, service_role keys, JWT secrets.
+      - name: Run Gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: set GITLEAKS_LICENSE for org-wide config & private repos
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      # ---- 2. Dependency audit (pnpm audit) — blocking on high/critical ----
+      - name: Run pnpm audit (dependency vulnerabilities)
+        run: pnpm audit --audit-level high
+        continue-on-error: false   # HARD FAIL on high/critical vulns
+
+      # ---- 3. Snyk (if token configured) — non-blocking but reports ----
+      - name: Run Snyk
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        if: ${{ env.SNYK_TOKEN != '' }}
+        uses: snyk/actions/node@master
+        with:
+          args: --severity-threshold=high
+          sarif: true
+        continue-on-error: true   # informational; covered by pnpm audit above
+
+      - name: Upload Snyk SARIF to GitHub Security tab
+        if: always() && hashFiles('snyk.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
+
+      # ---- 4. Trivy filesystem scan — blocking on CRITICAL ----
+      - name: Run Trivy (filesystem scan)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'   # HARD FAIL on critical findings
+          ignore-unfixed: true
+
+  # ============================================
+  # BUILD
+  # ============================================
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Turborepo Cache
+        uses: dtinth/setup-github-actions-caching-for-turbo@v1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          TURBO_TOKEN: ${{ env.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ env.TURBO_TEAM }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            apps/*/dist
+            apps/*/.next
+            services/*/dist
+          retention-days: 1
+
+  # ============================================
+  # BUILD DOCKER IMAGES
+  # ============================================
+  docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service:
+          - api
+          - api-gateway
+          - auth-service
+          - scoring-service
+          - tournament-service
+          - analytics-service
+          - payment-service
+          - notification-service
+          - ai-commentary-service
+          - streaming-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker
+
+      - name: Build and push
+        run: |
+          docker build \
+            -t $REGISTRY/$PROJECT_ID/${{ matrix.service }}:${{ github.sha }} \
+            -t $REGISTRY/$PROJECT_ID/${{ matrix.service }}:latest \
+            -f services/${{ matrix.service }}/Dockerfile .
+          docker push $REGISTRY/$PROJECT_ID/${{ matrix.service }}:${{ github.sha }}
+          docker push $REGISTRY/$PROJECT_ID/${{ matrix.service }}:latest
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ matrix.service }}:${{ github.sha }}'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+  # ============================================
+  # DEPLOY TO VPS
+  # ============================================
+  # The production target is a single VPS running Docker Compose
+  # (docker-compose.prod.yml). The old Kubernetes jobs were removed: the
+  # manifests under infrastructure/kubernetes only covered scoring-service
+  # and had no overlays/kustomization.yaml, so those jobs could never run.
+  #
+  # Required repository secrets (Settings > Secrets and variables > Actions):
+  #   VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_APP_DIR
+  deploy-vps:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: [docker, e2e]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          cat > ~/.ssh/config <<'EOF'
+          Host ssl-vps
+            HostName ${{ secrets.VPS_HOST }}
+            User ${{ secrets.VPS_USER }}
+            IdentityFile ~/.ssh/id_deploy
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Push commit to VPS
+        run: |
+          ssh ssl-vps "cd ${{ secrets.VPS_APP_DIR }} && \
+            git fetch origin main && \
+            git checkout main && \
+            git reset --hard origin/main"
+
+      - name: Preflight validation
+        run: |
+          ssh ssl-vps "cd ${{ secrets.VPS_APP_DIR }} && \
+            ENV_FILE=.env.prod bash scripts/preflight.sh"
+
+      - name: Deploy
+        run: |
+          ssh ssl-vps "cd ${{ secrets.VPS_APP_DIR }} && \
+            bash deploy-vps.sh --phase all"
+
+      - name: Post-deploy smoke test
+        run: |
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors \
+            https://api.ssl.mtkcodex.site/api/health
+
+  # ============================================
+  # E2E TESTS
+  # ============================================
+  # These boot the Nest app in-process via supertest, so they do not need a
+  # deployed environment. Running them before the deploy gates the VPS on them.
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+            version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm --filter "@mtk/database" build && pnpm --filter "@mtk/dns-provider" build
+
+      - name: Run E2E tests
+        run: pnpm test:e2e
+        env:
+          BASE_URL: https://api.ssl.mtkcodex.site
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/

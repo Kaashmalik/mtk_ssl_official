@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "target": "ES2022",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@mtk/database": ["../../packages/database/src/index.ts"],
+      "@mtk/database/*": ["../../packages/database/src/*"],
+      "@mtk/dns-provider": ["../../packages/dns-provider/src/index.ts"],
+      "@mtk/dns-provider/*": ["../../packages/dns-provider/src/*"]
+    }
+  },
+  "include": ["src/**/*", "../../packages/database/src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "../../packages/database/src/**/__tests__/**",
+    "../../packages/database/src/**/*.test.ts"
+  ]
+}
+

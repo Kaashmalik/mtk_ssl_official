@@ -1,0 +1,16 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && pnpm turbo build --filter=@mtk/web",
+  "installCommand": "cd ../.. && pnpm install",
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/ssl-renewal",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/subscription-renewal",
+      "schedule": "0 7 * * *"
+    }
+  ]
+}

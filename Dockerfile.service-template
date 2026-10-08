@@ -1,0 +1,68 @@
+# ============================================================================
+# Base Dockerfile for standalone NestJS services (no workspace deps)
+# Used by: api-gateway, auth-service, payment-service, notification-service,
+#          ai-commentary-service, streaming-service, analytics-service
+# ============================================================================
+ARG NODE_VERSION=22
+
+# --- Stage 1: Dependencies ---
+FROM node:${NODE_VERSION}-alpine AS deps
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY tsconfig.json ./
+COPY services/${SERVICE_NAME}/package.json ./services/${SERVICE_NAME}/
+
+# Install only production dependencies
+RUN pnpm install --frozen-lockfile --prod --filter @ssl/${SERVICE_NAME}... || true
+
+# --- Stage 2: Build ---
+FROM node:${NODE_VERSION}-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN apk add --no-cache python3 make g++
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY tsconfig.json ./
+COPY turbo.json ./
+COPY services/${SERVICE_NAME}/package.json ./services/${SERVICE_NAME}/
+COPY services/${SERVICE_NAME}/tsconfig.json ./services/${SERVICE_NAME}/
+COPY services/${SERVICE_NAME}/nest-cli.json* ./services/${SERVICE_NAME}/
+COPY services/${SERVICE_NAME}/src ./services/${SERVICE_NAME}/src
+COPY services/${SERVICE_NAME}/proto* ./services/${SERVICE_NAME}/
+COPY services/${SERVICE_NAME}/webpack.config* ./services/${SERVICE_NAME}/
+
+RUN pnpm install --frozen-lockfile --filter @ssl/${SERVICE_NAME}
+RUN pnpm --filter @ssl/${SERVICE_NAME} build
+
+# --- Stage 3: Production ---
+FROM node:${NODE_VERSION}-alpine AS runner
+RUN apk add --no-cache tini curl
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nestjs
+
+# Copy only built artifacts and production node_modules
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/services/${SERVICE_NAME}/node_modules ./node_modules-service
+COPY --from=builder /app/services/${SERVICE_NAME}/dist ./dist
+
+# Copy proto files if they exist (needed at runtime for gRPC)
+COPY --from=builder /app/services/${SERVICE_NAME}/proto* ./
+
+USER nestjs
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
+
+EXPOSE ${PORT:-3000}
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/main.js"]

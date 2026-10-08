@@ -1,0 +1,15 @@
+p, admin, *, *, *
+p, owner, *, *, *
+p, scorer, *, matches, read
+p, scorer, *, matches, write
+p, scorer, *, scoring, read
+p, scorer, *, scoring, write
+p, user, *, matches, read
+p, user, *, scoring, read
+p, user, *, teams, read
+p, user, *, players, read
+p, user, *, tournaments, read
+
+g, user_123, user, tenant_default
+g, scorer_123, scorer, tenant_default
+g, admin_123, admin, tenant_default

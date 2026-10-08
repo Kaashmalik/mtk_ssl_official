@@ -1,0 +1,45 @@
+{
+  "name": "shakir-super-league",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Pakistan's #1 Cricket Tournament & League Management Platform by Malik Tech",
+  "author": "Muhammad Kashif <kaash0542@gmail.com>",
+  "license": "PROPRIETARY",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "clean": "turbo run clean && rimraf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\""
+  },
+  "devDependencies": {
+    "@turbo/gen": "^2.4.0",
+    "prettier": "^3.5.0",
+    "rimraf": "^6.1.2",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "web-streams-polyfill": "3.3.3",
+      "formdata-node>web-streams-polyfill": "3.3.3"
+    }
+  },
+  "dependencies": {
+    "react-native-url-polyfill": "^3.0.0"
+  }
+}

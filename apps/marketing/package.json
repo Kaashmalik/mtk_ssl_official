@@ -1,0 +1,38 @@
+{
+  "name": "@mtk/marketing",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3003 --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mtk/config": "workspace:*",
+    "@mtk/database": "workspace:*",
+    "@mtk/observability": "workspace:*",
+    "@mtk/ui": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "framer-motion": "^12.6.0",
+    "lucide-react": "^0.475.0",
+    "next": "^15.3.0",
+    "next-themes": "^0.4.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.4",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.20.0",
+    "eslint-config-next": "^15.3.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.1.0",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.7.0"
+  }
+}

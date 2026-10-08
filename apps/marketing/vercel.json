@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && pnpm turbo build --filter=@mtk/marketing",
+  "installCommand": "cd ../.. && pnpm install",
+  "outputDirectory": ".next"
+}

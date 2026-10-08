@@ -1,0 +1,65 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["**/.env.*local"],
+  "globalEnv": ["NODE_ENV", "CI"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**"],
+      "env": ["NEXT_PUBLIC_*", "SUPABASE_*", "CLERK_*"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "env": [
+        "NEXT_PUBLIC_*",
+        "SUPABASE_*",
+        "CLERK_*",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "SENTRY_*",
+        "ACME_*",
+        "CERT_STORAGE_DIR",
+        "DNS_PROVIDER",
+        "CLOUDFLARE_*",
+        "CRON_SECRET",
+        "API_SERVICE_URL",
+        "SSL_ADMIN_TOKEN",
+        "IMPERSONATION_TOKEN_SECRET",
+        "SERVICE_NAME",
+        "LOG_LEVEL",
+        "PORT"
+      ]
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "outputs": []
+    },
+    "type-check": {
+      "dependsOn": ["^type-check"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": ["coverage/**"],
+      "inputs": ["src/**", "test/**"]
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "outputs": ["playwright-report/**"],
+      "cache": false
+    },
+    "clean": {
+      "cache": false
+    },
+    "db:migrate": {
+      "cache": false
+    },
+    "db:generate": {
+      "cache": false
+    }
+  },
+  "remoteCache": {
+    "signature": true
+  }
+}
