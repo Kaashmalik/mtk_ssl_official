@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db } from "@mtk/database"
+import { db, getPlanLimits, type PlanKey } from "@mtk/database"
 import { tenants, tenantBranding, subscriptions, users, userTenantRoles } from "@mtk/database"
 import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
@@ -186,6 +186,10 @@ export const updateTenantBrandingSettings = withAuth("settings:manage", async (i
   if (!tenant) throw new Error("Tenant not found")
 
   const validated = updateBrandingSchema.parse(input)
+  const limits = getPlanLimits(tenant.plan as PlanKey)
+  if (validated.appName && validated.appName.trim() !== validated.name.trim() && !limits.whiteLabel) {
+    throw new Error("A separate white-label app name requires the Pro plan or above")
+  }
 
   // Update tenant name
   await db.update(tenants)

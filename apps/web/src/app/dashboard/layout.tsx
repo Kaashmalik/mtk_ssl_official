@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
-import { getUserRoleAndTenantIds } from "@/lib/rbac-server"
+import { getUserRoleAndTenantIds, getUserRoleForTenant, resolveActiveTenantId } from "@/lib/rbac-server"
 import { DashboardShell } from "./dashboard-shell"
 import { TrialBannerServer } from "@/components/billing/trial-banner-server"
 import type { UserRole } from "@/lib/rbac"
@@ -17,10 +17,10 @@ export default async function DashboardLayout({
     try {
         const { userId } = await auth()
         if (userId) {
-            const record = await getUserRoleAndTenantIds(userId)
-            if (record?.role) {
-                userRole = record.role
-            }
+            const tenantId = await resolveActiveTenantId()
+            const tenantRole = tenantId ? await getUserRoleForTenant(userId, tenantId) : null
+            const record = tenantRole ? null : await getUserRoleAndTenantIds(userId)
+            userRole = tenantRole ?? record?.role ?? "fan"
         }
     } catch {
         // Fallback to 'fan' (minimal access) if role lookup fails
