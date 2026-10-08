@@ -17,6 +17,12 @@ describe("Role-Based Access Control (RBAC) System", () => {
     expect(hasPermission("league_owner", "tournament:create")).toBe(true);
     expect(hasPermission("league_owner", "settings:manage")).toBe(true);
 
+    // Team managers are scoped by assigned-team checks and must not directly
+    // create or edit arbitrary player records.
+    expect(hasPermission("team_manager", "team:update")).toBe(true);
+    expect(hasPermission("team_manager", "player:create")).toBe(false);
+    expect(hasPermission("team_manager", "player:update")).toBe(false);
+
     // Scorers can score matches but not manage users
     expect(hasPermission("scorer", "match:score")).toBe(true);
     expect(hasPermission("scorer", "user:manage")).toBe(false);

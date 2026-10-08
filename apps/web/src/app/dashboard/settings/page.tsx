@@ -6,11 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { getMyTenant } from "@/app/actions/tenants"
 import { TenantSettingsForm } from "@/components/settings/tenant-settings-form"
+import { WhiteLabelRequestPanel } from "@/components/settings/white-label-request-panel"
 import { UsageMeters } from "@/components/settings/usage-meters"
 import { db, tenantBranding } from "@mtk/database"
 import { eq } from "drizzle-orm"
 import { unstable_noStore as noStore } from "next/cache"
 import { Settings, CreditCard } from "lucide-react"
+import { getMyWhiteLabelRequests } from "@/app/actions/white-label"
+import { getUserRoleAndTenantIds, getUserRoleForTenant } from "@/lib/rbac-server"
+import { hasPermission } from "@/lib/rbac"
 
 export default async function SettingsPage() {
   noStore()
@@ -20,6 +24,13 @@ export default async function SettingsPage() {
 
   const tenant = await getMyTenant()
   if (!tenant) redirect("/dashboard/league/setup")
+
+  const tenantRole = await getUserRoleForTenant(userId, tenant.id)
+  const globalRole = tenantRole ? null : await getUserRoleAndTenantIds(userId)
+  if (!hasPermission(tenantRole ?? globalRole?.role ?? "fan", "settings:manage")) {
+    redirect("/dashboard")
+  }
+  const whiteLabelRequests = await getMyWhiteLabelRequests()
 
   const [branding] = await db.select().from(tenantBranding)
     .where(eq(tenantBranding.tenantId, tenant.id))
@@ -94,6 +105,10 @@ export default async function SettingsPage() {
       {/* Branding Form */}
       <MotionWrapper variant="fadeInUp" delay={0.1}>
         <TenantSettingsForm initialData={initialData} />
+      </MotionWrapper>
+
+      <MotionWrapper variant="fadeInUp" delay={0.12}>
+        <WhiteLabelRequestPanel plan={tenant.plan} tenantId={tenant.id} requests={whiteLabelRequests} />
       </MotionWrapper>
     </div>
   )

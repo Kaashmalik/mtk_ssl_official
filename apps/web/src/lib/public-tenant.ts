@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { eq, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { db, tenants } from "@mtk/database";
 import { normalizeHost, tenantSlugCandidates } from "./tenant-host";
 
@@ -62,9 +62,13 @@ export async function getPublicTenantContext(): Promise<PublicTenantContext | nu
   // Build the WHERE from whichever signals are actually present, so an
   // apex-domain request does not issue a pointless query.
   const conditions = [];
-  if (host) conditions.push(eq(tenants.customDomain, host));
-  if (subdomainSlug) conditions.push(eq(tenants.slug, subdomainSlug));
-  if (overrideSlug) conditions.push(eq(tenants.slug, overrideSlug));
+  if (host) conditions.push(and(
+    eq(tenants.customDomain, host),
+    eq(tenants.customDomainVerified, true),
+    eq(tenants.sslEnabled, true),
+  ));
+  if (subdomainSlug) conditions.push(and(eq(tenants.slug, subdomainSlug), eq(tenants.isActive, true)));
+  if (overrideSlug) conditions.push(and(eq(tenants.slug, overrideSlug), eq(tenants.isActive, true)));
 
   if (conditions.length === 0) return null;
 

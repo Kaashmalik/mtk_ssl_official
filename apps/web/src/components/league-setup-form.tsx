@@ -55,7 +55,7 @@ export function LeagueSetupForm() {
             <CardTitle className="text-lg">League details</CardTitle>
           </div>
           <p className="text-sm text-muted-foreground">
-            This creates your league workspace, URL, and management space. You can update branding later.
+            Your league starts on the Free plan. You can invite team managers, configure tournaments, and upgrade when you need more capacity.
           </p>
         </CardHeader>
         <CardContent className="grid gap-5">
@@ -80,13 +80,13 @@ export function LeagueSetupForm() {
               required
             />
             <p className="text-xs text-muted-foreground">
-              Your public league URL will be <Badge variant="outline">{(slug || derivedSlug || "your-league")}.ssl.cricket</Badge>
+              Your public league URL will be <Badge variant="outline">{(slug || derivedSlug || "your-league")}.ssl.mtkcodex.site</Badge>
             </p>
           </div>
 
           <div className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-300">
             <ShieldCheck className="h-4 w-4 mt-0.5" />
-            SSL, access controls, and multi-tenant isolation are enabled by default. Branding and domains are managed by the super admin.
+            Your league data and access are isolated. White-label options depend on your plan; custom domains require Enterprise and domain verification.
           </div>
 
           {error && (

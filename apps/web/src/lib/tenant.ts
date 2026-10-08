@@ -1,20 +1,26 @@
 import { headers } from "next/headers";
 import { db } from "@mtk/database";
 import { tenants, tenantBranding } from "@mtk/database";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { normalizeHost, tenantSlugCandidates } from "./tenant-host";
 
 /**
  * Get tenant from custom domain or subdomain
  */
 export async function getTenantFromRequest() {
   const headersList = await headers();
-  const host = headersList.get("host") || "";
+  const host = normalizeHost(headersList.get("x-forwarded-host") ?? headersList.get("host"));
   
   // Check for custom domain first
   const customDomainTenant = await db
     .select()
     .from(tenants)
-    .where(eq(tenants.customDomain, host))
+    .where(and(
+      eq(tenants.customDomain, host),
+      eq(tenants.customDomainVerified, true),
+      eq(tenants.sslEnabled, true),
+      eq(tenants.isActive, true),
+    ))
     .limit(1);
 
   if (customDomainTenant.length > 0) {
@@ -22,12 +28,12 @@ export async function getTenantFromRequest() {
   }
 
   // Check for subdomain (e.g., myleague.ssl.mtkcodex.site)
-  const subdomain = host.split(".")[0];
-  if (subdomain && subdomain !== "www" && subdomain !== "app" && subdomain !== "admin") {
+  const subdomain = tenantSlugCandidates(host)[0];
+  if (subdomain) {
     const subdomainTenant = await db
       .select()
       .from(tenants)
-      .where(eq(tenants.slug, subdomain))
+      .where(and(eq(tenants.slug, subdomain), eq(tenants.isActive, true)))
       .limit(1);
 
     if (subdomainTenant.length > 0) {

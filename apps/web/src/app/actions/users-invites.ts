@@ -4,10 +4,11 @@ import { createHash, randomBytes } from "crypto"
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db, userInvites, userTenantRoles, users, teams, tenants, notifications, withTenantContext } from "@mtk/database"
-import { and, desc, eq, sql } from "drizzle-orm"
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
+import { ROLE_HIERARCHY } from "@/lib/rbac"
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 const INVITABLE_ROLES = ["team_manager", "coach", "scorer"] as const
@@ -16,6 +17,10 @@ const createInviteSchema = z.object({
   email: z.string().email("Enter a valid email address"),
   role: z.enum(INVITABLE_ROLES),
   teamId: z.string().uuid().optional().nullable(),
+}).superRefine((input, ctx) => {
+  if (input.role === "team_manager" && !input.teamId) {
+    ctx.addIssue({ code: "custom", path: ["teamId"], message: "A team manager invitation must be assigned to a team" })
+  }
 })
 
 export type CreateInviteInput = z.infer<typeof createInviteSchema>
@@ -64,6 +69,9 @@ export const createInvite = withAuth("user:invite", async (input: CreateInviteIn
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
+  const [actor] = await db.select({ id: users.id, displayName: users.displayName, email: users.email })
+    .from(users).where(eq(users.clerkId, userId)).limit(1)
+  if (!actor) throw new Error("Your account is still provisioning. Please try again.")
   const validated = createInviteSchema.parse(input)
   const tenantId = tenant.id
 
@@ -99,12 +107,9 @@ export const createInvite = withAuth("user:invite", async (input: CreateInviteIn
       teamId: validated.teamId ?? null,
       tokenHash: hashToken(token),
       status: "pending",
-      invitedBy: userId,
+      invitedBy: actor.id,
       expiresAt: new Date(Date.now() + INVITE_TTL_MS),
     }).returning()
-
-    const [inviter] = await db.select({ displayName: users.displayName, email: users.email })
-      .from(users).where(eq(users.id, userId)).limit(1)
 
     const link = `${appBaseUrl()}/accept-invite?token=${encodeURIComponent(token)}`
 
@@ -118,7 +123,7 @@ export const createInvite = withAuth("user:invite", async (input: CreateInviteIn
     try {
       await sendInviteEmail(
         email,
-        inviter?.displayName || inviter?.email || "A league owner",
+        actor.displayName || actor.email || "A league owner",
         tenant.name,
         validated.role,
         link,
@@ -262,9 +267,13 @@ export const acceptInvite = withAuth("invite:accept", async (token: string) => {
         )).limit(1)
 
       if (roleRow) {
-        await tx.update(userTenantRoles)
-          .set({ role: invite.role, updatedAt: new Date() })
-          .where(eq(userTenantRoles.id, roleRow.id))
+        // Redeeming a lesser-scoped invitation must not demote an owner or
+        // another existing tenant role.
+        if (ROLE_HIERARCHY[invite.role] > ROLE_HIERARCHY[roleRow.role]) {
+          await tx.update(userTenantRoles)
+            .set({ role: invite.role, updatedAt: new Date() })
+            .where(eq(userTenantRoles.id, roleRow.id))
+        }
       } else {
         await tx.insert(userTenantRoles).values({
           userId: user.id,
@@ -272,6 +281,18 @@ export const acceptInvite = withAuth("invite:accept", async (token: string) => {
           role: invite.role,
           isPrimary: false,
         })
+      }
+
+      if (invite.role === "team_manager" && invite.teamId) {
+        const [assignedTeam] = await tx.update(teams)
+          .set({ managerId: user.id, updatedAt: new Date() })
+          .where(and(
+            eq(teams.id, invite.teamId),
+            eq(teams.tenantId, invite.tenantId),
+            or(isNull(teams.managerId), eq(teams.managerId, user.id)),
+          ))
+          .returning({ id: teams.id })
+        if (!assignedTeam) throw new Error("This team already has a different manager or the team no longer exists")
       }
 
       // Keep the legacy array in sync for the tenant-wide notification filter.

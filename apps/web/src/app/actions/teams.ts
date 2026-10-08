@@ -2,9 +2,9 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { teamRepo, playerRepo, tournamentRepo, withTenantContext, checkPlanLimit } from "@mtk/database"
+import { db, teamRepo, playerRepo, tournamentRepo, withTenantContext, withoutTenantContext, checkPlanLimit } from "@mtk/database"
 import { type PlanKey, type Team, type Player, type Tournament } from "@mtk/database"
-import { teams, players } from "@mtk/database"
+import { teams, players, users } from "@mtk/database"
 import { eq, and, ilike, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
@@ -51,6 +51,15 @@ async function requireTenant() {
   const tenant = await getMyTenant()
   if (!tenant) throw new Error("Tenant not found")
   return tenant
+}
+
+async function requireAssignedTeamAccess(team: Team, tenantOwnerId: string, clerkUserId: string) {
+  const [actor] = await withoutTenantContext(() => db.select({ id: users.id }).from(users)
+    .where(eq(users.clerkId, clerkUserId)).limit(1))
+  if (!actor) throw new Error("Your account is still provisioning. Please try again.")
+  if (actor.id !== tenantOwnerId && team.managerId !== actor.id && team.captainId !== actor.id) {
+    throw new Error("You can only manage the team assigned to you")
+  }
 }
 
 // ─── Slug Generator ───────────────────────────────────────────
@@ -120,6 +129,10 @@ export const updateTeam = withAuth("team:update", async (id: string, input: Upda
   }
 
   const team = await withTenantContext({ userId, tenantId }, async () => {
+    const existingTeam = await teamRepo.findById<Team>(id)
+    if (!existingTeam) throw new Error("Team not found")
+    await requireAssignedTeamAccess(existingTeam, tenant.ownerId, userId)
+
     if (cleanData.tournamentId) {
       const tournament = await tournamentRepo.findById<Tournament>(cleanData.tournamentId as string)
       if (!tournament) throw new Error("Tournament not found")
@@ -238,6 +251,19 @@ export const addPlayerToTeam = withAuth("team:manage_roster", async (teamId: str
   const player = await withTenantContext({ userId, tenantId }, async () => {
     const team = await teamRepo.findById<Team>(teamId)
     if (!team) throw new Error("Team not found")
+    await requireAssignedTeamAccess(team, tenant.ownerId, userId)
+
+    const rosterMember = await playerRepo.findById<Player>(playerId)
+    if (!rosterMember) throw new Error("Player not found")
+    if (rosterMember.teamId && rosterMember.teamId !== teamId) {
+      throw new Error("Remove the player from their current team before moving them")
+    }
+    if (!rosterMember.teamId && team.maxSquadSize) {
+      const rosterSize = await playerRepo.count({ where: eq(players.teamId, teamId) })
+      if (rosterSize >= team.maxSquadSize) {
+        throw new Error(`This team has reached its ${team.maxSquadSize}-player squad limit`)
+      }
+    }
 
     return playerRepo.updateById<Player>(playerId, {
       teamId,
@@ -261,6 +287,7 @@ export const removePlayerFromTeam = withAuth("team:manage_roster", async (teamId
   await withTenantContext({ userId, tenantId }, async () => {
     const team = await teamRepo.findById<Team>(teamId)
     if (!team) throw new Error("Team not found")
+    await requireAssignedTeamAccess(team, tenant.ownerId, userId)
 
     const pl = await playerRepo.findById<Player>(playerId)
     if (!pl || pl.teamId !== teamId) {

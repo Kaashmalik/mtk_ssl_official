@@ -11,6 +11,7 @@ export function WhiteLabelManagement() {
   const [adminNotesById, setAdminNotesById] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<"pending" | "approved" | "rejected" | "revoked">("pending");
   const [search, setSearch] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -30,19 +31,24 @@ export function WhiteLabelManagement() {
 
   async function handleReview(requestId: string, status: "approved" | "rejected" | "revoked") {
     try {
+      setActionError(null);
+      if (status === "rejected" && !adminNotesById[requestId]?.trim()) {
+        setActionError("Add a short reason before rejecting this request.");
+        return;
+      }
       const res = await fetch("/api/white-label", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId, status, adminNotes: adminNotesById[requestId] || "" }),
       });
-
-      if (res.ok) {
-        await fetchRequests();
-        setSelectedRequest(null);
-        setAdminNotesById((prev) => ({ ...prev, [requestId]: "" }));
-      }
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Could not update this request");
+      await fetchRequests();
+      setSelectedRequest(null);
+      setAdminNotesById((prev) => ({ ...prev, [requestId]: "" }));
     } catch (error) {
       console.error("Failed to review request:", error);
+      setActionError(error instanceof Error ? error.message : "Could not update this request");
     }
   }
 
@@ -137,6 +143,7 @@ export function WhiteLabelManagement() {
                 </div>
                 {selectedRequest === request.id && (
                   <div className="mt-4 space-y-3 border-t border-border/40 pt-4">
+                    {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
                     <Textarea
                       placeholder="Admin notes (optional)"
                       value={adminNotesById[request.id] || ""}
@@ -146,12 +153,14 @@ export function WhiteLabelManagement() {
                       rows={3}
                     />
                     <div className="flex gap-2">
-                      <Button variant="default" size="sm" onClick={() => handleReview(request.id, "approved")}>
-                        Approve
-                      </Button>
-                      <Button variant="destructive" size="sm" onClick={() => handleReview(request.id, "rejected")}>
-                        Reject
-                      </Button>
+                      {request.status === "pending" && <>
+                        <Button variant="default" size="sm" onClick={() => handleReview(request.id, "approved")}>
+                          Approve
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={() => handleReview(request.id, "rejected")}>
+                          Reject
+                        </Button>
+                      </>}
                       {request.status === "approved" && (
                         <Button variant="outline" size="sm" onClick={() => handleReview(request.id, "revoked")}>
                           Revoke

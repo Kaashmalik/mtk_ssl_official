@@ -3,10 +3,20 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@mtk/database";
-import { tenants, dnsVerifications } from "@mtk/database";
+import { tenants, dnsVerifications, users } from "@mtk/database";
 import { eq, and } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { isSuperAdmin } from "@/lib/super-admin";
+
+async function canManageTenantDomain(clerkUserId: string, tenantId: string) {
+  if (await isSuperAdmin()) return true;
+  const [actor] = await db.select({ id: users.id }).from(users)
+    .where(eq(users.clerkId, clerkUserId)).limit(1);
+  if (!actor) return false;
+  const [tenant] = await db.select({ id: tenants.id }).from(tenants)
+    .where(and(eq(tenants.id, tenantId), eq(tenants.ownerId, actor.id))).limit(1);
+  return Boolean(tenant);
+}
 
 /**
  * GET - Check DNS verification status
@@ -16,11 +26,6 @@ export async function GET(request: NextRequest) {
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const isAdmin = await isSuperAdmin();
-    if (!isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const searchParams = request.nextUrl.searchParams;
@@ -40,6 +45,12 @@ export async function GET(request: NextRequest) {
 
     if (tenant.length === 0) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
+    }
+    if (!(await canManageTenantDomain(userId, tenantId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (tenant[0].customDomain !== domain) {
+      return NextResponse.json({ error: "This domain is not assigned to the league" }, { status: 409 });
     }
 
     // Get DNS verification
@@ -112,11 +123,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isAdmin = await isSuperAdmin();
-    if (!isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const body = await request.json();
     const { domain, tenantId } = body;
 
@@ -134,18 +140,21 @@ export async function POST(request: NextRequest) {
     if (tenant.length === 0) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
+    if (!(await canManageTenantDomain(userId, tenantId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     // Check if enterprise plan
-    if (tenant[0].plan !== "enterprise") {
+    if (tenant[0].plan !== "enterprise" || tenant[0].customDomain !== domain) {
       return NextResponse.json(
-        { error: "Custom domain requires Enterprise plan" },
+        { error: "An approved custom domain requires an Enterprise plan" },
         { status: 403 }
       );
     }
 
     // Generate verification token
     const verificationToken = randomBytes(16).toString("hex");
-    const expectedValue = `ssl-verify=${verificationToken}`;
+    const expectedValue = `ssl-verify-${verificationToken}`;
 
     // Create or update DNS verification
     const existing = await db
@@ -214,7 +223,7 @@ async function checkDnsRecord(
 ): Promise<boolean> {
   try {
     if (type.toLowerCase() === "txt") {
-      const records = await dns.promises.resolveTxt(domain);
+      const records = await dns.promises.resolveTxt(`_ssl-verify.${domain}`);
       return records.some((record) =>
         record.some((val) => val === expectedValue || val.includes(expectedValue))
       );

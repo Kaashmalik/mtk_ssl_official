@@ -12,6 +12,8 @@ import {
 } from "@mtk/database";
 import { and, desc, eq } from "drizzle-orm";
 import { captureError, getRequestLogger } from "@mtk/observability";
+import { getPlanLimits, type PlanKey } from "@mtk/database";
+import { z } from "zod";
 
 export async function GET(request: NextRequest) {
   const adminId = await verifySuperAdmin();
@@ -89,100 +91,107 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const { requestId, status, adminNotes } = await request.json();
-
-    if (!requestId || !status) {
-      return NextResponse.json(
-        { error: "requestId and status are required" },
-        { status: 400 }
-      );
+    const bodySchema = z.object({
+      requestId: z.string().uuid(),
+      status: z.enum(["approved", "rejected", "revoked"]),
+      adminNotes: z.string().max(1000).optional().nullable(),
+    });
+    const parsed = bodySchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
+    }
+    const { requestId, status, adminNotes } = parsed.data;
+    if (status === "rejected" && !adminNotes?.trim()) {
+      return NextResponse.json({ error: "A rejection reason is required" }, { status: 400 });
     }
 
-    const [data] = await db
-      .update(whiteLabelRequests)
-      .set({
-        status,
-        adminNotes: adminNotes || null,
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(whiteLabelRequests.id, requestId))
-      .returning();
+    const review = await db.transaction(async (tx) => {
+      const [item] = await tx.select().from(whiteLabelRequests)
+        .where(eq(whiteLabelRequests.id, requestId)).for("update").limit(1);
+      if (!item) return null;
+      if ((status === "revoked" && item.status !== "approved") ||
+          (status !== "revoked" && item.status !== "pending")) {
+        return { kind: "conflict" as const, currentStatus: item.status };
+      }
 
-    if (!data) {
-      return NextResponse.json(
-        { error: "Request not found" },
-        { status: 404 }
-      );
-    }
+      const [tenant] = await tx.select().from(tenants)
+        .where(eq(tenants.id, item.tenantId)).for("update").limit(1);
+      if (!tenant) throw new Error("Request tenant not found");
 
-    if (data) {
       if (status === "approved") {
-        await db
-          .insert(tenantBranding)
-          .values({
-            tenantId: data.tenantId,
-            hideSslBranding: data.hideBranding,
-            appName: data.customAppName || null,
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: tenantBranding.tenantId,
-            set: {
-              hideSslBranding: data.hideBranding,
-              appName: data.customAppName || null,
-              updatedAt: new Date(),
-            }
-          });
-
-        if (data.customDomain) {
-          await db
-            .update(tenants)
-            .set({
-              customDomain: data.customDomain,
-              customDomainVerified: false,
-              customDomainVerifiedAt: null,
-              updatedAt: new Date(),
-            })
-            .where(eq(tenants.id, data.tenantId));
-
-          // --- Auto-create the DNS ownership verification record ---
-          // This bridges the gap between approval and the verification flow:
-          // previously the tenant had no way to know WHICH TXT record to add
-          // until a super-admin manually visited the branding settings page.
-          // Now approval immediately issues a verification token.
-          await createDnsVerificationForDomain(data.tenantId, data.customDomain);
+        const limits = getPlanLimits(tenant.plan as PlanKey);
+        if ((item.hideBranding || item.customAppName) && !limits.whiteLabel) {
+          return { kind: "ineligible" as const, message: "The tenant no longer has an eligible white-label plan" };
+        }
+        if (item.customDomain && !limits.customDomain) {
+          return { kind: "ineligible" as const, message: "The tenant no longer has an eligible custom-domain plan" };
         }
       }
 
-      if (status === "revoked") {
-        await db
-          .insert(tenantBranding)
-          .values({
-            tenantId: data.tenantId,
-            hideSslBranding: false,
-            appName: null,
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: tenantBranding.tenantId,
-            set: {
-              hideSslBranding: false,
-              appName: null,
-              updatedAt: new Date(),
-            }
-          });
+      const now = new Date();
+      const [updated] = await tx.update(whiteLabelRequests).set({
+        status,
+        adminNotes: adminNotes?.trim() || null,
+        reviewedBy: adminId,
+        reviewedAt: now,
+        updatedAt: now,
+      }).where(eq(whiteLabelRequests.id, item.id)).returning();
 
-        await db
-          .update(tenants)
-          .set({
-            customDomain: null,
+      if (status === "approved") {
+        await tx.insert(tenantBranding).values({
+          tenantId: item.tenantId,
+          hideSslBranding: item.hideBranding,
+          appName: item.customAppName || null,
+          updatedAt: now,
+        }).onConflictDoUpdate({
+          target: tenantBranding.tenantId,
+          set: { hideSslBranding: item.hideBranding, appName: item.customAppName || null, updatedAt: now },
+        });
+        if (item.customDomain) {
+          await tx.update(tenants).set({
+            customDomain: item.customDomain,
             customDomainVerified: false,
             customDomainVerifiedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(tenants.id, data.tenantId));
+            sslEnabled: false,
+            updatedAt: now,
+          }).where(eq(tenants.id, item.tenantId));
+        }
+      } else if (status === "revoked") {
+        await tx.insert(tenantBranding).values({
+          tenantId: item.tenantId,
+          hideSslBranding: false,
+          appName: null,
+          updatedAt: now,
+        }).onConflictDoUpdate({
+          target: tenantBranding.tenantId,
+          set: { hideSslBranding: false, appName: null, updatedAt: now },
+        });
+        await tx.update(tenants).set({
+          customDomain: null,
+          customDomainVerified: false,
+          customDomainVerifiedAt: null,
+          sslEnabled: false,
+          updatedAt: now,
+        }).where(eq(tenants.id, item.tenantId));
+      }
+      return { kind: "updated" as const, request: updated };
+    });
+
+    if (!review) return NextResponse.json({ error: "Request not found" }, { status: 404 });
+    if (review.kind === "conflict") {
+      return NextResponse.json({ error: `Request is already ${review.currentStatus}` }, { status: 409 });
+    }
+    if (review.kind === "ineligible") {
+      return NextResponse.json({ error: review.message }, { status: 409 });
+    }
+    const data = review.request;
+    let dnsSetupPending = false;
+    if (status === "approved" && data.customDomain) {
+      try {
+        await createDnsVerificationForDomain(data.tenantId, data.customDomain);
+      } catch (error) {
+        dnsSetupPending = true;
+        getRequestLogger().error("White-label approved but DNS token provisioning failed", error);
       }
     }
 
@@ -203,7 +212,7 @@ export async function PATCH(request: NextRequest) {
       updated_at: data.updatedAt.toISOString(),
     };
 
-    return NextResponse.json({ request: mappedResponse });
+    return NextResponse.json({ request: mappedResponse, dnsSetupPending });
   } catch (error) {
     getRequestLogger().error("Update white-label request error", error);
     await captureError(error, {

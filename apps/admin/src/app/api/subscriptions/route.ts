@@ -14,6 +14,7 @@ import { verifySuperAdmin } from "@/lib/admin-auth";
 import { db, subscriptionRequests, tenants, subscriptions, payments, users, commissionRates, invoices, notifications } from "@mtk/database";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { z } from "zod";
+import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
 
 /**
  * Issues a sequential invoice number and an invoice row for a settled payment.
@@ -73,21 +74,21 @@ async function issueInvoice(input: {
   }
 }
 
-/**
- * Standardized plan prices (PKR per league).
- */
-const PLAN_PRICES: Record<string, number> = {
-  free: 0,
-  starter: 4999,
-  pro: 14999,
-  enterprise: 49999,
-};
-
 const approveRejectSchema = z.object({
   id: z.string().uuid(),
   action: z.enum(["approve", "reject"]),
   adminNotes: z.string().optional(),
 });
+
+function addBillingMonths(start: Date, months: number): Date {
+  const result = new Date(start);
+  const day = result.getDate();
+  result.setDate(1);
+  result.setMonth(result.getMonth() + months);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, lastDay));
+  return result;
+}
 
 export async function GET(req: NextRequest) {
   const adminId = await verifySuperAdmin();
@@ -164,161 +165,159 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { id, action, adminNotes } = validated.data;
-
-    // Find the request
-    const [request] = await db
-      .select()
-      .from(subscriptionRequests)
-      .where(eq(subscriptionRequests.id, id))
-      .limit(1);
-
-    if (!request) {
-      return NextResponse.json({ error: "Request not found" }, { status: 404 });
-    }
-
-    if (request.status !== "pending") {
+    if (action === "reject" && !adminNotes?.trim()) {
       return NextResponse.json(
-        { error: `Request already ${request.status}. Cannot modify.` },
-        { status: 409 }
+        { error: "Add a short reason so the league owner knows what to correct." },
+        { status: 400 }
       );
     }
 
-    // Find the tenant
-    const [tenant] = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.id, request.tenantId))
-      .limit(1);
+    // Lock and re-check the request inside the transaction. This makes the
+    // review decision, entitlement change, subscription, and payment record
+    // atomic and prevents two admins from granting the same request twice.
+    const activation = await db.transaction(async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(subscriptionRequests)
+        .where(eq(subscriptionRequests.id, id))
+        .for("update")
+        .limit(1);
 
-    if (!tenant) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
-    }
+      if (!request) return { error: "not_found" as const };
+      if (request.status !== "pending") return { error: request.status };
 
-    if (action === "reject") {
-      // Reject: update status and add admin notes
-      await db
+      const now = new Date();
+      if (request.expiresAt <= now) {
+        await tx.update(subscriptionRequests)
+          .set({ status: "expired", updatedAt: now })
+          .where(and(eq(subscriptionRequests.id, id), eq(subscriptionRequests.status, "pending")));
+        return { error: "expired" as const };
+      }
+
+      const decision = action === "approve" ? "approved" : "rejected";
+      const [claimed] = await tx
         .update(subscriptionRequests)
         .set({
-          status: "rejected",
-          adminNotes: adminNotes || null,
+          status: decision,
+          adminNotes: adminNotes?.trim() || null,
           reviewedBy: adminId,
-          reviewedAt: new Date(),
-          updatedAt: new Date(),
+          reviewedAt: now,
+          updatedAt: now,
         })
-        .where(eq(subscriptionRequests.id, id));
+        .where(and(eq(subscriptionRequests.id, id), eq(subscriptionRequests.status, "pending")))
+        .returning();
 
-      return NextResponse.json({ success: true, action: "rejected" });
-    }
+      if (!claimed) return { error: "already_reviewed" as const };
+      if (action === "reject") return { action: "rejected" as const };
 
-    // ─── Approve: full upgrade flow in a transaction-like sequence ───────
+      const [tenant] = await tx
+        .select()
+        .from(tenants)
+        .where(eq(tenants.id, request.tenantId))
+        .for("update")
+        .limit(1);
+      if (!tenant) throw new Error("Tenant missing for subscription request");
 
-    // 1. Mark the request as approved
-    await db
-      .update(subscriptionRequests)
-      .set({
-        status: "approved",
-        adminNotes: adminNotes || null,
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(subscriptionRequests.id, id));
+      const parsedPlan = z.enum(["starter", "pro", "enterprise"]).safeParse(request.requestedPlan);
+      if (!parsedPlan.success) throw new Error("Invalid requested subscription plan");
+      const monthlyPlanPrice = PLAN_PRICES[parsedPlan.data];
+      const billedAmount = Number(request.amount);
+      const periodMonths = billedAmount === monthlyPlanPrice * 10 ? 12 : billedAmount === monthlyPlanPrice ? 1 : 0;
+      if (!Number.isFinite(billedAmount) || periodMonths === 0) {
+        throw new Error("Subscription request amount is invalid for this plan");
+      }
 
-    // 2. Upgrade the tenant plan
-    await db
-      .update(tenants)
-      .set({
-        plan: request.requestedPlan as "free" | "starter" | "pro" | "enterprise",
-        updatedAt: new Date(),
-      })
-      .where(eq(tenants.id, tenant.id));
+      const periodEnd = addBillingMonths(now, periodMonths);
+      await tx.update(tenants)
+        .set({ plan: request.requestedPlan as "free" | "starter" | "pro" | "enterprise", updatedAt: now })
+        .where(eq(tenants.id, tenant.id));
 
-    // 3. Create / update the subscription row
-    const now = new Date();
-    const periodEnd = new Date(now);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+      const [existingSub] = await tx
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.tenantId, tenant.id))
+        .limit(1);
 
-    const amount = PLAN_PRICES[request.requestedPlan] || Number(request.amount);
-
-    // Check if there's an active subscription for this tenant
-    const [existingSub] = await db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.tenantId, tenant.id))
-      .limit(1);
-
-    if (existingSub) {
-      await db
-        .update(subscriptions)
-        .set({
+      let subscriptionId = existingSub?.id ?? null;
+      if (existingSub) {
+        await tx.update(subscriptions).set({
           plan: request.requestedPlan,
           status: "active",
-          monthlyAmount: String(amount),
+          monthlyAmount: String(monthlyPlanPrice),
+          paymentMethod: request.paymentMethod === "stripe" ? "stripe" :
+            request.paymentMethod.startsWith("jazzcash") ? "jazzcash" :
+              request.paymentMethod.startsWith("easypaisa") ? "easypaisa" : "bank_transfer",
           currentPeriodStart: now,
           currentPeriodEnd: periodEnd,
           updatedAt: now,
-        })
-        .where(eq(subscriptions.id, existingSub.id));
-    } else {
-      await db.insert(subscriptions).values({
+        }).where(eq(subscriptions.id, existingSub.id));
+      } else {
+        const [createdSub] = await tx.insert(subscriptions).values({
+          tenantId: tenant.id,
+          plan: request.requestedPlan,
+          status: "active",
+          monthlyAmount: String(monthlyPlanPrice),
+          currency: "PKR",
+          paymentMethod: request.paymentMethod === "stripe" ? "stripe" :
+            request.paymentMethod.startsWith("jazzcash") ? "jazzcash" :
+              request.paymentMethod.startsWith("easypaisa") ? "easypaisa" : "bank_transfer",
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
+        }).returning({ id: subscriptions.id });
+        subscriptionId = createdSub.id;
+      }
+
+      const [commission] = await tx.select().from(commissionRates)
+        .where(eq(commissionRates.plan, request.requestedPlan)).limit(1);
+      const commissionAmount = billedAmount * (commission ? Number(commission.rate) / 100 : 0);
+      const paymentMethod = request.paymentMethod === "stripe" ? "stripe" :
+        request.paymentMethod.startsWith("jazzcash") ? "jazzcash" :
+          request.paymentMethod.startsWith("easypaisa") ? "easypaisa" : "bank_transfer";
+      const [payment] = await tx.insert(payments).values({
         tenantId: tenant.id,
-        plan: request.requestedPlan,
-        status: "active",
-        monthlyAmount: String(amount),
+        userId: request.userId,
+        amount: String(billedAmount),
         currency: "PKR",
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-      });
+        paymentMethod,
+        status: "completed",
+        transactionId: request.transactionReference,
+        commissionAmount: String(commissionAmount),
+        paidAt: now,
+        completedAt: now,
+        paymentType: "subscription",
+        description: `Plan upgrade: ${request.currentPlan} → ${request.requestedPlan}`,
+      }).returning();
+
+      return {
+        action: "approved" as const,
+        request,
+        payment,
+        subscriptionId,
+        now,
+        periodEnd,
+        amount: billedAmount,
+        tenant,
+      };
+    });
+
+    if ("error" in activation) {
+      if (activation.error === "not_found") {
+        return NextResponse.json({ error: "Request not found" }, { status: 404 });
+      }
+      return NextResponse.json({ error: `Request already ${activation.error}. Cannot modify.` }, { status: 409 });
+    }
+    if (activation.action === "rejected") {
+      return NextResponse.json({ success: true, action: "rejected" });
     }
 
-    // 4. Create a payment record
-    // Map the request's free-form payment_method onto the payments enum so a
-    // Stripe payment isn't mislabelled as a bank transfer.
-    const paymentMethod =
-      request.paymentMethod === "stripe"
-        ? "stripe"
-        : request.paymentMethod === "jazzcash_manual" || request.paymentMethod === "jazzcash"
-          ? "jazzcash"
-          : request.paymentMethod === "easypaisa_manual" || request.paymentMethod === "easypaisa"
-            ? "easypaisa"
-            : "bank_transfer";
-    // Look up commission rate for the plan
-    const [commission] = await db
-      .select()
-      .from(commissionRates)
-      .where(eq(commissionRates.plan, request.requestedPlan))
-      .limit(1);
-
-    const commissionRate = commission ? Number(commission.rate) : 0;
-    const commissionAmount = amount * (commissionRate / 100);
-
-    const [payment] = await db.insert(payments).values({
-      tenantId: tenant.id,
-      userId: request.userId,
-      amount: String(amount),
-      currency: "PKR",
-      paymentMethod,
-      status: "completed",
-      transactionId: request.transactionReference,
-      commissionAmount: String(commissionAmount),
-      paidAt: now,
-      completedAt: now,
-      paymentType: "subscription",
-      description: `Plan upgrade: ${request.currentPlan} → ${request.requestedPlan}`,
-    }).returning();
+    const { request, payment, subscriptionId, now, periodEnd, amount, tenant } = activation;
 
     // 5. Issue the invoice for the settled payment
-    const [activeSub] = await db
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(eq(subscriptions.tenantId, tenant.id))
-      .limit(1);
-
     const invoiceNumber = await issueInvoice({
       tenantId: tenant.id,
       userId: request.userId,
       paymentId: payment.id,
-      subscriptionId: activeSub?.id ?? existingSub?.id ?? null,
+      subscriptionId,
       plan: request.requestedPlan,
       amount,
       periodStart: now,

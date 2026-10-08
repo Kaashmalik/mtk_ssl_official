@@ -2,9 +2,9 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db } from "@mtk/database"
-import { tenants, tenantBranding, subscriptions, users } from "@mtk/database"
-import { eq } from "drizzle-orm"
+import { db, getPlanLimits, type PlanKey } from "@mtk/database"
+import { tenants, tenantBranding, subscriptions, users, userTenantRoles } from "@mtk/database"
+import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 
@@ -32,13 +32,32 @@ export async function getMyTenant() {
   const { userId } = await auth()
   if (!userId) return null
 
-  const [tenant] = await db
-    .select()
-    .from(tenants)
-    .where(eq(tenants.ownerId, userId))
+  // `tenants.owner_id` is a UUID referencing `users.id`, not Clerk's string ID.
+  const [user] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.clerkId, userId))
+    .limit(1)
+  if (!user) return null
+
+  const [membership] = await db
+    .select({ tenant: tenants })
+    .from(userTenantRoles)
+    .innerJoin(tenants, eq(userTenantRoles.tenantId, tenants.id))
+    .where(eq(userTenantRoles.userId, user.id))
+    .orderBy(desc(userTenantRoles.isPrimary), desc(userTenantRoles.createdAt))
     .limit(1)
 
-  return tenant ?? null
+  if (membership) return membership.tenant
+
+  // Compatibility for older tenant rows whose owner role has not been backfilled.
+  const [ownedTenant] = await db
+    .select()
+    .from(tenants)
+    .where(eq(tenants.ownerId, user.id))
+    .limit(1)
+
+  return ownedTenant ?? null
 }
 
 /**
@@ -47,17 +66,28 @@ export async function getMyTenant() {
  * Steps:
  *   1. Insert tenant with plan = 'free', isActive = true.
  *   2. Create an active subscription row for the free plan (amount = 0).
- *   3. Link the Clerk user to the tenant via users.tenant_ids array.
- *      This ensures the webhook-synced user record has the tenant reference.
+ *   3. Grant the owner role in the tenant-scoped role table.
  */
 export async function createTenant(input: CreateTenantInput) {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
 
+  // Tenant ownership uses the database UUID. Clerk IDs are strings and must not
+  // be written into or compared directly with the UUID owner_id column.
+  const [dbUser] = await db
+    .select({ id: users.id, tenantIds: users.tenantIds })
+    .from(users)
+    .where(eq(users.clerkId, userId))
+    .limit(1)
+
+  if (!dbUser) {
+    throw new Error("Your account is still being set up. Please refresh and try again.")
+  }
+
   const existing = await db
     .select({ id: tenants.id })
     .from(tenants)
-    .where(eq(tenants.ownerId, userId))
+    .where(eq(tenants.ownerId, dbUser.id))
     .limit(1)
 
   if (existing.length > 0) {
@@ -79,74 +109,57 @@ export async function createTenant(input: CreateTenantInput) {
     throw new Error("This league URL is already taken. Please choose another.")
   }
 
-  // 1. Create tenant.
-  //
-  // `plan` records the tenant's *effective entitlement*, and every limit is
-  // enforced from it (teams/players quota, live streaming, white-label — see
-  // `getPlanLimits` call sites). It was previously hardcoded to "free" while the
-  // subscription row below was created as a 14-day **Pro** trial, so the trial was
-  // sold but never honoured: a new league sat on free limits (4 teams, 40
-  // players, no streaming) for the whole 14 days, and the two records disagreed.
-  //
-  // Set to "pro" to match the trialing subscription. Trial expiry is already
-  // handled by `/api/cron/subscription-renewal`, which selects `trialing` rows
-  // past `currentPeriodEnd` and downgrades `tenants.plan` to "free" in the same
-  // transaction as pausing the subscription — so this cannot leak paid features.
-  //
-  // NOTE: `tenants.plan` and `subscriptions.plan` are two sources of truth that
-  // must be written together. Divergent drift is the root cause of this bug; see
-  // the "Dual source of truth for plan" note in PLAN_ENHANCED_2026-10-04.md.
+  // New leagues start on Free. The effective plan and subscription are written
+  // together so signup cannot accidentally grant a paid trial or mismatched
+  // entitlements.
   const now = new Date()
   const periodEnd = new Date(now)
   periodEnd.setMonth(periodEnd.getMonth() + 1)
 
-  const [tenant] = await db
-    .insert(tenants)
-    .values({
-      name: parsed.name,
-      slug: parsed.slug,
-      customDomain: null,
-      ownerId: userId,
-      plan: "pro",
-      isActive: true,
+  const tenant = await db.transaction(async (tx) => {
+    const [createdTenant] = await tx
+      .insert(tenants)
+      .values({
+        name: parsed.name,
+        slug: parsed.slug,
+        customDomain: null,
+        ownerId: dbUser.id,
+        plan: "free",
+        isActive: true,
+      })
+      .returning()
+
+    await tx.insert(subscriptions).values({
+      tenantId: createdTenant.id,
+      plan: "free",
+      status: "active",
+      monthlyAmount: "0",
+      currency: "PKR",
+      currentPeriodStart: now,
+      currentPeriodEnd: periodEnd,
     })
-    .returning()
 
-  // 2. Create subscription row — start on a 14-day Pro trial
-  const trialEnd = new Date(now)
-  trialEnd.setDate(trialEnd.getDate() + 14)
-  await db.insert(subscriptions).values({
-    tenantId: tenant.id,
-    plan: "pro",
-    status: "trialing",
-    monthlyAmount: "14999",
-    currency: "PKR",
-    currentPeriodStart: now,
-    currentPeriodEnd: trialEnd,
-    trialEndsAt: trialEnd,
+    await tx.insert(userTenantRoles).values({
+      userId: dbUser.id,
+      tenantId: createdTenant.id,
+      role: "league_owner",
+      isPrimary: true,
+    }).onConflictDoNothing({
+      target: [userTenantRoles.userId, userTenantRoles.tenantId],
+    })
+
+    // Keep the legacy membership array synchronized until all consumers have
+    // moved to user_tenant_roles. Do not set the user's global role here.
+    await tx
+      .update(users)
+      .set({
+        tenantIds: [...(Array.isArray(dbUser.tenantIds) ? dbUser.tenantIds : []), createdTenant.id],
+        updatedAt: now,
+      })
+      .where(eq(users.id, dbUser.id))
+
+    return createdTenant
   })
-
-  // 3. Link the user to this tenant via tenant_ids array
-  //    Find the user by clerkId (set by the Clerk webhook)
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.clerkId, userId))
-    .limit(1)
-
-  if (user) {
-    const currentTenantIds: string[] = Array.isArray(user.tenantIds) ? user.tenantIds : []
-    if (!currentTenantIds.includes(tenant.id)) {
-      await db
-        .update(users)
-        .set({
-          tenantIds: [...currentTenantIds, tenant.id],
-          role: "league_owner",
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, user.id))
-    }
-  }
 
   revalidatePath("/dashboard")
   revalidatePath("/dashboard/league")
@@ -173,6 +186,10 @@ export const updateTenantBrandingSettings = withAuth("settings:manage", async (i
   if (!tenant) throw new Error("Tenant not found")
 
   const validated = updateBrandingSchema.parse(input)
+  const limits = getPlanLimits(tenant.plan as PlanKey)
+  if (validated.appName && validated.appName.trim() !== validated.name.trim() && !limits.whiteLabel) {
+    throw new Error("A separate white-label app name requires the Pro plan or above")
+  }
 
   // Update tenant name
   await db.update(tenants)

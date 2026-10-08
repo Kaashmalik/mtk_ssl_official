@@ -102,7 +102,17 @@ export default function AcceptInvitePage() {
           {preview.status === "revoked" && <p className="text-sm text-destructive">This invitation was revoked.</p>}
 
           {!blocked && (
-            <>
+            <div className="space-y-2">
+              <Button asChild className="w-full">
+                <Link href={`/sign-in?redirect_url=${encodeURIComponent(`/accept-invite?token=${token}`)}`}>
+                  Sign in to accept
+                </Link>
+              </Button>
+              <Button asChild variant="outline" className="w-full">
+                <Link href={`/sign-up?redirect_url=${encodeURIComponent(`/accept-invite?token=${token}`)}`}>
+                  Create an account
+                </Link>
+              </Button>
               <Button
                 className="w-full"
                 disabled={isPending}
@@ -111,9 +121,9 @@ export default function AcceptInvitePage() {
                 {isPending ? "Accepting..." : "Accept Invitation"}
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                You must be signed in as <b>{preview.email}</b> to accept.
+                Sign in or create an account with <b>{preview.email}</b>, then accept this invitation.
               </p>
-            </>
+            </div>
           )}
         </CardContent>
       </Card>
