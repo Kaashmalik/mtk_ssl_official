@@ -56,11 +56,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find the user's tenant
+    // Resolve the Clerk identity to the internal UUID used by tenants.owner_id.
+    const [tenantOwner] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.clerkId, userId))
+      .limit(1);
+
+    if (!tenantOwner) {
+      return NextResponse.json({ error: "User record not found" }, { status: 404 });
+    }
+
+    // Only the league owner may manage billing.
     const [tenant] = await db
       .select()
       .from(tenants)
-      .where(eq(tenants.ownerId, userId))
+      .where(eq(tenants.ownerId, tenantOwner.id))
       .limit(1);
 
     if (!tenant) {
@@ -146,11 +157,21 @@ export async function GET() {
   }
 
   try {
-    // Find the user's tenant
+    const [tenantOwner] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.clerkId, userId))
+      .limit(1);
+
+    if (!tenantOwner) {
+      return NextResponse.json({ error: "User record not found" }, { status: 404 });
+    }
+
+    // Find the tenant the authenticated league owner is authorized to bill.
     const [tenant] = await db
       .select({ id: tenants.id, plan: tenants.plan })
       .from(tenants)
-      .where(eq(tenants.ownerId, userId))
+      .where(eq(tenants.ownerId, tenantOwner.id))
       .limit(1);
 
     if (!tenant) {
