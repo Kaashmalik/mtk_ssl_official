@@ -7,7 +7,8 @@ const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL;
 /**
  * Verify the current request is from a super admin.
  * Uses Clerk v6 auth() and Drizzle to retrieve user roles.
- * Returns the userId string on success, null otherwise.
+ * Returns the internal database user UUID on success, null otherwise. Audit and
+ * reviewed-by columns reference `users.id`, never Clerk's `user_*` identifier.
  */
 export async function verifySuperAdmin(): Promise<string | null> {
   const { userId } = await auth();
@@ -15,7 +16,7 @@ export async function verifySuperAdmin(): Promise<string | null> {
 
   try {
     const [user] = await db
-      .select({ email: users.email, role: users.role })
+      .select({ id: users.id, email: users.email, role: users.role })
       .from(users)
       .where(eq(users.clerkId, userId))
       .limit(1);
@@ -34,12 +35,12 @@ export async function verifySuperAdmin(): Promise<string | null> {
     if (!isRoleAdmin) {
       if (isEmailAdmin) {
         console.warn(`[admin-auth] [DEV ONLY] Bootstrapping super_admin permissions for user email ${user.email} matching SUPER_ADMIN_EMAIL.`);
-        return userId;
+        return user.id;
       }
       return null;
     }
 
-    return userId;
+    return user.id;
   } catch (error) {
     console.error("verifySuperAdmin error:", error);
     return null;
