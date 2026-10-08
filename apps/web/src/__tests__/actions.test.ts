@@ -37,6 +37,7 @@ vi.mock("@mtk/database", async (importOriginal) => {
     returning: vi.fn().mockImplementation(() => []),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
+    transaction: vi.fn(async (callback: (tx: any) => Promise<unknown>) => callback(mockDb)),
   };
 
   // NOTE: these repo mocks must NOT reach into `mockDb`. The previous
@@ -98,8 +99,10 @@ describe("Server Actions Unit Tests", () => {
     });
 
     it("should fetch tenant for the logged-in user", async () => {
-      const mockTenant = { id: MOCK_TENANT_ID, ownerId: "mock-user-123" };
-      vi.mocked((db as any).limit).mockReturnValueOnce([mockTenant] as any);
+      const mockTenant = { id: MOCK_TENANT_ID, ownerId: "mock-db-user-id" };
+      vi.mocked((db as any).limit)
+        .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
+        .mockReturnValueOnce([mockTenant] as any);
 
       const tenant = await getMyTenant();
       expect(tenant).toEqual(mockTenant);
@@ -117,14 +120,14 @@ describe("Server Actions Unit Tests", () => {
     });
 
     it("should successfully insert a new tenant when valid input is passed", async () => {
-      // Stub check for existing tenant: return empty array (doesn't exist)
-      // Stub check for slugTaken: return empty array (not taken)
+      // Stub database user lookup, existing-tenant check, and slug check.
       vi.mocked((db as any).limit)
-        .mockReturnValueOnce([]) // existing check
+        .mockReturnValueOnce([{ id: "mock-db-user-id", tenantIds: [] }] as any)
+        .mockReturnValueOnce([]) // existing tenant check
         .mockReturnValueOnce([]); // slugTaken check
 
       const mockNewTenant = { id: MOCK_TENANT_ID, name: "My League", slug: "my-league" };
-      vi.mocked(db.insert(null as any).values(null as any).returning).mockReturnValueOnce([mockNewTenant] as any);
+      vi.mocked((db as any).returning).mockReturnValueOnce([mockNewTenant] as any);
 
       const response = await createTenant({ name: "My League", slug: "my-league" });
       expect(response.success).toBe(true);
@@ -138,8 +141,10 @@ describe("Server Actions Unit Tests", () => {
       // limits before inserting.
       const mockTenant = { id: MOCK_TENANT_ID, name: "Test Tenant", plan: "enterprise" };
 
-      // Stub requireTenant check
-      vi.mocked((db as any).limit).mockReturnValueOnce([mockTenant] as any);
+      // getMyTenant resolves Clerk identity to the database UUID, then tenant.
+      vi.mocked((db as any).limit)
+        .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
+        .mockReturnValueOnce([mockTenant] as any);
 
       const mockNewPlayer = { id: "player-123", name: "John Doe", tenantId: MOCK_TENANT_ID };
 
@@ -165,8 +170,9 @@ describe("Server Actions Unit Tests", () => {
       const mockTeamA = { id: MOCK_TEAM_A_ID, name: "Team A", tenantId: MOCK_TENANT_ID };
       const mockTeamB = { id: MOCK_TEAM_B_ID, name: "Team B", tenantId: MOCK_TENANT_ID };
       
-      // Stub db selects: 1st for tenant in requireTenant(), 2nd for teamA, 3rd for teamB
+      // getMyTenant resolves user + tenant before loading both teams.
       vi.mocked((db as any).limit)
+        .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
         .mockReturnValueOnce([mockTenant] as any)
         .mockReturnValueOnce([mockTeamA] as any)
         .mockReturnValueOnce([mockTeamB] as any);
