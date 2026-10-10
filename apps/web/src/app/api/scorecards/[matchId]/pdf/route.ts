@@ -109,7 +109,7 @@ export async function GET(
   // Build innings HTML sections
   let inningsHtml = ""
   for (const inn of innings) {
-    const battingTeamName = teamNameById.get(inn.battingTeamId) ?? "Batting Team"
+    const battingTeamName = teamNameById.get(inn.teamId) ?? "Batting Team"
     const bowling = bowlingAll.filter(b => b.inningsId === inn.id)
     const batting = battingAll.filter(b => b.inningsId === inn.id)
     const extras = (inn.extras as number | null) ?? 0

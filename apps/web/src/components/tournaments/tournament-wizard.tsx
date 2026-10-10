@@ -4,7 +4,7 @@ import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
+import { tournamentWizardSchema, TOURNAMENT_STEP_FIELDS, type TournamentFormData } from "@/lib/tournament-wizard"
 import { Stepper, Card, CardContent, Button, Progress } from "@mtk/ui"
 import { ChevronLeft, ChevronRight, Languages } from "lucide-react"
 import { StepFormat } from "./steps/step-format"
@@ -28,24 +28,7 @@ import { CopyFromPrevious } from "./copy-from-previous"
 import { createTournament } from "@/app/actions/tournaments"
 import { toast } from "sonner"
 
-const tournamentSchema = z.object({
-  format: z.enum(["knockout", "league", "hybrid"]),
-  matchType: z.enum(["t20", "odi", "tape_ball", "custom"]),
-  customOvers: z.number().min(1).max(50).optional(),
-  name: z.string().min(3).max(100),
-  description: z.string().max(500).optional(),
-  startDate: z.string(),
-  endDate: z.string(),
-  location: z.string().min(1),
-  maxTeams: z.number().min(2).max(64),
-  registrationFee: z.number().min(0).optional(),
-  prizePool: z.number().min(0).optional(),
-  teamSeeding: z.array(z.string()).optional(),
-  logo: z.string().optional(),
-  primaryColor: z.string().optional(),
-})
-
-export type TournamentFormData = z.infer<typeof tournamentSchema>
+export type { TournamentFormData } from "@/lib/tournament-wizard"
 
 const STEPS = [
   { label: "Format", description: "Choose tournament type" },
@@ -64,7 +47,7 @@ export function TournamentWizard() {
   const { language, toggleLanguage, t } = useLanguage()
 
   const form = useForm<TournamentFormData>({
-    resolver: zodResolver(tournamentSchema),
+    resolver: zodResolver(tournamentWizardSchema),
     defaultValues: {
       format: undefined,
       matchType: undefined,
@@ -87,13 +70,15 @@ export function TournamentWizard() {
   const progress = ((currentStep + 1) / STEPS.length) * 100
 
   const nextStep = async () => {
-    const isValid = await form.trigger()
+    if (isPending) return
+    if (currentStep === STEPS.length - 1) {
+      await handleSubmit()
+      return
+    }
+
+    const isValid = await form.trigger([...TOURNAMENT_STEP_FIELDS[currentStep]], { shouldFocus: true })
     if (isValid) {
-      if (currentStep < STEPS.length - 1) {
-        setCurrentStep(currentStep + 1)
-      } else {
-        await handleSubmit()
-      }
+      setCurrentStep(currentStep + 1)
     }
   }
 
@@ -112,7 +97,7 @@ export function TournamentWizard() {
         await createTournament({
           name: data.name,
           description: data.description || null,
-          format: data.format as "knockout" | "league" | "hybrid" | "round_robin",
+          format: data.format,
           startDate: data.startDate || null,
           endDate: data.endDate || null,
           maxTeams: data.maxTeams,
@@ -195,7 +180,7 @@ export function TournamentWizard() {
             <Button
               variant="outline"
               onClick={prevStep}
-              disabled={currentStep === 0}
+              disabled={currentStep === 0 || isPending}
               className="min-w-[120px]"
             >
               <ChevronLeft className="w-4 h-4 mr-2" />

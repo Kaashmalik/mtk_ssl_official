@@ -166,6 +166,7 @@ pnpm run dev
 
 | Document | Purpose |
 |-----|---------|
+| 🗺️ [`MASTER_PLAN_2026-10-10.md`](./MASTER_PLAN_2026-10-10.md) | Premium SaaS, white-label, live cricket, UX, delivery phases, and implementation tracker |
 | 📖 [`docs/PROJECT_GUIDE.md`](./docs/PROJECT_GUIDE.md) | Product & architecture truth |
 | 🏛️ [`docs/architecture/BACKEND_UNIFICATION_DECISION.md`](./docs/architecture/BACKEND_UNIFICATION_DECISION.md) | Hybrid backend (Accepted) |
 | 📦 [`docs/adr/001-microservices-migration.md`](./docs/adr/001-microservices-migration.md) | Superseded by unification ADR |

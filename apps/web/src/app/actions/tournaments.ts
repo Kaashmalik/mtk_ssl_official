@@ -2,10 +2,12 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { tournamentRepo } from "@mtk/database"
-import { withTenantContext, resolveDefaultTenantId, type Tournament } from "@mtk/database"
+import { db, users, tournamentRepo } from "@mtk/database"
+import { withTenantContext, type Tournament } from "@mtk/database"
+import { eq } from "drizzle-orm"
 import { z } from "zod"
-import { withAuth } from "./action-guard"
+import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-server"
+import type { Permission } from "@/lib/rbac"
 
 const createTournamentSchema = z.object({
   name: z.string().min(2).max(200),
@@ -39,21 +41,36 @@ function generateSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 }
 
+/** Resolve once, then authorize and query the same tenant. */
+async function requireTournamentContext(permission: Permission) {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found. Create a league first.")
+
+  await requirePermissionServer(permission, tenantId)
+  return { userId, tenantId }
+}
+
 /**
  * Create a new tournament.
  *
  * The tenant context is resolved from Clerk auth, then passed into
  * `withTenantContext` so the repository layer auto-scopes the insert.
  */
-export const createTournament = withAuth("tournament:create", async (input: CreateTournamentInput) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found. Create a league first.")
+export async function createTournament(input: CreateTournamentInput) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:create")
 
   const validated = createTournamentSchema.parse(input)
   const slug = validated.slug || generateSlug(validated.name)
+
+  // Clerk's string ID is not the UUID referenced by tournaments.created_by.
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.clerkId, userId),
+    columns: { id: true },
+  })
+  if (!dbUser) throw new Error("Your account is still being set up. Please refresh and try again.")
 
   // ── Tenant-scoped via withTenantContext ──
   // The repo's insert() will auto-set tenantId from context.
@@ -62,25 +79,23 @@ export const createTournament = withAuth("tournament:create", async (input: Crea
     tournamentRepo.insert<Tournament>({
       ...validated,
       slug,
-      createdBy: userId,
+      createdBy: dbUser.id,
     })
   )
+
+  if (!tournament) throw new Error("Tournament could not be created. Please try again.")
 
   revalidatePath("/dashboard/tournaments")
   revalidatePath("/dashboard")
   return { success: true, tournament }
-})
+}
 
 /**
  * Update a tournament.
  * The repo's updateById() scopes by both id AND tenantId from context.
  */
-export const updateTournament = withAuth("tournament:update", async (id: string, input: UpdateTournamentInput) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found")
+export async function updateTournament(id: string, input: UpdateTournamentInput) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:update")
 
   const validated = updateTournamentSchema.parse(input)
   const cleanData = Object.fromEntries(Object.entries(validated).filter(([, v]) => v !== undefined)) as Record<string, unknown>
@@ -94,17 +109,13 @@ export const updateTournament = withAuth("tournament:update", async (id: string,
   revalidatePath("/dashboard/tournaments")
   revalidatePath(`/dashboard/tournaments/${id}`)
   return { success: true, tournament }
-})
+}
 
 /**
  * Delete a tournament.
  */
-export const deleteTournament = withAuth("tournament:delete", async (id: string) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found")
+export async function deleteTournament(id: string) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:delete")
 
   const deleted = await withTenantContext({ userId, tenantId }, () =>
     tournamentRepo.deleteById(id)
@@ -114,50 +125,38 @@ export const deleteTournament = withAuth("tournament:delete", async (id: string)
   revalidatePath("/dashboard/tournaments")
   revalidatePath("/dashboard")
   return { success: true }
-})
+}
 
 /**
  * Get a single tournament.
  */
-export const getTournament = withAuth("tournament:read", async (id: string) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found")
+export async function getTournament(id: string) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:read")
 
   return withTenantContext({ userId, tenantId }, () =>
     tournamentRepo.findById<Tournament>(id)
   )
-})
+}
 
 /**
  * List tournaments with pagination and filters.
  * The repo's findFiltered() auto-scopes to the current tenant.
  */
-export const getTournaments = withAuth("tournament:read", async (filters: TournamentFilters) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found")
+export async function getTournaments(filters: TournamentFilters) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:read")
 
   const validated = tournamentFiltersSchema.parse(filters)
 
   return withTenantContext({ userId, tenantId }, () =>
     tournamentRepo.findFiltered(validated)
   )
-})
+}
 
 /**
  * Open tournament registration.
  */
-export const openRegistration = withAuth("tournament:manage_registrations", async (tournamentId: string) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found")
+export async function openRegistration(tournamentId: string) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:manage_registrations")
 
   const tournament = await withTenantContext({ userId, tenantId }, () =>
     tournamentRepo.updateById(tournamentId, {
@@ -170,17 +169,13 @@ export const openRegistration = withAuth("tournament:manage_registrations", asyn
   if (!tournament) throw new Error("Tournament not found")
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
   return { success: true, tournament }
-})
+}
 
 /**
  * Close tournament registration.
  */
-export const closeRegistration = withAuth("tournament:manage_registrations", async (tournamentId: string) => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-
-  const tenantId = await resolveDefaultTenantId(userId)
-  if (!tenantId) throw new Error("Tenant not found")
+export async function closeRegistration(tournamentId: string) {
+  const { userId, tenantId } = await requireTournamentContext("tournament:manage_registrations")
 
   const tournament = await withTenantContext({ userId, tenantId }, () =>
     tournamentRepo.updateById(tournamentId, {
@@ -192,4 +187,4 @@ export const closeRegistration = withAuth("tournament:manage_registrations", asy
   if (!tournament) throw new Error("Tournament not found")
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
   return { success: true, tournament }
-})
+}

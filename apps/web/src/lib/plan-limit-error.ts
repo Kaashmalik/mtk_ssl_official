@@ -18,7 +18,7 @@
 import {
   readPlanLimitDetail,
   type PlanLimitDetail,
-} from "@mtk/database";
+} from "@mtk/database/lib/plan-guard";
 
 export interface ResolvedActionError {
   /** Message safe to render directly. Never contains the wire payload. */
