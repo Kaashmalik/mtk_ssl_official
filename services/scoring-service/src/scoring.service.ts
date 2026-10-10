@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   InternalServerErrorException,
 } from '@nestjs/common';
@@ -21,6 +22,9 @@ import {
   isUniqueViolation,
 } from '@mtk/database';
 import Redis from 'ioredis';
+import { calculateDeliveryDelta } from '@mtk/database/lib/scoring-delivery';
+import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
+import { z } from 'zod';
 import { env } from './env';
 import {
   KafkaScoringPublisher,
@@ -38,6 +42,7 @@ import {
 export type { MatchState, MatchStatus, Scorecard };
 
 export interface BallEvent {
+  clientOpId: string;
   matchId: string;
   inningsId: string;
   over: number;
@@ -60,7 +65,38 @@ export interface BallEvent {
 
 export interface BallResult {
   ballId: string;
+  clientOpId?: string;
   scorecard: Scorecard;
+  replayed?: boolean;
+}
+
+const recordedDeltaSchema = z.object({
+  totalRuns: z.number().int().nonnegative(),
+  batterRuns: z.number().int().nonnegative(),
+  extras: z.number().int().nonnegative(),
+  legalBalls: z.number().int().min(0).max(1),
+  wides: z.number().int().min(0).max(7),
+  noBalls: z.number().int().min(0).max(7),
+  byes: z.number().int().nonnegative(),
+  legByes: z.number().int().nonnegative(),
+  isFour: z.boolean(),
+  isSix: z.boolean(),
+});
+
+function scorecardFor(innings: {
+  matchId: string; inningsNumber: number; totalRuns: number;
+  totalWickets: number; totalBalls: number;
+}): Scorecard {
+  return {
+    matchId: innings.matchId,
+    innings: innings.inningsNumber,
+    totalRuns: innings.totalRuns,
+    totalWickets: innings.totalWickets,
+    overs: Math.floor(innings.totalBalls / 6),
+    balls: innings.totalBalls % 6,
+    runRate: innings.totalBalls > 0
+      ? Number((innings.totalRuns / (innings.totalBalls / 6)).toFixed(2)) : 0,
+  };
 }
 
 export interface CreateInningsInput {
@@ -224,9 +260,28 @@ export class ScoringService {
   }
 
   async recordBall(tenantId: string, ballEvent: BallEvent): Promise<BallResult> {
+    const validated = deliveryCommandSchema.safeParse(ballEvent);
+    if (!validated.success) {
+      throw new BadRequestException(validated.error.issues.map((issue) => issue.message));
+    }
+    const command = validated.data;
+    const fingerprint = deliveryFingerprint(command);
+    let delta: ReturnType<typeof calculateDeliveryDelta>;
+    try {
+      delta = calculateDeliveryDelta({
+        runs: command.runs,
+        extras: command.extras ? { type: command.extras.type, runs: command.extras.runs } : undefined,
+      });
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Invalid delivery runs');
+    }
     const { matchId, inningsId } = ballEvent;
 
-    const { result, publishData, becameLive, match } = await db.transaction(async (tx) => {
+    const outcome = await db.transaction(async (tx) => {
+      // Serialize commands for this match, including retries and undo. Locks
+      // are transaction-scoped and tenant-filtered; no process-local mutex.
+      await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
+        WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
       // 1. Validate match exists, belongs to this tenant, and is in a scorable
       //    state. Scoping the WHERE clause (not just comparing afterwards) means
       //    a cross-tenant id never even reaches the comparison.
@@ -235,10 +290,6 @@ export class ScoringService {
       });
 
       assertTenantScope(tenantId, match, 'Match', matchId);
-
-      if (match.status === 'completed' || match.status === 'abandoned') {
-        throw new BadRequestException(`Match ${matchId} is already ${match.status}`);
-      }
 
       // 2. Validate innings exists within this tenant and this match
       const innings = await tx.query.matchInnings.findFirst({
@@ -251,21 +302,44 @@ export class ScoringService {
 
       assertTenantScope(tenantId, innings, 'Innings', inningsId);
 
-      // 3. Check for duplicate ball (unique constraint on match_id, innings_id, over, ball)
-      const existingBall = await tx.query.matchBalls.findFirst({
-        where: and(
-          eq(matchBalls.matchId, matchId),
-          eq(matchBalls.inningsId, inningsId),
-          eq(matchBalls.overNumber, ballEvent.over),
-          eq(matchBalls.ballNumber, ballEvent.ball),
-          eq(matchBalls.tenantId, tenantId)
-        ),
-      });
+      // The immutable event remembers a command even after its ball is undone.
+      // A retry cannot silently recreate an undone ball or reuse an op ID for
+      // different contents. Replay before lifecycle/coordinate checks so an
+      // already-accepted command can still be acknowledged after innings end.
+      if (command.clientOpId) {
+        const recorded = await tx.query.scoringEvents.findFirst({
+          where: and(
+            eq(scoringEvents.matchId, matchId), eq(scoringEvents.tenantId, tenantId),
+            eq(scoringEvents.eventType, 'ball_recorded'),
+            sql`${scoringEvents.payload}->>'client_op_id' = ${command.clientOpId}`,
+          ),
+        });
+        if (recorded) {
+          const payload = recorded.payload as Record<string, unknown>;
+          if (recorded.inningsId !== inningsId || payload.fingerprint !== fingerprint) {
+            throw new ConflictException('Operation ID already belongs to a different delivery');
+          }
+          const recordedBallId = z.string().uuid().safeParse(payload.ball_id);
+          if (!recordedBallId.success) throw new ConflictException('Stored operation requires score review');
+          const existing = await tx.query.matchBalls.findFirst({
+            where: and(eq(matchBalls.id, recordedBallId.data), eq(matchBalls.tenantId, tenantId),
+              eq(matchBalls.matchId, matchId), eq(matchBalls.inningsId, inningsId)),
+          });
+          if (!existing) throw new ConflictException('This delivery was undone; use a new operation ID');
+          return { result: { ballId: existing.id, clientOpId: command.clientOpId,
+            scorecard: scorecardFor(innings), replayed: true } };
+        }
+      }
 
-      if (existingBall) {
-        throw new BadRequestException(
-          `Ball ${ballEvent.over}.${ballEvent.ball} already recorded for this innings`
-        );
+      if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
+        throw new BadRequestException(`Match ${matchId} cannot be scored while ${match.status}`);
+      }
+      if (innings.status === 'completed') throw new BadRequestException('Innings is already completed');
+
+      const expectedOver = Math.floor(innings.totalBalls / 6);
+      const expectedBall = (innings.totalBalls % 6) + 1;
+      if (command.over !== expectedOver || command.ball !== expectedBall) {
+        throw new ConflictException(`Expected delivery ${expectedOver}.${expectedBall}; refresh match state`);
       }
 
       // 4. Determine ball properties from event
@@ -273,10 +347,8 @@ export class ScoringService {
       const isNoBall = ballEvent.extras?.type === 'noball';
       const isBye = ballEvent.extras?.type === 'bye';
       const isLegBye = ballEvent.extras?.type === 'legbye';
-      const isWicket = !!ballEvent.wicket;
-      const totalRuns = ballEvent.runs + (ballEvent.extras?.runs || 0);
-      const isFour = totalRuns === 4 && !isWide && !isNoBall && !isBye && !isLegBye;
-      const isSix = totalRuns === 6 && !isWide && !isNoBall && !isBye && !isLegBye;
+      const isWicket = !!ballEvent.wicket && ballEvent.wicket.type !== 'retired_hurt';
+      const { totalRuns, isFour, isSix } = delta;
 
       // Initialize scorecard projection if missing
       const projection = await tx.query.scorecardProjections.findFirst({
@@ -304,45 +376,32 @@ export class ScoringService {
         });
       }
 
-      // Insert into scoringEvents (immutability event store)
+      // The match lock protects MAX+1 event and delivery sequence allocation.
       const lastEvent = await tx.select({ seq: sql<number>`COALESCE(MAX(sequence_number), 0)` })
         .from(scoringEvents)
         .where(eq(scoringEvents.aggregateId, inningsId));
-      const nextSeq = (lastEvent[0]?.seq || 0) + 1;
-
-      const [recordedEvent] = await tx.insert(scoringEvents)
-        .values({
-          tenantId: match.tenantId,
-          matchId: matchId,
-          inningsId: inningsId,
-          eventType: 'ball_recorded',
-          eventVersion: 1,
-          aggregateId: inningsId,
-          sequenceNumber: nextSeq,
-          payload: {
-            runs: totalRuns,
-            is_wicket: isWicket,
-            is_wide: isWide,
-            is_no_ball: isNoBall,
-            is_bye: isBye,
-            is_leg_bye: isLegBye,
-            batsman_runs: ballEvent.runs,
-          },
-        })
-        .returning({ id: scoringEvents.id, sequenceNumber: scoringEvents.sequenceNumber });
+      const nextSeq = Number(lastEvent[0]?.seq || 0) + 1;
+      const lastDelivery = await tx.query.matchBalls.findFirst({
+        where: and(eq(matchBalls.matchId, matchId), eq(matchBalls.inningsId, inningsId),
+          eq(matchBalls.tenantId, tenantId)),
+        orderBy: [desc(matchBalls.ballSequence)],
+      });
 
       // 5. Insert the ball record
       const ballInsert: NewMatchBall = {
         tenantId: match.tenantId,
         matchId,
         inningsId,
+        ballSequence: (lastDelivery?.ballSequence ?? 0) + 1,
+        clientOpId: command.clientOpId ?? null,
         overNumber: ballEvent.over,
         ballNumber: ballEvent.ball,
         bowlerId: ballEvent.bowlerId || null,
         batsmanId: ballEvent.batsmanId || null,
-        runs: ballEvent.runs,
+        // match_balls.runs is the total displayed by public timelines/scorecards.
+        runs: totalRuns,
         isWicket,
-        wicketType: isWicket ? (ballEvent.wicket!.type as any) : null,
+        wicketType: command.wicket?.type ?? null,
         isFour,
         isSix,
         isWide,
@@ -357,32 +416,40 @@ export class ScoringService {
         .values(ballInsert)
         .returning();
 
-      // 6. Incrementally update innings aggregates (O(1) - no recalculation)
-      const extrasRuns = (isWide || isNoBall) ? (ballEvent.extras?.runs || 0) : 0;
-      const byesRuns = isBye ? ballEvent.runs : 0;
-      const legByesRuns = isLegBye ? ballEvent.runs : 0;
+      if (!insertedBall) throw new InternalServerErrorException('Ball insert returned no row');
+      const [recordedEvent] = await tx.insert(scoringEvents).values({
+        tenantId, matchId, inningsId, eventType: 'ball_recorded', eventVersion: 2,
+        aggregateId: inningsId, sequenceNumber: nextSeq,
+        payload: {
+          ball_id: insertedBall.id, client_op_id: command.clientOpId ?? null, fingerprint,
+          delta, runs: totalRuns, batsman_runs: delta.batterRuns,
+          is_wicket: isWicket, is_wide: isWide, is_no_ball: isNoBall,
+          is_bye: isBye, is_leg_bye: isLegBye,
+        },
+      }).returning({ id: scoringEvents.id, sequenceNumber: scoringEvents.sequenceNumber });
 
+      // 6. Incrementally update innings aggregates (O(1) - no recalculation)
       await tx.update(matchInnings)
         .set({
           totalRuns: sql`${matchInnings.totalRuns} + ${totalRuns}`,
           totalWickets: sql`${matchInnings.totalWickets} + ${isWicket ? 1 : 0}`,
-          totalBalls: sql`${matchInnings.totalBalls} + ${(!isWide && !isNoBall) ? 1 : 0}`,
-          extras: sql`${matchInnings.extras} + ${extrasRuns}`,
-          byes: sql`${matchInnings.byes} + ${byesRuns}`,
-          legByes: sql`${matchInnings.legByes} + ${legByesRuns}`,
-          wides: sql`${matchInnings.wides} + ${isWide ? 1 : 0}`,
-          noBalls: sql`${matchInnings.noBalls} + ${isNoBall ? 1 : 0}`,
+          totalBalls: sql`${matchInnings.totalBalls} + ${delta.legalBalls}`,
+          extras: sql`${matchInnings.extras} + ${delta.extras}`,
+          byes: sql`${matchInnings.byes} + ${delta.byes}`,
+          legByes: sql`${matchInnings.legByes} + ${delta.legByes}`,
+          wides: sql`${matchInnings.wides} + ${delta.wides}`,
+          noBalls: sql`${matchInnings.noBalls} + ${delta.noBalls}`,
           status: 'in_progress',
           updatedAt: new Date(),
         })
         .where(and(eq(matchInnings.id, inningsId), eq(matchInnings.tenantId, tenantId)));
 
       // 7. Update match status to live if not already
-      if (match.status === 'scheduled') {
+      if (match.status === 'scheduled' || match.status === 'toss' || match.status === 'innings_break') {
         await tx.update(matches)
           .set({
             status: 'live',
-            startDate: new Date(),
+            startDate: match.startDate ?? new Date(),
             updatedAt: new Date(),
           })
           .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)));
@@ -401,19 +468,18 @@ export class ScoringService {
         throw new Error('Innings disappeared during transaction');
       }
 
-      const totalBalls = updatedInnings.totalBalls;
-      const overs = Math.floor(totalBalls / 6) + (totalBalls % 6) / 10;
-      const runRate = totalBalls > 0 ? (updatedInnings.totalRuns / (totalBalls / 6)) : 0;
-
-      const scorecard: Scorecard = {
-        matchId,
-        innings: updatedInnings.inningsNumber,
-        totalRuns: updatedInnings.totalRuns,
-        totalWickets: updatedInnings.totalWickets,
-        overs: Math.floor(totalBalls / 6),
-        balls: totalBalls % 6,
-        runRate: Number(runRate.toFixed(2)),
-      };
+      const scorecard = scorecardFor(updatedInnings);
+      // Reconcile the existing trigger-owned projection with the exact innings
+      // delta in this transaction (older triggers omit extras during undo).
+      await tx.update(scorecardProjections).set({
+        totalRuns: updatedInnings.totalRuns, totalWickets: updatedInnings.totalWickets,
+        totalBalls: updatedInnings.totalBalls, totalExtras: updatedInnings.extras,
+        wides: updatedInnings.wides, noBalls: updatedInnings.noBalls,
+        byes: updatedInnings.byes, legByes: updatedInnings.legByes,
+        currentOver: scorecard.overs, currentBall: scorecard.balls,
+        lastEventSequence: nextSeq, updatedAt: new Date(),
+      }).where(and(eq(scorecardProjections.inningsId, inningsId),
+        eq(scorecardProjections.tenantId, tenantId)));
 
       this.logger.log(
         `Ball ${ballEvent.over}.${ballEvent.ball}: ${totalRuns} runs${isWicket ? ' + WICKET' : ''} ` +
@@ -422,6 +488,7 @@ export class ScoringService {
 
       const result = {
         ballId: insertedBall.id,
+        clientOpId: command.clientOpId,
         scorecard,
       };
 
@@ -488,14 +555,13 @@ export class ScoringService {
         timestamp: new Date().toISOString(),
       };
 
-      // Invalidate cache after database transaction commits
-      const cacheKey = `match:state:${matchId}`;
-      this.redis.del(cacheKey).catch((err) => 
-        this.logger.warn(`Failed to invalidate match state cache: ${err}`)
-      );
-
       return { result, publishData, becameLive, match };
     });
+
+    if (!('publishData' in outcome)) return outcome.result;
+    const { result, publishData, becameLive, match } = outcome;
+    await this.redis.del(`match:state:${matchId}`).catch((err) =>
+      this.logger.warn(`Failed to invalidate match state cache: ${err}`));
 
     // Publish AFTER commit â€” a slow/failed Kafka broker must never roll back a
     // recorded ball. KafkaScoringPublisher swallows failures and logs them.
@@ -515,7 +581,16 @@ export class ScoringService {
   }
 
   async undoBall(tenantId: string, matchId: string, ballId: string): Promise<BallResult> {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
+        WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
+      const match = await tx.query.matches.findFirst({
+        where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
+      });
+      assertTenantScope(tenantId, match, 'Match', matchId);
+      if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
+        throw new BadRequestException('This match can no longer be edited');
+      }
       // 1. Find the ball to undo, scoped to this tenant
       const ball = await tx.query.matchBalls.findFirst({
         where: and(
@@ -533,7 +608,7 @@ export class ScoringService {
           eq(matchBalls.inningsId, ball.inningsId),
           eq(matchBalls.tenantId, tenantId),
         ),
-        orderBy: [desc(matchBalls.createdAt)],
+        orderBy: [desc(matchBalls.ballSequence)],
       });
 
       if (!lastRecordedBall || lastRecordedBall.id !== ballId) {
@@ -560,58 +635,106 @@ export class ScoringService {
         throw new BadRequestException('Cannot undo balls in a completed innings');
       }
 
-      // 3. Determine what to subtract
+      // Exact v2 event deltas survive independently of the mutable ball row.
+      // Legacy extras did not retain enough information to reverse safely.
+      const recorded = await tx.query.scoringEvents.findFirst({
+        where: and(eq(scoringEvents.tenantId, tenantId), eq(scoringEvents.matchId, matchId),
+          eq(scoringEvents.inningsId, ball.inningsId), eq(scoringEvents.eventType, 'ball_recorded'),
+          sql`${scoringEvents.payload}->>'ball_id' = ${ballId}`),
+      });
+      const payload = recorded?.payload as Record<string, unknown> | undefined;
+      let delta: ReturnType<typeof calculateDeliveryDelta>;
+      if (recorded) {
+        const decoded = recordedDeltaSchema.safeParse(payload?.delta);
+        if (recorded.eventVersion !== 2 || !decoded.success) {
+          throw new ConflictException('Stored delivery accounting requires review before undo');
+        }
+        delta = {
+          totalRuns: decoded.data.totalRuns, batterRuns: decoded.data.batterRuns,
+          extras: decoded.data.extras, legalBalls: decoded.data.legalBalls,
+          wides: decoded.data.wides, noBalls: decoded.data.noBalls,
+          byes: decoded.data.byes, legByes: decoded.data.legByes,
+          isFour: decoded.data.isFour, isSix: decoded.data.isSix,
+        };
+        if (delta.totalRuns !== ball.runs || delta.totalRuns !== delta.batterRuns + delta.extras) {
+          throw new ConflictException('Stored delivery accounting does not match the ball');
+        }
+        try {
+          const extrasType = ball.isWide ? 'wide' : ball.isNoBall ? 'noball'
+            : ball.isBye ? 'bye' : ball.isLegBye ? 'legbye' : undefined;
+          const expected = calculateDeliveryDelta({ runs: delta.batterRuns,
+            extras: extrasType ? { type: extrasType, runs: delta.extras } : undefined });
+          if (Object.entries(expected).some(([key, value]) => delta[key] !== value) ||
+              payload?.is_wicket !== ball.isWicket) {
+            throw new Error('Delta does not match delivery flags');
+          }
+        } catch {
+          throw new ConflictException('Stored delivery components require review before undo');
+        }
+      } else {
+        if (ball.isWide || ball.isNoBall || ball.isBye || ball.isLegBye) {
+          throw new ConflictException('Legacy extras require score review; automatic undo is unsafe');
+        }
+        delta = calculateDeliveryDelta({ runs: ball.runs });
+      }
+
       const isWide = ball.isWide;
       const isNoBall = ball.isNoBall;
       const isBye = ball.isBye;
       const isLegBye = ball.isLegBye;
       const isWicket = ball.isWicket;
-      const totalRuns = ball.runs + (isWide || isNoBall ? 1 : 0); // Base runs + extra runs
+      const totalRuns = delta.totalRuns;
+      if (innings.totalRuns < totalRuns || innings.totalBalls < delta.legalBalls ||
+          innings.totalWickets < (isWicket ? 1 : 0) || innings.extras < delta.extras ||
+          innings.byes < delta.byes || innings.legByes < delta.legByes ||
+          innings.wides < delta.wides || innings.noBalls < delta.noBalls) {
+        throw new ConflictException('Innings accounting requires review before undo');
+      }
 
       // Insert undo event into scoringEvents
       const lastEvent = await tx.select({ seq: sql<number>`COALESCE(MAX(sequence_number), 0)` })
         .from(scoringEvents)
         .where(eq(scoringEvents.aggregateId, ball.inningsId));
-      const nextSeq = (lastEvent[0]?.seq || 0) + 1;
+      const nextSeq = Number(lastEvent[0]?.seq || 0) + 1;
 
       await tx.insert(scoringEvents).values({
         tenantId: innings.tenantId,
         matchId: matchId,
         inningsId: ball.inningsId,
         eventType: 'ball_undone',
-        eventVersion: 1,
+        eventVersion: 2,
         aggregateId: ball.inningsId,
         sequenceNumber: nextSeq,
         payload: {
+          ball_id: ballId,
+          recorded_event_id: recorded?.id ?? null,
+          delta,
           runs: totalRuns,
           is_wicket: isWicket,
           is_wide: isWide,
           is_no_ball: isNoBall,
           is_bye: isBye,
           is_leg_bye: isLegBye,
-          batsman_runs: ball.runs,
+          batsman_runs: delta.batterRuns,
         },
       });
 
       // 4. Delete the ball record (cascade will handle related data)
       await tx.delete(matchBalls)
-        .where(eq(matchBalls.id, ballId));
+        .where(and(eq(matchBalls.id, ballId), eq(matchBalls.tenantId, tenantId),
+          eq(matchBalls.matchId, matchId), eq(matchBalls.inningsId, ball.inningsId)));
 
       // 5. Decrement innings aggregates
-      const extrasRuns = (isWide || isNoBall) ? 1 : 0;
-      const byesRuns = isBye ? ball.runs : 0;
-      const legByesRuns = isLegBye ? ball.runs : 0;
-
       await tx.update(matchInnings)
         .set({
-          totalRuns: sql`GREATEST(0, ${matchInnings.totalRuns} - ${totalRuns})`,
-          totalWickets: sql`GREATEST(0, ${matchInnings.totalWickets} - ${isWicket ? 1 : 0})`,
-          totalBalls: sql`GREATEST(0, ${matchInnings.totalBalls} - ${(!isWide && !isNoBall) ? 1 : 0})`,
-          extras: sql`GREATEST(0, ${matchInnings.extras} - ${extrasRuns})`,
-          byes: sql`GREATEST(0, ${matchInnings.byes} - ${byesRuns})`,
-          legByes: sql`GREATEST(0, ${matchInnings.legByes} - ${legByesRuns})`,
-          wides: sql`GREATEST(0, ${matchInnings.wides} - ${isWide ? 1 : 0})`,
-          noBalls: sql`GREATEST(0, ${matchInnings.noBalls} - ${isNoBall ? 1 : 0})`,
+          totalRuns: innings.totalRuns - totalRuns,
+          totalWickets: innings.totalWickets - (isWicket ? 1 : 0),
+          totalBalls: innings.totalBalls - delta.legalBalls,
+          extras: innings.extras - delta.extras,
+          byes: innings.byes - delta.byes,
+          legByes: innings.legByes - delta.legByes,
+          wides: innings.wides - delta.wides,
+          noBalls: innings.noBalls - delta.noBalls,
           updatedAt: new Date(),
         })
         .where(and(eq(matchInnings.id, ball.inningsId), eq(matchInnings.tenantId, tenantId)));
@@ -628,18 +751,16 @@ export class ScoringService {
         throw new Error('Innings disappeared during undo transaction');
       }
 
-      const totalBalls = updatedInnings.totalBalls;
-      const runRate = totalBalls > 0 ? (updatedInnings.totalRuns / (totalBalls / 6)) : 0;
-
-      const scorecard: Scorecard = {
-        matchId,
-        innings: updatedInnings.inningsNumber,
-        totalRuns: updatedInnings.totalRuns,
-        totalWickets: updatedInnings.totalWickets,
-        overs: Math.floor(totalBalls / 6),
-        balls: totalBalls % 6,
-        runRate: Number(runRate.toFixed(2)),
-      };
+      const scorecard = scorecardFor(updatedInnings);
+      await tx.update(scorecardProjections).set({
+        totalRuns: updatedInnings.totalRuns, totalWickets: updatedInnings.totalWickets,
+        totalBalls: updatedInnings.totalBalls, totalExtras: updatedInnings.extras,
+        wides: updatedInnings.wides, noBalls: updatedInnings.noBalls,
+        byes: updatedInnings.byes, legByes: updatedInnings.legByes,
+        currentOver: scorecard.overs, currentBall: scorecard.balls,
+        lastEventSequence: nextSeq, updatedAt: new Date(),
+      }).where(and(eq(scorecardProjections.inningsId, ball.inningsId),
+        eq(scorecardProjections.tenantId, tenantId)));
 
       this.logger.log(
         `UNDO ball ${ballId}: removed ${totalRuns} runs${isWicket ? ' + wicket' : ''} ` +
@@ -651,14 +772,11 @@ export class ScoringService {
         scorecard,
       };
 
-      // Invalidate cache after database transaction commits
-      const cacheKey = `match:state:${matchId}`;
-      this.redis.del(cacheKey).catch((err) => 
-        this.logger.warn(`Failed to invalidate match state cache: ${err}`)
-      );
-
       return result;
     });
+    await this.redis.del(`match:state:${matchId}`).catch((err) =>
+      this.logger.warn(`Failed to invalidate match state cache: ${err}`));
+    return result;
   }
 
   async getBallHistory(matchId: string, inningsId: string, limit: number = 50) {
@@ -667,7 +785,7 @@ export class ScoringService {
         eq(matchBalls.matchId, matchId),
         eq(matchBalls.inningsId, inningsId)
       ),
-      orderBy: [desc(matchBalls.createdAt)],
+      orderBy: [desc(matchBalls.ballSequence)],
       limit,
     });
   }
@@ -782,6 +900,9 @@ export class ScoringService {
     inningsId: string,
   ): Promise<CompleteInningsResult> {
     const result = await db.transaction(async (tx) => {
+      // Same lock ordering as delivery/undo; completion cannot race a write.
+      await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
+        WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
       const innings = await tx.query.matchInnings.findFirst({
         where: and(
           eq(matchInnings.id, inningsId),

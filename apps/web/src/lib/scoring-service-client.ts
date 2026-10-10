@@ -24,6 +24,7 @@ function scoringBaseUrl(): string {
 export type ScoringProxyBallInput = {
   matchId: string;
   inningsId: string;
+  clientOpId: string;
   over: number;
   ball: number;
   runs: number;
@@ -35,6 +36,8 @@ export type ScoringProxyBallInput = {
 
 export type ScoringProxyBallResult = {
   ballId: string;
+  clientOpId?: string;
+  replayed?: boolean;
   scorecard: {
     matchId: string;
     innings: number;

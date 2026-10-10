@@ -1,67 +1,54 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   getQueuedBalls,
   removeQueuedBall,
   incrementAttempts,
   countQueuedBalls,
-  type QueuedBall,
 } from "@/lib/offline-ball-queue";
-
-const MAX_ATTEMPTS = 5;
+import { replayBallQueue } from "@/lib/replay-ball-queue";
 
 /**
  * Replays offline balls through the normal recordBall server action.
  * Entries are removed only after a successful write, so an interrupted sync
  * resumes rather than losing deliveries.
  */
-export function useOfflineBallSync(onSynced?: (count: number) => void) {
+export function useOfflineBallSync(matchId: string, onSynced?: (count: number) => void) {
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const syncInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
-    setPending(await countQueuedBalls());
-  }, []);
+    setPending(await countQueuedBalls(matchId));
+  }, [matchId]);
 
   const sync = useCallback(
     async (recordBall: (input: Record<string, unknown>) => Promise<unknown>) => {
-      if (syncing) return;
-      const queue = await getQueuedBalls();
-      if (queue.length === 0) {
-        setPending(0);
-        return;
-      }
-
+      if (syncInFlight.current) return;
+      syncInFlight.current = true;
       setSyncing(true);
-      let synced = 0;
-
-      for (const item of queue as QueuedBall[]) {
-        if (item.attempts >= MAX_ATTEMPTS) {
-          // Give up on this entry rather than blocking the queue forever.
-          await removeQueuedBall(item.clientOpId);
-          toast.error(`Dropped an unsynced ball (${item.attempts} failed attempts)`);
-          continue;
+      try {
+        const queue = await getQueuedBalls(matchId);
+        const { synced, blocked } = await replayBallQueue(queue, {
+          record: recordBall, remove: removeQueuedBall, incrementAttempts,
+        });
+        if (blocked) toast.error("A delivery could not sync. It is saved on this device; retry after checking the match.");
+        if (synced > 0) {
+          toast.success(`Synced ${synced} offline ball${synced === 1 ? "" : "s"}`);
+          onSynced?.(synced);
         }
-        try {
-          await recordBall(item.payload);
-          await removeQueuedBall(item.clientOpId);
-          synced++;
-        } catch {
-          await incrementAttempts(item.clientOpId);
-          break; // likely still offline — stop and retry later
-        }
-      }
-
-      await refresh();
-      setSyncing(false);
-      if (synced > 0) {
-        toast.success(`Synced ${synced} offline ball${synced === 1 ? "" : "s"}`);
-        onSynced?.(synced);
+      } catch (error) {
+        console.error("Offline scoring queue unavailable:", error);
+        toast.error("Could not access saved deliveries. Your queue has not been cleared.");
+      } finally {
+        syncInFlight.current = false;
+        setSyncing(false);
+        await refresh();
       }
     },
-    [syncing, refresh, onSynced],
+    [matchId, refresh, onSynced],
   );
 
   useEffect(() => {

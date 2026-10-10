@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import * as Network from "expo-network";
 import Constants from "expo-constants";
 import { useOfflineStore } from "@/store/offline-store";
 import { Platform } from "react-native";
+import { isScoringAcknowledgement } from "@/lib/scoring-ack";
 
 function scoringServiceUrl(): string {
   return (
@@ -17,6 +18,7 @@ function scoringServiceUrl(): string {
  * Does not write via anon Supabase PostgREST — that path is RLS-denied and schema-mismatched.
  */
 export function useOfflineSync() {
+  const syncInFlight = useRef(false);
   const { isOnline, setOnline, getPendingBalls, markBallSynced, clearSyncedBalls } =
     useOfflineStore();
 
@@ -49,59 +51,53 @@ export function useOfflineSync() {
     if (!isOnline) return;
 
     const syncPendingBalls = async () => {
-      const pendingBalls = getPendingBalls();
-      const base = scoringServiceUrl();
+      if (syncInFlight.current) return;
+      syncInFlight.current = true;
+      try {
+        const pendingBalls = getPendingBalls();
+        const base = scoringServiceUrl();
 
-      for (const ball of pendingBalls) {
-        try {
-          if (!ball.inningsId || !ball.batsmanId || !ball.bowlerId) {
-            logSyncError(
-              new Error(
-                `Skipping ball ${ball.id}: missing inningsId/batsmanId/bowlerId for scoring-service`,
-              ),
-            );
-            continue;
+        for (const ball of pendingBalls) {
+          try {
+            if (!ball.inningsId || !ball.batsmanId || !ball.bowlerId) {
+              logSyncError(new Error(`Delivery ${ball.id} is missing required scoring identifiers`));
+              break;
+            }
+
+            let extras: { type: string; runs: number } | undefined;
+            if (ball.isWide) extras = { type: "wide", runs: Math.max(1, ball.runs) };
+            else if (ball.isNoBall) extras = { type: "noball", runs: Math.max(1, ball.runs) };
+            else if (ball.isBye) extras = { type: "bye", runs: ball.runs };
+            else if (ball.isLegBye) extras = { type: "legbye", runs: ball.runs };
+
+            const wicket = ball.isWicket && ball.wicketType
+              ? { type: ball.wicketType, playerId: ball.batsmanId } : undefined;
+            const res = await fetch(`${base}/scoring/ball`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                clientOpId: ball.id, matchId: ball.matchId, inningsId: ball.inningsId,
+                over: ball.over, ball: ball.ball, runs: ball.runs,
+                batsmanId: ball.batsmanId, bowlerId: ball.bowlerId, extras, wicket,
+              }),
+            });
+
+            const acknowledgement: unknown = res.ok ? await res.json() : null;
+            if (isScoringAcknowledgement(res.status, acknowledgement, ball.id)) {
+              markBallSynced(ball.id);
+            } else {
+              logSyncError(new Error(`Scoring acknowledgement rejected (HTTP ${res.status})`));
+              break;
+            }
+          } catch (error) {
+            logSyncError(error);
+            break;
           }
-
-          let extras: { type: string; runs: number } | undefined;
-          if (ball.isWide) extras = { type: "wide", runs: Math.max(1, ball.runs) };
-          else if (ball.isNoBall) extras = { type: "noball", runs: Math.max(1, ball.runs) };
-          else if (ball.isBye) extras = { type: "bye", runs: ball.runs };
-          else if (ball.isLegBye) extras = { type: "legbye", runs: ball.runs };
-
-          const wicket =
-            ball.isWicket && ball.wicketType
-              ? { type: ball.wicketType, playerId: ball.batsmanId }
-              : undefined;
-
-          const res = await fetch(`${base}/scoring/ball`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              matchId: ball.matchId,
-              inningsId: ball.inningsId,
-              over: ball.over,
-              ball: ball.ball,
-              runs: ball.runs,
-              batsmanId: ball.batsmanId,
-              bowlerId: ball.bowlerId,
-              extras,
-              wicket,
-            }),
-          });
-
-          if (res.ok || res.status === 400) {
-            // 400 often means duplicate ball already applied — treat as synced
-            markBallSynced(ball.id);
-          } else {
-            logSyncError(new Error(`HTTP ${res.status}`));
-          }
-        } catch (error) {
-          logSyncError(error);
         }
+        clearSyncedBalls();
+      } finally {
+        syncInFlight.current = false;
       }
-
-      clearSyncedBalls();
     };
 
     syncPendingBalls();

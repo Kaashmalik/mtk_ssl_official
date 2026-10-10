@@ -41,7 +41,7 @@ import {
 import { useScoringSocket } from "@/hooks/use-scoring-socket";
 import { CommentaryFeed } from "@/components/scoring/commentary-feed";
 import { LanguageSelector } from "@/components/scoring/language-selector";
-import { queueBall } from "@/lib/offline-ball-queue";
+import { queueBall, removeQueuedBall } from "@/lib/offline-ball-queue";
 import { resolveActionError } from "@/lib/plan-limit-error";
 import { useOfflineBallSync } from "@/hooks/use-offline-ball-sync";
 
@@ -118,7 +118,6 @@ function ScoringInterface() {
     innings2,
     superOver,
     isOnline,
-    undo,
     redo,
     addBall,
     resetInnings,
@@ -147,14 +146,32 @@ function ScoringInterface() {
   const [dbWriteFailed, setDbWriteFailed] = useState(false);
 
   // Offline ball queue: replays persisted balls once the connection returns.
-  const offlineSync = useOfflineBallSync();
+  const offlineSync = useOfflineBallSync(matchId);
+  const syncSavedBalls = useCallback(() => offlineSync.sync(async (input) => {
+    const acknowledgement = await recordBallAction(input as RecordBallInput);
+    setDbWriteFailed(false);
+    const state = useScoringStore.getState();
+    for (const innings of [state.innings1, state.innings2, state.superOver]) {
+      if (!innings) continue;
+      const localBall = innings.balls.find((ball) =>
+        ball.clientOpId === acknowledgement.clientOpId ||
+        `${state.matchId}:${innings.inningsId}:${ball.id}` === acknowledgement.clientOpId);
+      if (localBall && acknowledgement.clientOpId) {
+        state.acknowledgeBall(localBall.id, acknowledgement.ballId, acknowledgement.clientOpId);
+      }
+    }
+    return acknowledgement;
+  }), [offlineSync.sync]);
 
   useEffect(() => {
-    if (!offlineSync.syncing) return;
-    // Replay via the same authenticated server action used for live scoring.
-    void offlineSync.sync((input) => recordBallAction(input as never));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offlineSync.syncing]);
+    if (isOnline && offlineSync.pending > 0) void syncSavedBalls();
+  }, [isOnline, offlineSync.pending, syncSavedBalls]);
+
+  useEffect(() => {
+    const onOnline = () => { void syncSavedBalls(); };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [syncSavedBalls]);
 
   // ─── Load match data from DB ───────────────────────────────
   useEffect(() => {
@@ -175,11 +192,10 @@ function ScoringInterface() {
 
         setMatchData(matchResult as MatchData);
         setPlayersData(playersResult as PlayersData);
-        setMatchId(matchId);
-
         // Hydrate the Zustand store from DB data
         const state = useScoringStore.getState();
         const isNewMatch = state.matchId !== matchId;
+        setMatchId(matchId);
         const mr = matchResult as MatchData;
 
         if (isNewMatch || !state.innings1) {
@@ -325,6 +341,7 @@ function ScoringInterface() {
     const ballInput: RecordBallInput = {
       matchId: state.matchId,
       inningsId,
+      clientOpId: lastBall.clientOpId ?? `${state.matchId}:${inningsId}:${lastBall.id}`,
       overNumber: lastBall.overNumber,
       ballNumber: lastBall.ballNumber,
       runs: lastBall.runs,
@@ -340,6 +357,20 @@ function ScoringInterface() {
       isSix: lastBall.isSix ?? false,
     };
 
+    // Save the operation before the first request. A reload or lost response
+    // can then replay the same ID without losing or double-applying a ball.
+    try {
+      await queueBall({
+        clientOpId: ballInput.clientOpId,
+        matchId: state.matchId, inningsId, payload: { ...ballInput },
+      });
+    } catch (error) {
+      console.error("Could not save delivery before submission:", error);
+      setDbWriteFailed(true);
+      toast.error("Could not save this delivery on your device. Keep this page open and check device storage.");
+      return;
+    }
+
     // Retry with exponential backoff (3 attempts)
     const MAX_RETRIES = 3;
     let attempt = 0;
@@ -347,7 +378,10 @@ function ScoringInterface() {
 
     while (attempt < MAX_RETRIES) {
       try {
-        await recordBallAction(ballInput);
+        const acknowledgement = await recordBallAction(ballInput);
+        useScoringStore.getState().acknowledgeBall(lastBall.id, acknowledgement.ballId, ballInput.clientOpId);
+        await removeQueuedBall(ballInput.clientOpId);
+        await refreshOfflineQueue();
         setDbWriteFailed(false);
         return; // Success
       } catch (err) {
@@ -360,26 +394,13 @@ function ScoringInterface() {
       }
     }
 
-// All retries failed -> persist to the offline queue and replay later.
+    // All retries failed. The operation was queued before the first attempt.
     console.error("Failed to persist ball to DB after retries:", lastError);
-    try {
-      await queueBall({
-        clientOpId: `${state.matchId}:${inningsId}:${lastBall.id}`,
-        matchId: state.matchId,
-        inningsId,
-        payload: { ...ballInput, clientOpId: `${state.matchId}:${inningsId}:${lastBall.id}` },
-      });
-      await refreshOfflineQueue();
-      toast.warning("You're offline — this ball is saved on this device and will sync automatically.", {
-        duration: 6000,
-      });
-    } catch (queueErr) {
-      console.error("Failed to queue ball offline:", queueErr);
-    }
-    setDbWriteFailed(true);
-    toast.error("Failed to save ball to the database after several attempts. Your scoring is kept on this device only and is NOT synced — please re-enter the ball once the connection is stable.", {
+    await refreshOfflineQueue();
+    toast.warning("This delivery is saved on this device and is waiting for confirmation. Retry sync when the match is available.", {
       duration: 6000,
     });
+    setDbWriteFailed(true);
   }, [matchData, refreshOfflineQueue]);
 
   // ─── Handle Undo with DB persistence ───────────────────────
@@ -391,21 +412,32 @@ function ScoringInterface() {
 
     if (currentInningsState && currentInningsState.balls.length > 0) {
       const lastBall = currentInningsState.balls[currentInningsState.balls.length - 1];
-      undo();
-
-      // Undo in DB
-      if (lastBall && !lastBall.id.startsWith("ball-")) {
+      if (lastBall.id.startsWith("ball-")) {
+        toast.error("Sync this delivery before undoing it so the score stays consistent.");
+        return;
+      }
+      // Apply local undo only after the canonical service accepts it.
+      if (lastBall) {
         startTransition(async () => {
+          let confirmed = false;
           try {
             await undoBallAction(state.matchId, lastBall.id);
+            confirmed = true;
+            if (lastBall.clientOpId) await removeQueuedBall(lastBall.clientOpId);
+            const snapshot = await getMatchForScoring(state.matchId);
+            const innings = snapshot.innings.find((value) => value.id === currentInningsState.inningsId);
+            if (!innings) throw new Error("Updated innings snapshot unavailable");
+            useScoringStore.getState().applyConfirmedUndo(lastBall.id, innings);
           } catch (err) {
             console.error("Failed to undo ball in DB:", err);
-            toast.error("Failed to undo ball in database. The local undo is preserved.");
+            toast.error(confirmed
+              ? "Undo was accepted, but the updated score could not load. Refresh this match."
+              : "Undo was not confirmed. The displayed score has not been changed.");
           }
         });
       }
     }
-  }, [undo]);
+  }, []);
 
   // ─── Voice Command ─────────────────────────────────────────
   const handleVoiceCommand = useCallback(async (input: BallInput) => {
@@ -416,7 +448,7 @@ function ScoringInterface() {
       overNumber,
       ballNumber,
       input,
-      runs: typeof input === "number" ? input : input === "WD" || input === "NB" ? 1 : 0,
+      runs: typeof input === "number" ? input : input === "W" ? 0 : 1,
       isWicket: input === "W",
       isWide: input === "WD",
       isNoBall: input === "NB",
@@ -512,6 +544,7 @@ function ScoringInterface() {
           <div className="flex gap-1.5 shrink-0">
             <Button
               onClick={handleUndo}
+              disabled={isPending || offlineSync.syncing}
               variant="outline"
               size="sm"
               className="touch-manipulation min-h-11 min-w-11 px-3 sm:px-3"
@@ -522,6 +555,8 @@ function ScoringInterface() {
             </Button>
             <Button
               onClick={redo}
+              disabled
+              title="Redo requires a new server-confirmed delivery; local-only redo is unavailable"
               variant="outline"
               size="sm"
               className="touch-manipulation min-h-11 min-w-11 px-3 sm:px-3 hidden sm:inline-flex"
@@ -533,6 +568,16 @@ function ScoringInterface() {
           </div>
         </div>
       </div>
+
+      {offlineSync.pending > 0 && (
+        <Card className="p-3 flex flex-wrap items-center justify-between gap-3" role="status">
+          <p className="text-sm">{offlineSync.pending} saved deliveries waiting to sync</p>
+          <Button size="sm" variant="outline" disabled={!isOnline || offlineSync.syncing}
+            onClick={() => { void syncSavedBalls(); }}>
+            {offlineSync.syncing ? "Syncing..." : "Retry sync"}
+          </Button>
+        </Card>
+      )}
 
       {/* Desktop-only extras row */}
       <div className="hidden sm:flex flex-wrap gap-2">
@@ -683,6 +728,7 @@ function ScoringInterface() {
               </div>
             </div>
             <BallInputComponent
+              disabled={isPending || offlineSync.syncing || currentInningsData?.status === "completed"}
               batsmanId={selectedBatsman}
               bowlerId={selectedBowler}
               onBallAdded={persistBallToDB}

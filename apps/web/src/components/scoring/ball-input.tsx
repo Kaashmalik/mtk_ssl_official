@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@mtk/ui";
 import { BallInput, WicketType, useScoringStore } from "@/stores/scoring-store";
 import { WicketSelector } from "./wicket-selector";
+import { toast } from "sonner";
 
 const BALL_OPTIONS: { value: BallInput; label: string; color: string }[] = [
   { value: 0, label: "0", color: "bg-gray-700 hover:bg-gray-600" },
@@ -22,10 +23,13 @@ const BALL_OPTIONS: { value: BallInput; label: string; color: string }[] = [
 interface BallInputProps {
   batsmanId?: string;
   bowlerId?: string;
-  onBallAdded?: () => void;
+  onBallAdded?: () => void | Promise<void>;
+  disabled?: boolean;
 }
 
-export function BallInputComponent({ batsmanId, bowlerId, onBallAdded }: BallInputProps) {
+export function BallInputComponent({ batsmanId, bowlerId, onBallAdded, disabled = false }: BallInputProps) {
+  const submitting = useRef(false);
+  const [saving, setSaving] = useState(false);
   const [showWicketSelector, setShowWicketSelector] = useState(false);
   const [pendingWicket, setPendingWicket] = useState<BallInput | null>(null);
   const addBall = useScoringStore((state) => state.addBall);
@@ -45,29 +49,37 @@ export function BallInputComponent({ batsmanId, bowlerId, onBallAdded }: BallInp
   };
 
   const submitBall = async (input: BallInput, wicketType?: WicketType, runs?: number) => {
-    if (!currentInnings) return;
+    if (!currentInnings || disabled || submitting.current) return;
+    submitting.current = true;
+    setSaving(true);
+    try {
+      const overNumber = currentInnings.currentBall === 6 ? currentInnings.currentOver + 1 : currentInnings.currentOver;
+      const ballNumber = currentInnings.currentBall === 6 ? 1 : currentInnings.currentBall + 1;
 
-    const overNumber = currentInnings.currentBall === 6 ? currentInnings.currentOver + 1 : currentInnings.currentOver;
-    const ballNumber = currentInnings.currentBall === 6 ? 1 : currentInnings.currentBall + 1;
+      await addBall({
+        overNumber,
+        ballNumber,
+        input,
+        runs: runs ?? (typeof input === "number" ? input : input === "W" ? 0 : 1),
+        isWicket: input === "W" || !!wicketType,
+        wicketType,
+        isWide: input === "WD",
+        isNoBall: input === "NB",
+        isBye: input === "B",
+        isLegBye: input === "LB",
+        batsmanId,
+        bowlerId,
+      });
 
-    await addBall({
-      overNumber,
-      ballNumber,
-      input,
-      runs: runs ?? (typeof input === "number" ? input : input === "WD" || input === "NB" ? 1 : 0),
-      isWicket: input === "W" || !!wicketType,
-      wicketType,
-      isWide: input === "WD",
-      isNoBall: input === "NB",
-      isBye: input === "B",
-      isLegBye: input === "LB",
-      batsmanId,
-      bowlerId,
-    });
-
-    setShowWicketSelector(false);
-    setPendingWicket(null);
-    onBallAdded?.();
+      setShowWicketSelector(false);
+      setPendingWicket(null);
+      await onBallAdded?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not record this delivery");
+    } finally {
+      submitting.current = false;
+      setSaving(false);
+    }
   };
 
   const handleWicketSelect = async (wicketType: WicketType) => {
@@ -83,6 +95,7 @@ export function BallInputComponent({ batsmanId, bowlerId, onBallAdded }: BallInp
           <Button
             key={option.value}
             onClick={() => handleBallClick(option.value)}
+            disabled={disabled || saving || !batsmanId || !bowlerId}
             aria-label={`Record ${option.label}`}
             className={`${option.color} text-white text-xl sm:text-xl font-bold min-h-14 sm:min-h-0 py-5 sm:py-6 touch-manipulation active:scale-95 transition-all rounded-xl`}
             size="lg"

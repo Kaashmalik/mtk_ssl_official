@@ -4,11 +4,12 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db } from "@mtk/database"
 import {
-  matches, matchInnings, matchBalls, players, teams,
+  matches, matchInnings, matchBalls, players, teams, tenants,
 } from "@mtk/database"
 import { eq, and, desc, asc } from "drizzle-orm"
 import { z } from "zod"
-import { getMyTenant } from "@/app/actions/tenants"
+import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
+import { resolveActiveTenantId } from "@/lib/rbac-server"
 import { withAuth } from "./action-guard"
 import {
   proxyRecordBall,
@@ -22,6 +23,7 @@ import {
 const recordBallSchema = z.object({
   matchId: z.string().uuid(),
   inningsId: z.string().uuid(),
+  clientOpId: z.string().trim().min(1).max(200),
   overNumber: z.number().int().min(0),
   ballNumber: z.number().int().min(1).max(6),
   runs: z.number().int().min(0).max(7),
@@ -50,7 +52,9 @@ const createInningsSchema = z.object({
 export type CreateInningsInput = z.infer<typeof createInningsSchema>
 
 async function requireTenant() {
-  const tenant = await getMyTenant()
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
   if (!tenant) throw new Error("Tenant not found")
   return tenant
 }
@@ -74,22 +78,17 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
     .limit(1)
 
   if (!match) throw new Error("Match not found")
-  if (match.status === "completed" || match.status === "abandoned" || match.status === "cancelled") {
-    throw new Error(`Match is already ${match.status}`)
-  }
-
   const [innings] = await db.select().from(matchInnings)
-    .where(and(eq(matchInnings.id, validated.inningsId), eq(matchInnings.matchId, validated.matchId)))
+    .where(and(eq(matchInnings.id, validated.inningsId), eq(matchInnings.matchId, validated.matchId),
+      eq(matchInnings.tenantId, tenant.id)))
     .limit(1)
 
   if (!innings) throw new Error("Innings not found")
-  if (innings.status === "completed") throw new Error("Innings is already completed")
+  // Lifecycle and replay decisions belong to the canonical service: a retry
+  // may legitimately acknowledge a delivery accepted before completion.
 
-  let extras: { type: "wide" | "noball" | "bye" | "legbye"; runs: number } | undefined
-  if (validated.isWide) extras = { type: "wide", runs: Math.max(1, validated.runs) }
-  else if (validated.isNoBall) extras = { type: "noball", runs: Math.max(1, validated.runs) }
-  else if (validated.isBye) extras = { type: "bye", runs: validated.runs }
-  else if (validated.isLegBye) extras = { type: "legbye", runs: validated.runs }
+  const delivery = scorerRunsToDelivery(validated)
+  if (validated.isWicket && !validated.wicketType) throw new Error("Select a dismissal type")
 
   const wicket = validated.isWicket && validated.wicketType
     ? { type: validated.wicketType, playerId: validated.batsmanId }
@@ -98,14 +97,19 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
   const result = await proxyRecordBall({
     matchId: validated.matchId,
     inningsId: validated.inningsId,
+    clientOpId: validated.clientOpId,
     over: validated.overNumber,
     ball: validated.ballNumber,
-    runs: validated.runs,
+    runs: delivery.runs,
     batsmanId: validated.batsmanId,
     bowlerId: validated.bowlerId,
-    extras,
+    extras: delivery.extras,
     wicket,
   }, tenant.id)
+
+  if (validated.clientOpId && result.clientOpId !== validated.clientOpId) {
+    throw new Error("Scoring service did not acknowledge this operation ID")
+  }
 
   revalidatePath(`/matches/${validated.matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${validated.matchId}`)
@@ -114,6 +118,8 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
   return {
     success: true,
     ballId: result.ballId,
+    clientOpId: validated.clientOpId ?? null,
+    replayed: result.replayed ?? false,
     scorecard: {
       matchId: validated.matchId,
       inningsId: validated.inningsId,

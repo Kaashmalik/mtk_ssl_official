@@ -1,11 +1,13 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { calculateDeliveryDelta, scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery";
 
 export type BallInput = 0 | 1 | 2 | 3 | 4 | 6 | "W" | "WD" | "NB" | "LB" | "B";
 export type WicketType = "bowled" | "caught" | "lbw" | "run_out" | "stumped" | "hit_wicket";
 
 export interface BallData {
   id: string;
+  clientOpId?: string;
   overNumber: number;
   ballNumber: number;
   input: BallInput;
@@ -42,6 +44,10 @@ export interface InningsState {
   balls: BallData[];
 }
 
+export type InningsAccounting = Pick<InningsState,
+  "totalRuns" | "totalWickets" | "totalBalls" | "extras" | "byes" |
+  "legByes" | "wides" | "noBalls" | "status">
+
 interface InningsHistory {
   history: InningsState[];
   historyIndex: number;
@@ -65,6 +71,8 @@ export interface ScoringState {
   setOnline: (online: boolean) => void;
   resetInnings: (innings: 1 | 2 | "super_over") => void;
   setMatchId: (matchId: string) => void;
+  acknowledgeBall: (localId: string, serverId: string, clientOpId: string) => void;
+  applyConfirmedUndo: (ballId: string, accounting: InningsAccounting) => void;
 }
 
 const calculateRuns = (input: BallInput): number => {
@@ -128,6 +136,39 @@ export const useScoringStore = create<ScoringState>()(
 
       setMatchId: (matchId: string) => set({ matchId }),
 
+      acknowledgeBall: (localId, serverId, clientOpId) => set((state) => {
+        const acknowledge = (innings: InningsState | null): InningsState | null => innings && ({
+          ...innings,
+          balls: innings.balls.map((ball) => ball.id === localId
+            ? { ...ball, id: serverId, clientOpId } : ball),
+        });
+        const history = (value: InningsHistory): InningsHistory => ({
+          ...value, history: value.history.map((innings) => acknowledge(innings)!),
+        });
+        return {
+          innings1: acknowledge(state.innings1), innings2: acknowledge(state.innings2),
+          superOver: acknowledge(state.superOver),
+          innings1History: history(state.innings1History),
+          innings2History: history(state.innings2History), superOverHistory: history(state.superOverHistory),
+        };
+      }),
+
+      applyConfirmedUndo: (ballId, accounting) => set((state) => {
+        const update: Partial<ScoringState> = {};
+        for (const [inningsKey, historyKey] of [
+          ["innings1", "innings1History"], ["innings2", "innings2History"], ["superOver", "superOverHistory"],
+        ] as const) {
+          const innings = state[inningsKey];
+          if (!innings?.balls.some((ball) => ball.id === ballId)) continue;
+          update[inningsKey] = {
+            ...innings, ...accounting, balls: innings.balls.filter((ball) => ball.id !== ballId),
+            currentOver: Math.floor(accounting.totalBalls / 6), currentBall: accounting.totalBalls % 6,
+          };
+          update[historyKey] = createEmptyHistory();
+        }
+        return update;
+      }),
+
       addBall: (ballData) => {
         const state = get();
         const inningsKey = getInningsKey(state.currentInnings) as
@@ -144,18 +185,15 @@ export const useScoringStore = create<ScoringState>()(
           timestamp: Date.now(),
           ...calculateBallData(ballData.input, ballData.wicketType, ballData.runs),
         };
+        const delta = calculateDeliveryDelta(scorerRunsToDelivery(ball));
+        ball.isFour = delta.isFour;
+        ball.isSix = delta.isSix;
 
-        // Incremental over/ball computation (O(1))
-        const newOver = ball.isWide || ball.isNoBall
-          ? currentInnings.currentOver
-          : currentInnings.currentBall === 6
-            ? currentInnings.currentOver + 1
-            : currentInnings.currentOver;
-        const newBall = ball.isWide || ball.isNoBall
-          ? currentInnings.currentBall
-          : currentInnings.currentBall === 6
-            ? 1
-            : currentInnings.currentBall + 1;
+        // Cricket display is derived from legal balls: six deliveries is 1.0,
+        // never 0.6. Extras do not advance the next delivery coordinates.
+        const totalBalls = currentInnings.totalBalls + delta.legalBalls;
+        const newOver = Math.floor(totalBalls / 6);
+        const newBall = totalBalls % 6;
 
         // Incremental state update (O(1) for aggregates, O(n) for array copy only)
         const newBalls = [...currentInnings.balls, ball];
@@ -163,12 +201,12 @@ export const useScoringStore = create<ScoringState>()(
           ...currentInnings,
           totalRuns: currentInnings.totalRuns + ball.runs,
           totalWickets: currentInnings.totalWickets + (ball.isWicket ? 1 : 0),
-          totalBalls: currentInnings.totalBalls + (!ball.isWide && !ball.isNoBall ? 1 : 0),
-          extras: currentInnings.extras + (ball.isWide || ball.isNoBall ? ball.runs : 0),
-          byes: currentInnings.byes + (ball.isBye ? ball.runs : 0),
-          legByes: currentInnings.legByes + (ball.isLegBye ? ball.runs : 0),
-          wides: currentInnings.wides + (ball.isWide ? 1 : 0),
-          noBalls: currentInnings.noBalls + (ball.isNoBall ? 1 : 0),
+          totalBalls,
+          extras: currentInnings.extras + delta.extras,
+          byes: currentInnings.byes + delta.byes,
+          legByes: currentInnings.legByes + delta.legByes,
+          wides: currentInnings.wides + delta.wides,
+          noBalls: currentInnings.noBalls + delta.noBalls,
           currentOver: newOver,
           currentBall: newBall,
           status: "in_progress",

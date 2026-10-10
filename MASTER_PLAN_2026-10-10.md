@@ -378,13 +378,13 @@ remaining limitations, not planned results.
   for this batch is tests and review, not a build.
 - **Not verified:** browser/E2E, real authenticated tenant journeys, remote schema,
   and deployed services. Unit tests mock external auth/database calls.
-- **Remote delivery:** this batch is prepared for a reviewed commit and normal
-  push; use repository history and remote branch status to verify delivery.
+- **Remote delivery:** pushed to `main` as `73c7ac0`; remote SHA was verified and
+  the working tree was clean at the end of the batch.
 
 #### Next work
 
-- [ ] Fix scoring P0 run components, extras/undo consistency, delivery sequencing,
-  operation IDs, concurrency, and authenticated replay/rejection retention.
+- [ ] Finish remaining scoring P0 integration work: authenticated mobile replay,
+  mixed-extras rules, legacy-score review, and real concurrency/network verification.
 - [ ] Complete **TENANT-01** across remaining product operations.
 - [ ] Complete **TOUR-02** configuration persistence and round-trip loading.
 - [ ] Verify live snapshot initialization and scorer assignments.
@@ -392,6 +392,89 @@ remaining limitations, not planned results.
 - [ ] Continue the responsive design, white-label, billing, and launch phases.
 
 Commit/push results must be reported separately if remote delivery is blocked.
+
+### 2026-10-10 — Batch 2: delivery accounting, exact undo, and replay retention
+
+#### Completed implementation
+
+- [x] **SCORE-01 (web/service supported modes):** add a pure shared delivery-run
+  contract. Convert UI total runs into disjoint batter/extras components; include
+  byes/leg-byes in total extras; report wide/no-ball runs in extras breakdowns;
+  recognize bat boundaries on no-balls.
+- [x] **SCORE-02:** remove coordinate-based deduplication. Assign delivery sequences
+  while holding a tenant-filtered match row lock, allowing repeated wides/no-balls
+  and the next legal delivery at the same display position.
+- [x] **SCORE-03:** require stable operation IDs on new delivery commands; persist
+  fingerprints/IDs in immutable v2 events; acknowledge identical retries without
+  another write/publication. Reject changed commands and replay of undone balls.
+- [x] **SCORE-06 (v2 events):** persist exact run deltas and ball/event associations;
+  reverse those deltas on undo; reconcile scorecard projections in the transaction.
+  Reject corrupt accounting and ambiguous legacy extras instead of guessing.
+- [x] Serialize delivery, undo, and innings-completion writes with the same match
+  lock ordering. Validate command input, lifecycle, and expected legal-ball position.
+- [x] Invalidate Redis state after transaction commit, not inside the transaction.
+- [x] **SCORE-05:** mobile clears only successful matching operation acknowledgements;
+  generic HTTP 400 and other failures retain deliveries and stop ordered replay.
+- [x] Remove web retry-limit deletion; scope replay to the current match, prevent
+  overlapping sync workers, retain failures, and provide pending-count/retry controls.
+- [x] Queue web operations before the first request, preserve their ID across retries,
+  and map confirmed database IDs back into local score/history snapshots.
+- [x] Make local extras/over notation match server accounting (`6` legal balls = `1.0`).
+- [x] Wait for server-confirmed undo and reload authoritative innings accounting;
+  do not depend on local undo history after a reload. Disable local-only redo.
+- [x] Resolve scoring reads/writes from the active tenant rather than a different
+  primary membership. Platform-wide context consolidation is still pending.
+- [x] Add regression coverage for run splits, exact reversal, repeated illegal
+  deliveries, operation-ID conflicts, replay-after-undo, corrupted deltas,
+  acknowledgement retention, local accounting, and reload-safe undo.
+
+#### Test-only verification
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/database test` | PASS — 56 tests / 3 files |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand` | PASS — 42 tests / 4 suites |
+| `corepack pnpm --filter @mtk/web test` | PASS — 109 tests / 13 files |
+
+**207 tests pass across the affected workspaces, including 52 new tests in this
+batch.** No build, lint, or standalone type-check command was run in this batch,
+following the user's test-only instruction. Jest exercises the scoring service
+and workspace source; Vitest exercises shared accounting, actions, store, and
+replay helpers. External auth/database/Redis/Kafka are mocked. Real PostgreSQL
+concurrency/trigger behavior, browser rendering, IndexedDB interruption, and
+authenticated device journeys still require staging/E2E verification.
+
+#### Contract and rollout notes
+
+- Uses the existing event JSON and `ball_sequence`/`client_op_id` columns; no
+  migration or remote-database change was performed. Migration 023 and the
+  existing scoring-event/projection tables must already be present.
+- Update the web app and canonical scoring service together. New writes require
+  a nonempty operation ID. Deployments rebuild workspace packages through their
+  normal pipeline; this session only ran tests against source.
+- New ball rows hold total delivery runs; v2 events retain the batter/extras
+  breakdown and innings/projection extras categories hold run totals. Historical
+  rows/events and old category counts are not retroactively changed.
+- Automatic undo of legacy extras is deliberately blocked because old rows do
+  not retain an unambiguous delta; a reviewed correction workflow is still needed.
+- Mixed no-ball/byes/leg-byes, penalties, free-hit/dismissal rules, and comprehensive
+  strike/playing-XI rules are follow-up cricket-engine work.
+- Mobile acknowledgement retention is fixed, but **SCORE-04 remains open**:
+  authenticated mobile API/BFF integration and mobile run-contract normalization
+  must be completed before claiming working end-to-end mobile synchronization.
+- Durable event outbox, multi-tab/device coordination, assigned-scorer enforcement,
+  and complete live-state snapshot/broadcast remain separate follow-ups.
+
+This batch is prepared for a reviewed commit and normal push. Verify delivery via
+repository history/remote status; report any push blocker explicitly.
+
+#### Next implementation batch
+
+- [ ] Complete authenticated mobile scoring/replay and shared run normalization.
+- [ ] Enforce scorer-to-match assignment and validate player/team eligibility.
+- [ ] Initialize and reconcile the full live snapshot on fresh visits/reconnect.
+- [ ] Add real two-tenant PostgreSQL and network-interruption E2E scenarios.
+- [ ] Implement mixed extras, complete wicket rules, and audited legacy corrections.
 
 ### Definition of done for each batch
 

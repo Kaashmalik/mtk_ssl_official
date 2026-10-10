@@ -40,6 +40,7 @@ class RecordBallDto {
   wicket?: { type: string; playerId: string; fielderId?: string };
   batsmanId: string;
   bowlerId: string;
+  clientOpId: string;
 }
 
 class CreateInningsDto {
@@ -84,13 +85,7 @@ export class ScoringController {
   @Throttle({ default: { limit: 120, ttl: 60000 } }) // 120 ball records per minute (generous for rapid scoring)
   @HttpCode(HttpStatus.CREATED)
   async recordBall(@Req() req: Request, @Body() dto: RecordBallDto) {
-    if (dto.over < 0 || dto.ball < 1 || dto.ball > 6) {
-      throw new BadRequestException('Invalid over or ball number');
-    }
-    if (dto.runs < 0 || dto.runs > 6) {
-      throw new BadRequestException('Runs must be between 0 and 6');
-    }
-
+    // The canonical service validates the full command for every entry point.
     return this.scoringService.recordBall(tenantIdOf(req), {
       ...dto,
       timestamp: new Date(),
