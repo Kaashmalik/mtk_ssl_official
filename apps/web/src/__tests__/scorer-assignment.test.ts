@@ -37,8 +37,10 @@ describe("Tenant-safe scorer assignment", () => {
     expect(mocks.context).toHaveBeenCalledWith({ userId: "clerk", tenantId: TENANT }, expect.any(Function))
     const dialect = new PgDialect()
     const candidate = dialect.sqlToQuery(mocks.where.mock.calls[0][0])
-    expect(candidate.params).toEqual([SCORER, TENANT, TENANT, TENANT])
-    expect(candidate.sql).toContain("NOT EXISTS")
+    expect(candidate.params).toEqual([SCORER, TENANT])
+    expect(candidate.sql).toContain('"status" = \'active\'')
+    expect(candidate.sql).toContain('"users"."is_active" = true')
+    expect(candidate.sql).not.toContain("NOT EXISTS")
     expect(dialect.sqlToQuery(mocks.updateWhere.mock.calls[0][0]).params).toEqual([MATCH, TENANT])
   })
   it("rejects a scorer who does not belong to the tenant before updating", async () => {
@@ -58,7 +60,7 @@ describe("Tenant-safe scorer assignment", () => {
   it("lists scorers using the same tenant membership contract as assignment", async () => {
     mocks.where.mockResolvedValue([])
     await getScorersForTenant()
-    expect(mocks.permission).toHaveBeenCalledWith("match:read", TENANT)
-    expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0][0]).params).toEqual([TENANT, TENANT, TENANT])
+    expect(mocks.permission).toHaveBeenCalledWith("match:update", TENANT)
+    expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0][0]).params).toEqual([TENANT])
   })
 })

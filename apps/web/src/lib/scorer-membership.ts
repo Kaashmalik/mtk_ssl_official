@@ -1,16 +1,13 @@
 import { users, userTenantRoles } from "@mtk/database"
 import { sql } from "drizzle-orm"
 
-/** Junction roles take precedence; legacy membership is only a fallback. */
+/** Only an explicit active league membership can be assigned as scorer. */
 export function scorerMembership(tenantId: string) {
   return sql`(
-    EXISTS (SELECT 1 FROM ${userTenantRoles}
+    ${users.isActive} = true AND EXISTS (SELECT 1 FROM ${userTenantRoles}
       WHERE ${userTenantRoles.userId} = ${users.id}
         AND ${userTenantRoles.tenantId} = ${tenantId}
-        AND ${userTenantRoles.role} = 'scorer')
-    OR (NOT EXISTS (SELECT 1 FROM ${userTenantRoles}
-      WHERE ${userTenantRoles.userId} = ${users.id}
-        AND ${userTenantRoles.tenantId} = ${tenantId})
-      AND ${users.role} = 'scorer' AND ${tenantId} = ANY(${users.tenantIds}))
+        AND ${userTenantRoles.role} = 'scorer'
+        AND ${userTenantRoles.status} = 'active')
   )`
 }

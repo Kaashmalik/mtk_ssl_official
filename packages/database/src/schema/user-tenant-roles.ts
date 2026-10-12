@@ -1,4 +1,4 @@
-import { pgTable, uuid, boolean, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, boolean, timestamp, uniqueIndex, index, text, integer, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { users, userRoleEnum } from "./users";
 import { tenants } from "./tenants";
@@ -23,6 +23,10 @@ export const userTenantRoles = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     role: userRoleEnum("role").notNull().default("fan"),
+    /** League-only access; never mirrors or changes users.isActive. */
+    status: text("status").$type<"active" | "suspended">().notNull().default("active"),
+    /** Incremented by the database trigger on every update, including invites. */
+    version: integer("version").notNull().default(0),
     /** True if this is the user's primary/default tenant */
     isPrimary: boolean("is_primary").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -39,6 +43,8 @@ export const userTenantRoles = pgTable(
     ),
     // Tenant-wide lookups filter on tenant_id alone.
     tenantIdx: index("idx_user_tenant_roles_tenant_id").on(table.tenantId),
+    statusCheck: check("user_tenant_roles_status_check", sql`${table.status} IN ('active', 'suspended')`),
+    versionCheck: check("user_tenant_roles_version_check", sql`${table.version} >= 0`),
   }),
 );
 

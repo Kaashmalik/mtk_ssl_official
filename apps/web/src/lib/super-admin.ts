@@ -10,16 +10,15 @@ export async function isSuperAdmin(): Promise<boolean> {
   
   try {
     const [dbUser] = await db
-      .select({ role: users.role })
+      .select({ role: users.role, isActive: users.isActive })
       .from(users)
       .where(eq(users.clerkId, user.id))
       .limit(1)
 
-    if (dbUser?.role === "super_admin") {
-      return true
-    }
+    if (dbUser) return dbUser.isActive === true && dbUser.role === "super_admin"
   } catch (error) {
     console.error("isSuperAdmin DB check error:", error)
+    return false
   }
 
   if (email && process.env.NODE_ENV !== "production") {

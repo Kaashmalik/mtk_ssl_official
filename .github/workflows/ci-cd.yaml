@@ -265,7 +265,10 @@ jobs:
     name: Deploy to VPS
     runs-on: ubuntu-latest
     needs: [docker, e2e]
-    if: github.ref == 'refs/heads/main'
+    # Batch 7 requires a reviewed Supabase migration and coordinated web/scoring
+    # release. Default OFF: a code push must not deploy against the old schema.
+    # Enable only after the rollout gates in supabase/MIGRATION_STATUS.md pass.
+    if: github.ref == 'refs/heads/main' && vars.LEAGUE_MEMBERSHIP_CONTROLS_READY == 'true'
     environment: production
     steps:
       - name: Checkout

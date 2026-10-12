@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { db, users, userTenantRoles, teams, players } from '@mtk/database';
+import { db, users, userTenantRoles, tenants, teams, players } from '@mtk/database';
 import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
 
@@ -13,24 +13,29 @@ export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId
   if (!z.string().uuid().safeParse(actorId).success || match.tenantId !== tenantId) {
     throw new ForbiddenException('Invalid scoring actor context');
   }
-  // FOR UPDATE also blocks the FK key-share lock of a first junction insert:
-  // legacy fallback cannot race insertion of a lower-privilege tenant role.
+  // Member commands lock users before memberships as well; revocation is
+  // serialized against this write without locking unrelated match rows.
   await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${actorId} FOR UPDATE`);
   const actor = await tx.query.users.findFirst({ where: eq(users.id, actorId) });
   if (!actor || actor.id !== actorId || actor.isActive !== true) {
     throw new ForbiddenException('Scoring account is unavailable or inactive');
+  }
+  await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR SHARE`);
+  const tenant = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+  if (!tenant || tenant.id !== tenantId || tenant.isActive !== true) {
+    throw new ForbiddenException('Scoring league is unavailable or inactive');
   }
   await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
     WHERE ${userTenantRoles.userId} = ${actorId} AND ${userTenantRoles.tenantId} = ${tenantId} FOR SHARE`);
   const membership = await tx.query.userTenantRoles.findFirst({ where: and(
     eq(userTenantRoles.userId, actorId), eq(userTenantRoles.tenantId, tenantId),
   ) });
-  // Missing row permits the existing migration-era fallback. Query errors do not.
-  if (membership && (membership.userId !== actorId || membership.tenantId !== tenantId)) {
+  if (!membership || membership.userId !== actorId || membership.tenantId !== tenantId
+    || membership.status !== 'active') {
     throw new ForbiddenException('Invalid scoring membership');
   }
-  const role = membership ? membership.role : (actor.tenantIds.includes(tenantId) ? actor.role : null);
-  if (role === 'league_owner' || role === 'super_admin') return;
+  const role = membership.role;
+  if (role === 'league_owner') return;
   if (role !== 'scorer' || match.scorerId !== actorId) {
     throw new ForbiddenException('You are not authorized to score this match');
   }

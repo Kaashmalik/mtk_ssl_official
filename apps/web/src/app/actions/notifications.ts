@@ -60,7 +60,7 @@ async function requireTenantContext(): Promise<{
  */
 function myNotificationFilter(user: CurrentUser, tenantId: string) {
   return or(
-    eq(notifications.userId, user.id),
+    and(eq(notifications.userId, user.id), eq(notifications.tenantId, tenantId)),
     and(isNull(notifications.userId), eq(notifications.tenantId, tenantId)),
   )
 }

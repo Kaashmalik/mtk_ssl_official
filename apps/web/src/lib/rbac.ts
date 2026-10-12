@@ -86,7 +86,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "match:create", "match:read", "match:update", "match:delete", "match:score",
     "scorecard:create", "scorecard:read", "scorecard:update",
     "stats:read", "stats:manage",
-    "user:read", "user:invite", "invite:accept",
+    "user:manage", "user:read", "user:invite", "invite:accept",
     "fan:follow", "fan:read",
     "registration:create", "registration:manage",
     "settings:manage",

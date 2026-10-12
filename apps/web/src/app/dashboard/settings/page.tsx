@@ -13,7 +13,7 @@ import { eq } from "drizzle-orm"
 import { unstable_noStore as noStore } from "next/cache"
 import { Settings, CreditCard } from "lucide-react"
 import { getMyWhiteLabelRequests } from "@/app/actions/white-label"
-import { getUserRoleAndTenantIds, getUserRoleForTenant } from "@/lib/rbac-server"
+import { getUserRoleForTenant } from "@/lib/rbac-server"
 import { hasPermission } from "@/lib/rbac"
 
 export default async function SettingsPage() {
@@ -26,8 +26,7 @@ export default async function SettingsPage() {
   if (!tenant) redirect("/dashboard/league/setup")
 
   const tenantRole = await getUserRoleForTenant(userId, tenant.id)
-  const globalRole = tenantRole ? null : await getUserRoleAndTenantIds(userId)
-  if (!hasPermission(tenantRole ?? globalRole?.role ?? "fan", "settings:manage")) {
+  if (!tenantRole || !hasPermission(tenantRole, "settings:manage")) {
     redirect("/dashboard")
   }
   const whiteLabelRequests = await getMyWhiteLabelRequests()
@@ -57,6 +56,9 @@ export default async function SettingsPage() {
       </MotionWrapper>
 
       {/* Quick Links */}
+      <Link href="/dashboard/settings/members" className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4">
+        Members &amp; access — league roles and suspension
+      </Link>
       <MotionWrapper variant="fadeInUp" delay={0.05}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Link href="/dashboard/settings">

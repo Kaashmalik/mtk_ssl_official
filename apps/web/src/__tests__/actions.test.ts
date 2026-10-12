@@ -78,6 +78,7 @@ vi.mock("next/cache", () => {
     revalidatePath: vi.fn(),
   };
 });
+vi.mock("@/lib/tenant", () => ({ getTenantFromRequest: vi.fn().mockResolvedValue(null) }));
 
 // Mock rbac-server to bypass the auth checks or return mock values
 vi.mock("../lib/rbac-server", () => {
@@ -104,7 +105,7 @@ describe("Server Actions Unit Tests", () => {
     it("should fetch tenant for the logged-in user", async () => {
       const mockTenant = { id: MOCK_TENANT_ID, ownerId: "mock-db-user-id" };
       vi.mocked((db as any).limit)
-        .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
+        .mockReturnValueOnce([{ id: "mock-db-user-id", isActive: true }] as any)
         .mockReturnValueOnce([{ tenant: mockTenant }] as any);
 
       const tenant = await getMyTenant();
@@ -125,7 +126,7 @@ describe("Server Actions Unit Tests", () => {
     it("should successfully insert a new tenant when valid input is passed", async () => {
       // Stub database user lookup, existing-tenant check, and slug check.
       vi.mocked((db as any).limit)
-        .mockReturnValueOnce([{ id: "mock-db-user-id", tenantIds: [] }] as any)
+        .mockReturnValueOnce([{ id: "mock-db-user-id", tenantIds: [], isActive: true }] as any)
         .mockReturnValueOnce([]) // existing tenant check
         .mockReturnValueOnce([]); // slugTaken check
 
@@ -155,7 +156,7 @@ describe("Server Actions Unit Tests", () => {
 
       // getMyTenant resolves Clerk identity to the database UUID, then tenant.
       vi.mocked((db as any).limit)
-        .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
+        .mockReturnValueOnce([{ id: "mock-db-user-id", isActive: true }] as any)
         .mockReturnValueOnce([{ tenant: mockTenant }] as any);
 
       const mockNewPlayer = { id: "player-123", name: "John Doe", tenantId: MOCK_TENANT_ID };
@@ -184,7 +185,7 @@ describe("Server Actions Unit Tests", () => {
       
       // getMyTenant resolves user + tenant before loading both teams.
       vi.mocked((db as any).limit)
-        .mockReturnValueOnce([{ id: "mock-db-user-id" }] as any)
+        .mockReturnValueOnce([{ id: "mock-db-user-id", isActive: true }] as any)
         .mockReturnValueOnce([{ tenant: mockTenant }] as any)
         .mockReturnValueOnce([mockTeamA] as any)
         .mockReturnValueOnce([mockTeamB] as any);

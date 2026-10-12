@@ -15,11 +15,16 @@ beforeEach(() => {
   mocks.host.mockResolvedValue({ id: "tenant" })
   mocks.primary.mockResolvedValue({ id: "primary" })
   mocks.user.mockResolvedValue(actor)
-  mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "scorer" })
+  mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "scorer", status: "active" })
   mocks.tenant.mockResolvedValue({ id: "tenant", name: "League", isActive: true })
 })
 
 describe("Authorized active workspace context", () => {
+  it.each(["suspended", "pending", undefined])("denies membership status %s without falling back", async status => {
+    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "league_owner", status })
+    expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
+    expect(mocks.tenant).not.toHaveBeenCalled()
+  })
   it("uses the host tenant and its role, not primary membership or global privilege", async () => {
     expect(await getDashboardContext("clerk-session")).toEqual({ status: "ready", context: { actorId: "actor", tenantId: "tenant", tenantName: "League", role: "scorer" } })
     expect(mocks.primary).not.toHaveBeenCalled()
@@ -30,7 +35,7 @@ describe("Authorized active workspace context", () => {
   })
   it("uses primary tenant only when no request tenant was resolved", async () => {
     mocks.host.mockResolvedValue(null)
-    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "primary", role: "coach" })
+    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "primary", role: "coach", status: "active" })
     mocks.tenant.mockResolvedValue({ id: "primary", name: "Primary league", isActive: true })
     expect(await getDashboardContext("clerk")).toMatchObject({ status: "ready", context: { tenantId: "primary", role: "coach" } })
   })
@@ -51,12 +56,12 @@ describe("Authorized active workspace context", () => {
     expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
     expect(mocks.tenant).not.toHaveBeenCalled()
   })
-  it("permits legacy membership only when the exact role row is absent", async () => {
+  it("denies absent membership even when legacy arrays/role still grant access", async () => {
     mocks.membership.mockResolvedValue(null)
-    expect(await getDashboardContext("clerk")).toMatchObject({ status: "ready", context: { role: "league_owner" } })
+    expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
   })
   it("honors a lower-privilege junction role rather than upgrading to legacy owner", async () => {
-    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "fan" })
+    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "fan", status: "active" })
     expect(await getDashboardContext("clerk")).toMatchObject({ status: "ready", context: { role: "fan" } })
   })
   it.each([{ userId: "other", tenantId: "tenant", role: "league_owner" },

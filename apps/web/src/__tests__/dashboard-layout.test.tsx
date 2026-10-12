@@ -18,6 +18,18 @@ beforeEach(() => {
 })
 
 describe("Active-tenant dashboard shell and billing notice", () => {
+  it.each(["denied", "unavailable"])("does not render private children on %s (pages still need their own authorization)", async status => {
+    mocks.context.mockResolvedValue({ status })
+    const privateChild = <p>Private league records</p>
+    const shell = await DashboardLayout({ children: privateChild })
+    expect(shell.props.children).not.toBe(privateChild)
+    expect(shell.props.children.props.role).toBe("alert")
+  })
+  it("keeps the authenticated no-league onboarding child available", async () => {
+    mocks.context.mockResolvedValue({ status: "no-tenant" })
+    const setup = <p>Setup</p>
+    expect((await DashboardLayout({ children: setup })).props.children).toBe(setup)
+  })
   it("uses the authorized context for navigation and billing", async () => {
     const shell = await DashboardLayout({ children: <p>Page</p> })
     expect(shell.props.userRole).toBe("league_owner")

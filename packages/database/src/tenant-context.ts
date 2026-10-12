@@ -1,7 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "./client";
 import { users } from "./schema/users";
+import { userTenantRoles } from "./schema/user-tenant-roles";
+import { tenants } from "./schema/tenants";
 
 // ---------------------------------------------------------------------------
 // Tenant Context — AsyncLocalStorage
@@ -76,19 +78,22 @@ export function requireTenantContext(): TenantContext {
 // ---------------------------------------------------------------------------
 
 /**
- * Look up the user's tenantIds array from the `users` table and return the
- * first one.  This is the default resolution for league owners who manage a
- * single league.  Multi-tenant users (e.g., a scorer in many leagues) must
- * explicitly pass the `tenantId` they intend to act on.
+ * Default to an explicit active membership in an active league. Request-scoped
+ * callers must still prefer their selected league and verify that exact scope.
  */
 export async function resolveDefaultTenantId(clerkUserId: string): Promise<string | null> {
   const user = await db.query.users.findFirst({
     where: eq(users.clerkId, clerkUserId),
-    columns: { tenantIds: true },
+    columns: { id: true, isActive: true },
   });
 
-  if (!user || !user.tenantIds || user.tenantIds.length === 0) return null;
-  return user.tenantIds[0];
+  if (!user || user.isActive !== true) return null;
+  const [membership] = await db.select({ tenantId: userTenantRoles.tenantId })
+    .from(userTenantRoles).innerJoin(tenants, eq(tenants.id, userTenantRoles.tenantId))
+    .where(and(eq(userTenantRoles.userId, user.id), eq(userTenantRoles.status, "active"),
+      ne(userTenantRoles.role, "super_admin"), eq(tenants.isActive, true)))
+    .orderBy(desc(userTenantRoles.isPrimary), desc(userTenantRoles.createdAt)).limit(1);
+  return membership?.tenantId ?? null;
 }
 
 /**
@@ -101,10 +106,16 @@ export async function verifyTenantMembership(
 ): Promise<string | null> {
   const user = await db.query.users.findFirst({
     where: eq(users.clerkId, clerkUserId),
-    columns: { tenantIds: true, role: true },
+    columns: { id: true, isActive: true },
   });
 
-  if (!user) return null;
-  if (!user.tenantIds?.includes(tenantId)) return null;
-  return user.role;
+  if (!user || user.isActive !== true) return null;
+  const membership = await db.query.userTenantRoles.findFirst({ where: and(
+    eq(userTenantRoles.userId, user.id), eq(userTenantRoles.tenantId, tenantId),
+  ) });
+  if (!membership || membership.userId !== user.id || membership.tenantId !== tenantId
+    || membership.status !== "active" || membership.role === "super_admin") return null;
+  const tenant = await db.query.tenants.findFirst({ where: and(eq(tenants.id, tenantId), eq(tenants.isActive, true)) });
+  if (!tenant || tenant.id !== tenantId || tenant.isActive !== true) return null;
+  return membership.role;
 }

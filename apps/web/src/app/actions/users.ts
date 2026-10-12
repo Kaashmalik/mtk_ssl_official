@@ -1,60 +1,121 @@
 "use server"
 
+import { randomUUID } from "crypto"
+import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, users } from "@mtk/database"
-import { eq, and, sql } from "drizzle-orm"
-import { getMyTenant } from "@/app/actions/tenants"
-import { withAuth } from "./action-guard"
-import { UserRole } from "@/lib/rbac"
+import { db, users, tenants, userTenantRoles, auditLogs } from "@mtk/database"
+import { and, eq, inArray, sql } from "drizzle-orm"
+import { z } from "zod"
+import { getDashboardContext } from "@/lib/dashboard-context"
+import { hasPermission } from "@/lib/rbac"
 
-async function requireTenant() {
-  const tenant = await getMyTenant()
-  if (!tenant) throw new Error("Tenant not found")
-  return tenant
+const editableRoles = ["team_manager", "coach", "scorer", "player", "fan"] as const
+const memberKey = z.object({
+  tenantId: z.string().uuid(),
+  membershipId: z.string().uuid(),
+  expectedVersion: z.number().int().min(0).max(2147483646),
+})
+const roleChange = memberKey.extend({ role: z.enum(editableRoles) }).strict()
+const statusChange = memberKey.extend({ status: z.enum(["active", "suspended"]) }).strict()
+export type MemberRoleChange = z.infer<typeof roleChange>
+export type MemberStatusChange = z.infer<typeof statusChange>
+
+async function requireMemberManager() {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  const access = await getDashboardContext(userId)
+  if (access.status !== "ready" || access.context.role !== "league_owner" || !hasPermission(access.context.role, "user:manage")) {
+    throw new Error("Forbidden: league member management requires an active owner membership")
+  }
+  return access.context
 }
 
-export const getUsers = withAuth("user:read", async () => {
-  const tenant = await requireTenant()
-  return db.select().from(users)
-    .where(sql`${users.tenantIds} @> ARRAY[${tenant.id}::uuid]`)
-    .orderBy(users.createdAt)
-})
+/** Administrative contact details are owner-only, not team-manager user:read. */
+export async function getUsers(expectedTenantId?: string) {
+  const context = await requireMemberManager()
+  if (expectedTenantId !== undefined && z.string().uuid().parse(expectedTenantId) !== context.tenantId) {
+    throw new Error("Workspace changed. Reload members before viewing.")
+  }
+  return db.select({
+    id: users.id, email: users.email, displayName: users.displayName,
+    avatarUrl: users.avatarUrl, accountActive: users.isActive,
+    protectedAccess: sql<boolean>`${users.role} = 'super_admin'`,
+    membershipId: userTenantRoles.id, role: userTenantRoles.role,
+    status: userTenantRoles.status, version: userTenantRoles.version,
+    createdAt: userTenantRoles.createdAt,
+  }).from(userTenantRoles).innerJoin(users, eq(users.id, userTenantRoles.userId))
+    .where(eq(userTenantRoles.tenantId, context.tenantId))
+    .orderBy(userTenantRoles.createdAt, userTenantRoles.id).limit(100)
+}
 
-export const updateUserRole = withAuth("user:manage", async (userId: string, newRole: UserRole) => {
-  const tenant = await requireTenant()
-  
-  // Make sure target user belongs to this tenant
-  const [targetUser] = await db.select().from(users)
-    .where(and(eq(users.id, userId), sql`${users.tenantIds} @> ARRAY[${tenant.id}::uuid]`))
-    .limit(1)
-  
-  if (!targetUser) throw new Error("User not found in this tenant")
-  if (targetUser.role === "super_admin") throw new Error("Cannot modify a super admin")
+async function changeMember(input: MemberRoleChange | MemberStatusChange) {
+  const context = await requireMemberManager()
+  if (input.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before saving.")
+  const member = await db.transaction(async (tx) => {
+    const key = and(eq(userTenantRoles.id, input.membershipId), eq(userTenantRoles.tenantId, context.tenantId))
+    const initial = await tx.query.userTenantRoles.findFirst({ where: key })
+    if (!initial || initial.tenantId !== context.tenantId || initial.id !== input.membershipId) {
+      throw new Error("Member not found in this league")
+    }
+    // Lock users in stable order, then league, then memberships. The scoring
+    // service locks its actor before membership too. Do not lock matches here.
+    const ids = [...new Set([context.actorId, initial.userId])].sort()
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${inArray(users.id, ids)} ORDER BY ${users.id} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${context.tenantId} FOR SHARE`)
+    await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
+      WHERE ${and(eq(userTenantRoles.tenantId, context.tenantId), inArray(userTenantRoles.userId, ids))}
+      ORDER BY ${userTenantRoles.id} FOR UPDATE`)
 
-  const [updatedUser] = await db.update(users)
-    .set({ role: newRole, updatedAt: new Date() })
-    .where(eq(users.id, userId))
-    .returning()
+    const actor = await tx.query.users.findFirst({ where: eq(users.id, context.actorId) })
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, context.tenantId) })
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
+    ) })
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true
+      || !league || league.id !== context.tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
+      || actorMember.status !== "active" || actorMember.role !== "league_owner") {
+      throw new Error("Forbidden: your member-management access changed")
+    }
+    const target = await tx.query.userTenantRoles.findFirst({ where: key })
+    const account = await tx.query.users.findFirst({ where: eq(users.id, initial.userId) })
+    if (!target || target.id !== input.membershipId || target.tenantId !== context.tenantId
+      || target.userId !== initial.userId || !account || account.id !== target.userId) {
+      throw new Error("Member not found in this league")
+    }
+    // Ownership and platform authority are not editable in ordinary member CRUD.
+    // Protect every owner, including the last one, until two-party transfer ships.
+    if (target.userId === context.actorId || target.userId === league.ownerId
+      || target.role === "league_owner" || target.role === "super_admin" || account.role === "super_admin") {
+      throw new Error("Owner, platform and self access cannot be changed here")
+    }
+    if (target.version !== input.expectedVersion) throw new Error("Member changed. Reload before saving.")
+    const changes = "role" in input ? { role: input.role } : { status: input.status }
+    if (("role" in input && target.role === input.role) || ("status" in input && target.status === input.status)) {
+      return { membershipId: target.id, role: target.role, status: target.status, version: target.version }
+    }
+    const [updated] = await tx.update(userTenantRoles).set(changes)
+      .where(and(key, eq(userTenantRoles.version, input.expectedVersion)))
+      .returning({ membershipId: userTenantRoles.id, role: userTenantRoles.role,
+        status: userTenantRoles.status, version: userTenantRoles.version })
+    if (!updated) throw new Error("Member changed. Reload before saving.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId: context.tenantId, actorId: context.actorId,
+      actorRole: actorMember.role, method: "MEMBERSHIP_CHANGE", path: "/dashboard/settings/members", statusCode: "200",
+      payload: { membershipId: target.id, targetUserId: target.userId,
+        before: { role: target.role, status: target.status, version: target.version }, after: updated },
+    })
+    return updated
+  })
+  revalidatePath("/dashboard", "layout")
+  return { success: true as const, member }
+}
 
-  revalidatePath("/dashboard/users")
-  return { success: true, user: updatedUser }
-})
+export async function updateUserRole(input: MemberRoleChange) {
+  return changeMember(roleChange.parse(input))
+}
 
-export const toggleUserStatus = withAuth("user:manage", async (userId: string, isActive: boolean) => {
-  const tenant = await requireTenant()
-
-  const [targetUser] = await db.select().from(users)
-    .where(and(eq(users.id, userId), sql`${users.tenantIds} @> ARRAY[${tenant.id}::uuid]`))
-    .limit(1)
-
-  if (!targetUser) throw new Error("User not found in this tenant")
-  if (targetUser.role === "super_admin") throw new Error("Cannot modify a super admin")
-
-  const [updatedUser] = await db.update(users)
-    .set({ isActive, updatedAt: new Date() })
-    .where(eq(users.id, userId))
-    .returning()
-
-  revalidatePath("/dashboard/users")
-  return { success: true, user: updatedUser }
-})
+/** Historical name retained; this changes league membership, never the account. */
+export async function toggleUserStatus(input: MemberStatusChange) {
+  return changeMember(statusChange.parse(input))
+}

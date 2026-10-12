@@ -32,14 +32,14 @@ describe("Match-scoped scorer authorization", () => {
     await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("assigned scorer")
   })
 
-  it.each(["league_owner", "super_admin"])("allows %s oversight only after exact-tenant permission", async (role) => {
+  it.each(["league_owner"])("allows %s oversight only after exact-tenant permission", async (role) => {
     mocks.role.mockResolvedValue(role)
     await requireMatchScoringAccess("clerk-user", "tenant", "match")
     expect(mocks.permission).toHaveBeenCalledWith("match:score", "tenant")
     expect(mocks.user).toHaveBeenCalledOnce()
   })
 
-  it.each([null, "coach", "fan"])("fails closed for role %s", async (role) => {
+  it.each([null, "coach", "fan", "super_admin"])("fails closed for role %s", async (role) => {
     mocks.role.mockResolvedValue(role)
     await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("Forbidden")
   })
@@ -80,10 +80,10 @@ describe("Match-scoped scorer authorization", () => {
     expect(mocks.match).not.toHaveBeenCalled()
   })
 
-  it("scopes scorer candidates to junction membership with legacy fallback only when absent", () => {
+  it("scopes scorer candidates to active explicit membership without legacy fallback", () => {
     const query = new PgDialect().sqlToQuery(scorerMembership("active-tenant"))
-    expect(query.sql).toContain("NOT EXISTS")
-    expect(query.sql).toContain("ANY")
-    expect(query.params).toEqual(["active-tenant", "active-tenant", "active-tenant"])
+    expect(query.sql).toContain('"status" = \'active\'')
+    expect(query.sql).not.toContain("ANY")
+    expect(query.params).toEqual(["active-tenant"])
   })
 })

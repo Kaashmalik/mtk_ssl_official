@@ -6,11 +6,12 @@ export default defineConfig({
     environment: "node",
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      "@mtk/database/lib/scoring-delivery": path.resolve(__dirname, "../../packages/database/src/lib/scoring-delivery.ts"),
-      "@mtk/database/lib/live-scoring-state": path.resolve(__dirname, "../../packages/database/src/lib/live-scoring-state.ts"),
-      "@mtk/database/lib/tournament-configuration": path.resolve(__dirname, "../../packages/database/src/lib/tournament-configuration.ts"),
-    },
+    // Exercise workspace schema/source without a build or stale dist columns.
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: /^@mtk\/database$/, replacement: path.resolve(__dirname, "../../packages/database/src/index.ts") },
+      { find: /^@mtk\/database\//, replacement: path.resolve(__dirname, "../../packages/database/src") + "/" },
+      { find: /^@mtk\/ui\//, replacement: path.resolve(__dirname, "../../packages/ui/src") + "/" },
+    ],
   },
 })

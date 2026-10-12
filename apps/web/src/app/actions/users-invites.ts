@@ -39,12 +39,11 @@ async function requireTenant() {
   return tenant
 }
 
-/** Fire-and-forget invite email. Falls back to a server log when unconfigured. */
+/** Provider acceptance is not delivery. Never log plaintext invitation secrets. */
 async function sendInviteEmail(to: string, inviterName: string, tenantName: string, role: string, link: string) {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
-    console.warn(`[invite][mock] to=${to} role=${role} link=${link}`)
-    return
+    return false
   }
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -63,6 +62,7 @@ async function sendInviteEmail(to: string, inviterName: string, tenantName: stri
     }),
   })
   if (!res.ok) throw new Error(`Invite email failed (${res.status})`)
+  return true
 }
 
 export const createInvite = withAuth("user:invite", async (input: CreateInviteInput) => {
@@ -119,18 +119,17 @@ export const createInvite = withAuth("user:invite", async (input: CreateInviteIn
     // failed while the invite remains — the owner retries, hits the duplicate
     // guard, and is told a pending invite already exists with no way to get the
     // link. So: log the failure, still return the link.
-    let emailDelivered = false
+    let emailAccepted = false
     try {
-      await sendInviteEmail(
+      emailAccepted = await sendInviteEmail(
         email,
         actor.displayName || actor.email || "A league owner",
         tenant.name,
         validated.role,
         link,
       )
-      emailDelivered = true
-    } catch (err) {
-      console.error("[invite] email delivery failed; invite row created without it", err)
+    } catch {
+      console.warn("[invite] provider did not accept email; invitation remains pending")
     }
 
     revalidatePath("/dashboard/users")
@@ -140,12 +139,12 @@ export const createInvite = withAuth("user:invite", async (input: CreateInviteIn
       success: true,
       invite: { id: invite.id, email, role: validated.role },
       link,
-      emailDelivered,
+      emailAccepted,
     }
   })
 })
 
-export const getInvites = withAuth("user:read", async () => {
+export const getInvites = withAuth("user:manage", async () => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
@@ -227,7 +226,9 @@ export const acceptInvite = withAuth("invite:accept", async (token: string) => {
   if (invite.status === "revoked") throw new Error("This invitation was revoked")
   if (invite.status === "accepted") throw new Error("This invitation was already accepted")
   if (invite.expiresAt.getTime() < Date.now()) {
-    await db.update(userInvites).set({ status: "expired" }).where(eq(userInvites.id, invite.id))
+    await db.update(userInvites).set({ status: "expired" }).where(and(
+      eq(userInvites.id, invite.id), eq(userInvites.status, "pending"), sql`${userInvites.expiresAt} <= now()`,
+    ))
     throw new Error("This invitation has expired")
   }
 
@@ -251,9 +252,15 @@ export const acceptInvite = withAuth("invite:accept", async (token: string) => {
     // update makes the claim atomic: exactly one caller updates a row, and the
     // loser is told the invitation is already used.
     await db.transaction(async (tx) => {
+      // Same user-before-membership lock order as scoring/member commands.
+      // Acceptance must never reactivate a suspended membership or account.
+      await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${user.id} FOR UPDATE`)
+      const [activeUser] = await tx.select({ isActive: users.isActive }).from(users).where(eq(users.id, user.id)).limit(1)
+      if (activeUser?.isActive !== true) throw new Error("Your account is inactive")
       const claimed = await tx.update(userInvites)
         .set({ status: "accepted", acceptedAt: new Date() })
-        .where(and(eq(userInvites.id, invite.id), eq(userInvites.status, "pending")))
+        .where(and(eq(userInvites.id, invite.id), eq(userInvites.tenantId, invite.tenantId),
+          eq(userInvites.status, "pending"), sql`${userInvites.expiresAt} > now()`))
         .returning({ id: userInvites.id })
 
       if (claimed.length === 0) {
@@ -267,6 +274,7 @@ export const acceptInvite = withAuth("invite:accept", async (token: string) => {
         )).limit(1)
 
       if (roleRow) {
+        if (roleRow.status !== "active") throw new Error("Your membership is suspended. Contact the league owner.")
         // Redeeming a lesser-scoped invitation must not demote an owner or
         // another existing tenant role.
         if (ROLE_HIERARCHY[invite.role] > ROLE_HIERARCHY[roleRow.role]) {
@@ -295,7 +303,8 @@ export const acceptInvite = withAuth("invite:accept", async (token: string) => {
         if (!assignedTeam) throw new Error("This team already has a different manager or the team no longer exists")
       }
 
-      // Keep the legacy array in sync for the tenant-wide notification filter.
+      // Compatibility metadata only; notifications and authorization now use
+      // explicit league membership, never this array as authority.
       await tx.update(users)
         .set({
           tenantIds: sql`array_append(${users.tenantIds}, ${invite.tenantId})`,

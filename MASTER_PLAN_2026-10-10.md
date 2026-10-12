@@ -830,6 +830,79 @@ was performed. `git diff --check` passes.
   complete cricket rules/audited corrections, and remaining white-label/billing and
   original staging/E2E rollout requirements. No client receives internal credentials.
 
+### 2026-10-12 — Batch 7: league-only member administration and enforcement
+
+#### Completed source implementation
+
+- Synchronized cleanly from `main` at `9ac8702` and began the new
+  [12 October roadmap](docs/SAAS_MASTER_PLAN_2026-10-12.md), focusing on
+  **IAM-01** and partial **ISO-04/05/06**, **IAM-02/04/05/07**, **SCORE-09**.
+- Added local `user_tenant_roles.status` (active/suspended), a database-maintained
+  concurrency version, constraints and a CLI-created migration. Backfill adds
+  only missing legitimate memberships; explicit existing rows are preserved.
+- Replaced league management of global `users.role`/`isActive` with tenant-bound,
+  version-checked membership mutations. Actor/account/league/membership authority
+  is rechecked under ordered locks; audit before/after shares the transaction.
+  Protect all owner/platform/self changes and reject privileged role grants.
+- Added owner-only Settings -> Members and access with confirmed role/status
+  changes, suspension consequences, conflict/error UI, protected rows and separate
+  global account status. Existing `/dashboard/users` remains available. Scope,
+  expiry, full detail, pagination and assignment integration remain unfinished.
+- Require active explicit membership in web RBAC/dashboard, canonical scoring and
+  exported database helpers. Remove legacy array/global role authorization in
+  these paths. Make shared league resolution host-first; known inactive hosts
+  never silently choose a primary league. No private children are displayed on
+  denied/unavailable dashboard context; pages/actions still need independent checks.
+- Lock/check active league and member status on all canonical mutation types.
+  Invite acceptance cannot override account/member suspension and rechecks expiry
+  on its atomic claim. Basic dispatch no longer logs plaintext links or claims
+  provider acceptance proves delivery. Complete provider-verified OTP, delivery
+  tracking, fresh inviter authority and scoped invitation grants are NOT built.
+- Protect private invitation/scorer contact lists with management permissions;
+  scope personal notification rows to the active league as well.
+- Added local RLS helper/grant hardening and a default-off VPS deployment gate
+  (`LEAGUE_MEMBERSHIP_CONTROLS_READY`). No remote migration or deployment ran.
+
+#### Verification
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | **31 files, 464 tests passed** |
+| `corepack pnpm --filter @mtk/database test` | **7 files, 123 tests passed** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | **8 suites, 166 tests passed** |
+| Combined suites | **753 tests passed; net +138 over Batch 6** |
+
+Tests cover source/mocked boundaries, SQL predicates/migration contracts and
+server-rendered/stubbed UI. They do not execute the migration or prove PostgreSQL
+locking, real rollback/RLS, actual provider delivery/OTP, browser interaction,
+mobile identity or deployed live fan-out. Negative-path Nest log messages are
+expected fixtures. Source aliases avoid testing stale generated database/UI artifacts.
+
+No build, lint, standalone type-check or repository dependency change ran. The
+Supabase CLI was obtained via `npx` to create the local migration; Docker is not
+installed, so local Supabase execution is blocked. Context7 was unreachable;
+official Drizzle transaction docs and the Supabase changelog were read directly.
+
+#### Release gates and remaining work
+
+- **Local migration is unapplied:**
+  `supabase/migrations/20261012100136_league_membership_controls.sql`.
+  Follow [migration history and Batch 7 rollout gates](supabase/MIGRATION_STATUS.md).
+  Do not automatically deploy this code against an old database.
+- Database grant inventory/function ownership and the legacy UUID/email RLS
+  identity bridge remain unverified; this is NOT a Clerk string-subject/Data API
+  integration. Review elevated/owner memberships before retiring old privileges.
+- Deploy matching workspace artifacts, web and scoring service together after
+  real-DB/staging acceptance. The new GitHub VPS gate does not control external
+  hosting Git integrations. Older binaries ignore league suspension; a rollback
+  to them can reopen access and must not be used as a safe revocation strategy.
+- Two-party ownership transfer, full membership lifecycle/expiry, scoped multiple
+  roles, private publication/sockets, all CRUD/exports/storage/jobs isolation,
+  notification UX, payment/billing and mobile/scoring recovery remain open.
+- Generic CRUD permission checks occur before writes; this batch establishes
+  locked revocation ordering for member commands and canonical scoring, not every
+  existing transaction or dashboard read. Real concurrency proof remains open.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

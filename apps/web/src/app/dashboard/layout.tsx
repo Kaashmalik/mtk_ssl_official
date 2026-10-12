@@ -17,6 +17,7 @@ export default async function DashboardLayout({
     // Resolve the user's role on the server so we can filter navigation
     let userRole: UserRole = "fan"
     let context: DashboardContext | null = null
+    let blocked = "Sign in to access a league workspace."
     try {
         const { userId } = await auth()
         if (userId) {
@@ -24,15 +25,22 @@ export default async function DashboardLayout({
             if (access.status === "ready") {
                 context = access.context
                 userRole = context.role
+                blocked = ""
+            } else if (access.status === "no-tenant") {
+                // Authenticated active accounts still need the league setup page.
+                blocked = ""
+            } else {
+                blocked = access.status === "unavailable" ? "Workspace access is temporarily unavailable. Please retry."
+                    : "You do not have active access to this league. Contact the organizer."
             }
         }
     } catch {
-        // Fallback to 'fan' (minimal access) if role lookup fails
+        blocked = "Workspace access is temporarily unavailable. Please retry."
     }
 
     return (
         <DashboardShell userRole={userRole} banner={context && hasPermission(context.role, "settings:manage") ? <TrialBannerServer context={context} /> : null}>
-            {children}
+            {blocked ? <p role="alert">{blocked}</p> : children}
         </DashboardShell>
     )
 }

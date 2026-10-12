@@ -7,7 +7,7 @@ import { normalizeHost, tenantSlugCandidates } from "./tenant-host";
 /**
  * Get tenant from custom domain or subdomain
  */
-export async function getTenantFromRequest() {
+export async function getTenantFromRequest(includeInactive = false) {
   const headersList = await headers();
   const host = normalizeHost(headersList.get("x-forwarded-host") ?? headersList.get("host"));
   
@@ -19,7 +19,7 @@ export async function getTenantFromRequest() {
       eq(tenants.customDomain, host),
       eq(tenants.customDomainVerified, true),
       eq(tenants.sslEnabled, true),
-      eq(tenants.isActive, true),
+      includeInactive ? undefined : eq(tenants.isActive, true),
     ))
     .limit(1);
 
@@ -33,7 +33,7 @@ export async function getTenantFromRequest() {
     const subdomainTenant = await db
       .select()
       .from(tenants)
-      .where(and(eq(tenants.slug, subdomain), eq(tenants.isActive, true)))
+      .where(and(eq(tenants.slug, subdomain), includeInactive ? undefined : eq(tenants.isActive, true)))
       .limit(1);
 
     if (subdomainTenant.length > 0) {

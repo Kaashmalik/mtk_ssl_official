@@ -16,10 +16,10 @@ export async function requireScoringActorId(clerkId: string): Promise<string> {
 
 export async function canScoreMatch(clerkId: string, tenantId: string, match: { scorerId: string | null }) {
   const role = await getUserRoleForTenant(clerkId, tenantId)
-  if (!["league_owner", "super_admin", "scorer"].includes(role ?? "")) return false
+  if (!["league_owner", "scorer"].includes(role ?? "")) return false
   const user = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
   if (!user || user.isActive !== true) return false
-  return role === "league_owner" || role === "super_admin" || match.scorerId === user.id
+  return role === "league_owner" || match.scorerId === user.id
 }
 
 /** Role checks and assignment checks must use the exact mutation tenant. */

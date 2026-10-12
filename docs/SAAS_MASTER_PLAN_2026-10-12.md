@@ -6,9 +6,9 @@
 | --- | --- |
 | Created / last reviewed | **12 October 2026 (2026-10-12)** |
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
-| Implementation baseline | `main` at `3d7e3fde559a3f96cfbed678543bf378d8a8a255` |
+| Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Scope of this change | Documentation only; no application, authentication, schema, or remote-database changes |
+| Current implementation | Batch 7: league-only membership controls and enforcement; local schema/migration changes, no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -74,13 +74,17 @@ This is a professional living plan covering known requirements and failure cases
 | 4 | `0080b88` | Wizard configuration persistence/reading/copying, validated dates/money/branding/seeds, locked partial updates |
 | 5 | `e9f4951` | Verified web actor propagation, transactional active-account/tenant-role/assignment checks, basic roster eligibility, delivery/undo actor metadata |
 | 6 | `3d7e3fd` | Role-aware responsive dashboard, authorized active-tenant dashboard/shell/trial reads, accurate summaries and honest error states |
+| 7 | Current batch; see Git history | Versioned league-only member role/status commands, owner-only Members and access UI, explicit active membership guards, local migration and coordinated-release gate; deployment/real-DB proof open |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
+
+Batch 7 verification and rollout boundaries are recorded in section 17. The
+615-test result remains historical evidence, not the current suite count.
 
 ### 3.2 Existing foundations are not complete new features
 
 - Invitation tokens, email dispatch, atomic invitation claiming, and basic team-manager assignment exist. A hardened scorer OTP/settings journey is not established.
-- `user_tenant_roles` provides one role per user/tenant. League membership status, multiple resource-scoped grants, and the broader proposed roles need design/migration.
+- `user_tenant_roles` still provides one role per user/tenant. Batch 7 adds local `active`/`suspended` status and a database-incremented version; deployed status is unverified. Expiry, full lifecycle, scoped multiple grants and broader roles remain open.
 - Team/player/match CRUD, registrations, public pages, branding, billing, reactions, and specialist services exist in varying states. Audit each before reuse; presence is not end-to-end acceptance.
 - Score snapshots, web queue retention, and canonical write authorization are implemented foundations. Mobile authenticated replay, outbox recovery, complete cricket rules, and private publication controls remain open.
 
@@ -88,11 +92,11 @@ Latest **previously recorded** test baseline: web **357 tests / 26 files**, data
 
 | ID | Current evidence | Required resolution |
 | --- | --- | --- |
-| GAP-01 | `actions/users.ts` changes global `users.role` / `users.isActive` | League-only membership role/status operations; separate platform authority |
+| GAP-01 | Batch 7 replaces global user-management writes with league-only membership commands | Verify migration/rollout and browser behavior; platform role-grant redesign remains open |
 | GAP-02 | Some pages/actions still use primary membership or legacy global roles | One verified active league across page, action, repository, and notification paths |
-| GAP-03 | Legacy `users.tenantIds` can grant access when a junction row is absent | Reconcile membership data and remove authority fallback safely; deleting a role row alone is not full revocation today |
-| GAP-04 | Invitation dispatch can log a secret link and report delivery when the provider is absent | Redacted logs, queued delivery, accurate accepted/delivered/bounced/failed states, safe resend/recovery |
-| GAP-05 | Invite acceptance relies on application email and pre-transaction expiry checks | Provider-verified email; atomic expiry/revocation/scope checks at claim time; current grant authority |
+| GAP-03 | Batch 7 removes fallback in web/scoring/shared membership helpers and proposes matching RLS helper changes; legacy columns remain | Verify safe backfill, existing elevated grants, real RLS and other consumers before declaring retirement complete |
+| GAP-04 | Batch 7 removes plaintext link logging and distinguishes provider acceptance from delivery; dispatch is still best effort | Queued delivery, persisted accepted/delivered/bounced/failed states, safe resend/recovery |
+| GAP-05 | Batch 7 rechecks atomic expiry and prevents suspension bypass; recipient identity still relies on application email | Provider-verified email/OTP, current inviter authority, resource validity and scoped grants at claim time |
 | GAP-06 | Mobile Supabase sessions and web Clerk identity are not a completed scoring transport contract | Approved identity strategy and explicit account mapping; no client internal tokens |
 | GAP-07 | Scoring sockets/state reads are currently anonymous public interfaces | Publication gates and protected private-match room/read access before offering private matches |
 | GAP-08 | Migration history, real locking, private networking, and deployed event delivery are not reverified | Local/staging schema proof, concurrency tests, infrastructure acceptance |
@@ -561,7 +565,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 
 ## 16. Phased Implementation Checklists: Built and Remaining
 
-**Six batches are delivered; no full phase below is declared production-complete.** Checked items describe inherited implementation, not work performed while writing this document. IDs are stable backlog references. Old batches remain historical evidence; future batches update this section and the evidence register.
+**Batches 1–6 are delivered; Batch 7 adds the current tested source implementation. No full phase below is production-complete.** Checkboxes represent their narrowly stated implementation, never deployment certification. IDs are stable backlog references. Historical results and release gates remain preserved.
 
 ### Phase summary
 
@@ -569,7 +573,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | --- | --- | --- | --- | --- |
 | 0. Evidence and release foundation | P0 | Plan/batch register and automated test foundations | Real schema/infrastructure/staging proof | PARTIAL |
 | 1. Isolation and authorization | P0 | Tournament/scoring/dashboard-scoped checks | Full CRUD/sockets/storage/jobs context, memberships, constraints | PARTIAL |
-| 2. Settings, memberships and OTP | P0/P1 | Basic invite/role/assignment foundations | League-only status/scoped grants and verified OTP journey | FOUNDATION; target controls remain |
+| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
 | 3. League/team/player registration | P1 | Existing CRUD and registration scaffolding | Full reviewed onboarding, team/captain/player eligibility flows | FOUNDATION; acceptance open |
 | 4. Competition operations | P1 | Wizard configuration save/reload/copy and locked updates | Fixtures, XI readiness, rules/standings/advancement | PARTIAL |
 | 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
@@ -595,8 +599,11 @@ Exit: repeatable baseline and a verified staging environment; old unit-test coun
 - [x] **ISO-02:** Enforce web/canonical scoring tenant, actor and assignment checks (Batches 3/5).
 - [x] **ISO-03:** Authorize active-tenant dashboard/shell/trial reads without role-query-error fallback (Batch 6).
 - [ ] **ISO-04:** Consolidate remaining pages/actions/admin APIs/repositories, especially users/invites and dashboard destinations.
+  Batch 7 repairs user management and shared host-first/default membership resolution, including known inactive hosts. Remaining direct paths, unknown/removed-domain handling, private sockets and exports still need audit.
 - [ ] **ISO-05:** Add authoritative league membership status/expiry and resource-scoped grant design; separate platform roles.
+  Local active/suspended status and version are implemented; expiry, scoped multiple grants and platform-grant redesign remain open.
 - [ ] **ISO-06:** Reconcile and safely retire legacy `users.role` / `tenantIds` authorization fallback.
+  Fallback is removed in selected source helpers and the proposed RLS migration. Legacy data/identity bridges and deployed consumer/grant inventory still require review.
 - [ ] **ISO-07:** Enforce tenant-consistent relationships, grants/RLS and service-role safeguards with real DB tests.
 - [ ] **ISO-08:** Scope uploads, exports, caches, search, notifications/jobs and sockets; define public/private publication boundaries.
 - [ ] **ISO-09:** Implement safe workspace switching, context indicators and isolated offline/client caches.
@@ -607,10 +614,12 @@ Exit: A/B/C league scenario passes across every private data/mutation boundary, 
 
 Existing invitation token storage/atomic claiming and match-scorer assignment are reusable foundations, not a checked complete OTP product.
 
-- [ ] **IAM-01:** Replace league UI operations that mutate global roles/status with authorized league-only membership commands.
+- [x] **IAM-01:** Replace league UI operations that mutate global roles/status with authorized league-only membership commands (Batch 7 source/tests; migration/deployment gates remain open).
 - [ ] **IAM-02:** Build Members and access list/detail UI with scoped role/status/expiry/assignment and save-confirmed toggles.
+  Batch 7 provides the owner-only list, confirmed role changes, suspension/reactivation confirmation, protected access, workspace/version assertions and an honest 100-row search boundary. Detail/scoped grants, expiry, assignment integration and pagination remain open.
 - [ ] **IAM-03:** Implement provider-verified invited-email OTP/login and atomic recipient/expiry/revocation/scope redemption.
 - [ ] **IAM-04:** Add accurate queued email/delivery/bounce/retry states; eliminate secret-link logging and false delivery success.
+  Batch 7 fixes logging/false delivery claims; persisted queued/provider/delivery tracking and retries are not implemented.
 - [ ] **IAM-05:** Implement activate/suspend/reactivate/remove/revoke/resend with version checks, idempotency and audit history.
 - [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
 - [ ] **IAM-07:** Implement last-owner safeguards, delegated grants and two-party ownership transfer.
@@ -737,7 +746,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Focus: league membership status and safe user-control commands (`ISO-04/05/06`, `IAM-01/02`).**
+**Updated after Batch 7:** complete the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then implement the verified invitation slice (`IAM-03/04/05/06`). `IAM-01` source is now implemented, not deployed-certified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -746,6 +755,42 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 - Add a confirmed-save Members and access UI using one active tenant; update every enforcing path, including canonical scoring, so a visual toggle is not a false security control.
 - Test Ali as active/assigned in A, suspended in B and outsider in C, including concurrent status changes and retained offline operations.
 - Keep the OTP invitation expansion as the following complete slice (`IAM-03/04/05/06`), after membership authority works. Do not ship a scorer activation UI that the backend ignores.
+
+### 2026-10-12 — Batch 7: membership isolation and safe member controls
+
+**Implementation:**
+
+- New local membership `status` (`active`/`suspended`) and version columns/constraints, reviewed-source backfill for missing legitimate memberships, and a database version trigger. Existing explicit memberships/global accounts/assignments are preserved.
+- Owner-authorized, tenant-asserted role/status commands replace global user writes. Users/league/memberships are locked in a defined order; actor authority is rechecked after locks. Conditional version changes and before/after audit insertion share one transaction.
+- Ordinary CRUD cannot edit self, any owner, recorded primary owner or platform account/grant, nor grant owner/platform roles. This protects the last owner by blocking all ordinary owner edits; two-party ownership transfer is NOT implemented.
+- Members and access is available through Settings and the existing users route, with controlled/server-confirmed role values, league-only status wording, confirmation, conflict/errors, protected rows and distinct platform account status. List/search is capped at 100 loaded members, not complete pagination.
+- Web RBAC, dashboard, scorer candidates, canonical scoring writes and exported database membership helpers require explicit active memberships; missing rows and errors cannot upgrade via global roles/arrays. Known inactive hosts do not switch to a primary league. Host lookup behavior for unknown/removed domains still needs a fuller audit.
+- Shared `getMyTenant()` is now host-first and membership-authorized, reducing guard/query workspace mismatches. Dashboard denial/unavailability hides private children as UX defense; individual server actions/pages must still authorize their reads.
+- Canonical record/undo/create-innings/complete-innings/complete-match transactions reject suspended memberships and inactive leagues, without accepting offline commands or removing retained work. Owner oversight requires an explicit active owner membership; global platform status alone does not grant scoring.
+- Invite acceptance cannot reactivate suspended members/accounts; the claim rechecks pending state, tenant and expiry in the transaction. Provider-verified recipient/OTP and current inviter/resource authority remain unfinished. Email dispatch no longer logs secret links or calls provider acceptance delivery.
+- Private invitations/scorer contact lists require management permissions. Notification queries scope personal as well as league-wide rows to the active league.
+- Local migration updates `current_tenant_id()` to active account/member/league joins with no legacy array fallback, checks global account activity for the existing platform override, and revokes direct `anon`/`authenticated` mutations of users/memberships. Existing RLS identity resolution still uses the legacy UUID/email bridge: Clerk string-subject compatibility is NOT implemented or certified.
+- The repository-defined VPS deployment job is default-off until `LEAGUE_MEMBERSHIP_CONTROLS_READY` is explicitly set to `true` after rollout gates. This does not inspect/control external hosting Git integrations.
+
+**Evidence and boundaries:**
+
+The exact commands/results are recorded in the historical master plan's Batch 7
+entry. Tests exercise source, mocked authentication/database/services, SQL
+construction/migration contracts, and server-rendered/stubbed UI. They do not
+execute the migration, prove PostgreSQL locks/RLS/rollback, deliver real email,
+exercise OTP, certify browser/device behavior or demonstrate production uptime.
+
+Supabase CLI was used to create the local migration. Docker is unavailable in
+this environment, so no local Supabase stack/migration execution ran. No remote
+database, provider/authentication configuration, production deployment, build,
+lint or standalone type-check was performed. The Context7 endpoint was
+unreachable; current official Drizzle transaction documentation and the Supabase
+changelog were read directly instead.
+
+**Release blocker:** follow [Batch 7 rollout gates](../supabase/MIGRATION_STATUS.md)
+before deployment. Deploy workspace database/UI artifacts, web and scoring
+service together after schema/identity/grant review. Do not roll back to binaries
+that ignore suspension while preserving an expectation of revoked access.
 
 ### Required decisions before their respective slices
 

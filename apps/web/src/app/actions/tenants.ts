@@ -4,9 +4,10 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db, getPlanLimits, type PlanKey } from "@mtk/database"
 import { tenants, tenantBranding, subscriptions, users, userTenantRoles } from "@mtk/database"
-import { desc, eq } from "drizzle-orm"
+import { and, desc, eq, ne } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
+import { getTenantFromRequest } from "@/lib/tenant"
 
 
 const createTenantSchema = z.object({
@@ -34,30 +35,34 @@ export async function getMyTenant() {
 
   // `tenants.owner_id` is a UUID referencing `users.id`, not Clerk's string ID.
   const [user] = await db
-    .select({ id: users.id })
+    .select({ id: users.id, isActive: users.isActive })
     .from(users)
     .where(eq(users.clerkId, userId))
     .limit(1)
-  if (!user) return null
+  if (!user || user.isActive !== true) return null
+
+  // Request league wins. A denied or unavailable host must never select the
+  // user's unrelated primary workspace instead.
+  const requestTenant = await getTenantFromRequest(true)
+  if (requestTenant) {
+    const membership = await db.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, user.id), eq(userTenantRoles.tenantId, requestTenant.id),
+    ) })
+    return membership?.status === "active" && membership.role !== "super_admin"
+      && membership.userId === user.id && membership.tenantId === requestTenant.id
+      && requestTenant.isActive === true ? requestTenant : null
+  }
 
   const [membership] = await db
     .select({ tenant: tenants })
     .from(userTenantRoles)
     .innerJoin(tenants, eq(userTenantRoles.tenantId, tenants.id))
-    .where(eq(userTenantRoles.userId, user.id))
+    .where(and(eq(userTenantRoles.userId, user.id), eq(userTenantRoles.status, "active"),
+      ne(userTenantRoles.role, "super_admin"), eq(tenants.isActive, true)))
     .orderBy(desc(userTenantRoles.isPrimary), desc(userTenantRoles.createdAt))
     .limit(1)
 
-  if (membership) return membership.tenant
-
-  // Compatibility for older tenant rows whose owner role has not been backfilled.
-  const [ownedTenant] = await db
-    .select()
-    .from(tenants)
-    .where(eq(tenants.ownerId, user.id))
-    .limit(1)
-
-  return ownedTenant ?? null
+  return membership?.tenant ?? null
 }
 
 /**
@@ -75,7 +80,7 @@ export async function createTenant(input: CreateTenantInput) {
   // Tenant ownership uses the database UUID. Clerk IDs are strings and must not
   // be written into or compared directly with the UUID owner_id column.
   const [dbUser] = await db
-    .select({ id: users.id, tenantIds: users.tenantIds })
+    .select({ id: users.id, tenantIds: users.tenantIds, isActive: users.isActive })
     .from(users)
     .where(eq(users.clerkId, userId))
     .limit(1)
@@ -83,6 +88,7 @@ export async function createTenant(input: CreateTenantInput) {
   if (!dbUser) {
     throw new Error("Your account is still being set up. Please refresh and try again.")
   }
+  if (dbUser.isActive !== true) throw new Error("Your account is inactive")
 
   const existing = await db
     .select({ id: tenants.id })

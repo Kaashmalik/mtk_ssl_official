@@ -3,7 +3,12 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-## Verdict: schema is in sync
+> **12 October 2026 update:** the inventory below is a historical October 6–7
+> snapshot, not a live schema certification. The new
+> `20261012100136_league_membership_controls.sql` is **local and unapplied**;
+> follow the Batch 7 rollout gates below before releasing its dependent code.
+
+## Historical verdict (October 6–7): schema was in sync
 
 | Check | Result |
 |---|---|
@@ -129,9 +134,78 @@ safe to re-run. Applied via `execute_sql`, deliberately **not** `apply_migration
 so seed rows never enter migration history.
 
 Fixture emails use the reserved `.invalid` TLD (RFC 2606) and carry **no**
-`clerk_id`, so they cannot authenticate and cannot be confused with real users.
+  `clerk_id`, so they cannot authenticate and cannot be confused with real users.
 
 It seeds three extra tenants (free / starter / pro) plus a live match whose innings
 aggregates are **derived from** its ball rows, and deliberately places
 `lahore-lions` at exactly `free.maxTeams` (4) and `free.maxPlayers` (40) so the
 quota boundary can be exercised.
+
+## Batch 7 rollout gates — unapplied membership controls (12 October 2026)
+
+`20261012100136_league_membership_controls.sql` is a **local migration only**.
+Its SQL/schema contract tests do not prove database execution. Docker is absent
+in the development environment; no Supabase reset, remote migration, authentication
+change or deployment was performed for this batch.
+
+### Before applying or releasing
+
+1. Reconcile recorded migration versions with repository filenames using the
+   drift notes above. Inspect the actual tables, enum, indexes, triggers, function
+   definitions/owners and role grants. Do not blindly run `db push`, `db reset`,
+   repair migration history or regenerate a production schema from Drizzle.
+2. Review users, global account activity, tenant owners, legacy arrays and every
+   existing explicit role. The backfill preserves existing rows and adds absent
+   referenced memberships; it cannot distinguish historical revocations from an
+   obsolete legacy array. Approve the proposed additions before execution.
+   Global owner/admin roles are not blindly copied to unrelated leagues.
+3. Resolve existing `super_admin` membership rows and anomalous owner mappings.
+   Such platform membership rows are denied by the new operational guards;
+   ordinary member CRUD cannot repair them. Preserve at least one authorized
+   active owner per active league through a reviewed administrative procedure.
+4. Audit direct Data API consumers (especially mobile), table **and column**
+   grants, inherited privileges and RLS policies. The migration revokes direct
+   account/member mutations for `anon`/`authenticated`; an inherited or separate
+   column-level grant must not bypass the trusted command path. Privileged server
+   connections bypass RLS and still need application authorization.
+5. Review the existing `auth.uid()`/JWT-email identity bridge and trusted function
+   ownership. This migration does not map Clerk string subjects to application
+   UUIDs or certify recipient identity. Do not enable client Data API access on
+   the assumption that this batch implements third-party authentication.
+6. Take a verified backup and execute the migration on a disposable, appropriately
+   anonymized staging database first. It is intentionally not a rerunnable SQL
+   script: new columns/function/trigger creation must match recorded history.
+   Confirm active/suspended constraints, version increments from every writer,
+   backfill results and empty tenant scope for absent/suspended memberships.
+7. Exercise real two-session locking/concurrency, stale-version rejection, audit
+   rollback on failure, revoked scoring record/replay/undo/innings/match completion,
+   invitation suspension rejection and RLS permissions. Confirm no deadlocks in
+   existing writers and no direct account/role privilege escalation.
+8. Exercise authenticated browser/mobile journeys: Ali active/assigned in A,
+   suspended in B, absent in C; unchanged global account/other-league records;
+   retained rejected offline work; owner protection; primary-versus-host tenant
+   behavior; save failure/conflict, dialog and keyboard/responsive behavior.
+
+### Coordinated release and rollback
+
+- Keep repository VPS deployment disabled (leave
+  `LEAGUE_MEMBERSHIP_CONTROLS_READY` unset/false). Inspect external hosting Git
+  integrations separately; this repository gate does not control them.
+- After the above gates pass, arrange a controlled maintenance window. Apply the
+  reviewed migration once and verify schema/history/owners/grants. Deploy matching
+  database/UI workspace artifacts, web and scoring service together; confirm the
+  matching server-only `SCORING_SERVICE_TOKEN` configuration and reload stale
+  clients. Old member action signatures intentionally do not remain privileged.
+- Enable `LEAGUE_MEMBERSHIP_CONTROLS_READY=true` only after migration acceptance
+  and coordinated release readiness. The existing VPS script's warning-only
+  Drizzle migration step is **not** proof this Supabase SQL was applied. Record
+  the deployed migration version, application SHAs and acceptance evidence here.
+- Do not roll back to binaries that ignore membership status while treating
+  suspended users as revoked. Disable sensitive traffic or deploy a reviewed
+  forward fix; do not delete suspension/audit records or restore legacy fallback
+  as an access-recovery shortcut. A database rollback requires its own reviewed
+  backup/restore procedure, not an automatic down migration.
+
+**Still open:** all real-database/deployed acceptance, complete provider-verified
+OTP and delivery lifecycle, expiry/scoped multiple grants, ownership transfer,
+unknown/removed host handling and complete private CRUD/socket/export coverage.

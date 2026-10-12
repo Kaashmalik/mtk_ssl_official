@@ -51,7 +51,7 @@ function createTransaction() {
       winnerId: null as string | null, result: null as string | null,
       status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
-    membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer' } as { userId: string; tenantId: string; role: string } | null,
+    membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active' } as { userId: string; tenantId: string; role: string; status: string } | null,
     roster: new Map<string, Record<string, any>>([
       [BATTER, { id: BATTER, tenantId: TENANT, teamId: TENANT, isActive: true, status: 'active', name: 'Batter' }],
       [BOWLER, { id: BOWLER, tenantId: TENANT, teamId: TEAM_B, isActive: true, status: 'active', name: 'Bowler' }],
@@ -67,6 +67,7 @@ function createTransaction() {
     query: {
       matches: { findFirst: jest.fn(async () => ({ ...state.match })) },
       users: { findFirst: jest.fn(async () => ({ ...state.actor })) },
+      tenants: { findFirst: jest.fn(async () => ({ id: TENANT, isActive: true })) },
       userTenantRoles: { findFirst: jest.fn(async () => state.membership) },
       matchInnings: { findFirst: jest.fn(async () => ({ ...state.innings })),
         findMany: jest.fn(async (_options: { where: SQL; orderBy: unknown[] }) => [{ ...state.innings }]) },
@@ -314,6 +315,15 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockRedis.del).not.toHaveBeenCalled();
     expect(publisher.publishBallEvent).not.toHaveBeenCalled();
     expect(dialect.sqlToQuery(mockTx.execute.mock.calls[0][0]).params).toEqual([MATCH, TENANT]);
+  });
+  it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])('blocks suspended membership inside the %s transaction before any writes', async (operation) => {
+    mockTx.state.membership!.status = 'suspended';
+    await expect(mutation(operation)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mockTx.insert).not.toHaveBeenCalled();
+    expect(mockTx.update).not.toHaveBeenCalled();
+    expect(mockTx.delete).not.toHaveBeenCalled();
+    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
+    expect(publisher.publishMatchEvent).not.toHaveBeenCalled();
   });
 
   it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])('rejects deactivated accounts on %s', async (operation) => {

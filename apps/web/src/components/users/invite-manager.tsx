@@ -71,8 +71,8 @@ export function InviteManager() {
         setEmail("")
         // The invite is valid and the link is shown below either way; this only
         // tells the owner whether to expect the email to arrive.
-        if (res.emailDelivered) {
-          toast.success("Invitation created and emailed")
+        if (res.emailAccepted) {
+          toast.success("Invitation created — email provider accepted it; delivery is not confirmed")
         } else {
           toast.success("Invitation created — email could not be sent, copy the link below")
         }

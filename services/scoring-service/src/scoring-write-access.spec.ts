@@ -24,7 +24,8 @@ function adapter() {
   ]);
   const mock = { execute: jest.fn().mockResolvedValue([]), query: {
     users: { findFirst: jest.fn().mockResolvedValue({ id: ACTOR, isActive: true, role: 'league_owner', tenantIds: [TENANT] }) },
-    userTenantRoles: { findFirst: jest.fn().mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'scorer' }) },
+    userTenantRoles: { findFirst: jest.fn().mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active' }) },
+    tenants: { findFirst: jest.fn().mockResolvedValue({ id: TENANT, isActive: true }) },
     teams: { findFirst: jest.fn(async ({ where }) => ({ id: dialect.sqlToQuery(where).params[0], tenantId: TENANT, isActive: true })) },
     players: { findFirst: jest.fn(async ({ where }) => roster.get(String(dialect.sqlToQuery(where).params[0]))) },
   } };
@@ -32,6 +33,22 @@ function adapter() {
 }
 
 describe('Transactional actor membership and assignment', () => {
+  it.each(['suspended', 'pending', undefined])('denies membership status %s despite active account and assignment', async (status) => {
+    const { mock, tx } = adapter();
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'scorer', status });
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it('a platform role is not an operational league scoring grant', async () => {
+    const { mock, tx } = adapter();
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'super_admin', status: 'active' });
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it.each([undefined, { id: TENANT, isActive: false }, { id: TEAM_B, isActive: true }])('denies inactive/foreign league %s', async (tenant) => {
+    const { mock, tx } = adapter();
+    mock.query.tenants.findFirst.mockResolvedValue(tenant);
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mock.query.userTenantRoles.findFirst).not.toHaveBeenCalled();
+  });
   it('uses match -> actor -> membership lock ordering and tenant-scoped role lookup', async () => {
     const { mock, tx } = adapter();
     await requireScoringWriteAccess(tx, TENANT, ACTOR, match);
@@ -39,7 +56,9 @@ describe('Transactional actor membership and assignment', () => {
     expect(locks[0].sql).toContain('FOR UPDATE');
     expect(locks[0].params).toEqual([ACTOR]);
     expect(locks[1].sql).toContain('FOR SHARE');
-    expect(locks[1].params).toEqual([ACTOR, TENANT]);
+    expect(locks[1].params).toEqual([TENANT]);
+    expect(locks[2].sql).toContain('FOR SHARE');
+    expect(locks[2].params).toEqual([ACTOR, TENANT]);
     expect(dialect.sqlToQuery(mock.query.userTenantRoles.findFirst.mock.calls[0][0].where).params).toEqual([ACTOR, TENANT]);
   });
   it.each([undefined, { id: ACTOR, isActive: false }, { id: 'someone-else', isActive: true }])('denies unavailable or mismatched actor %s', async (actor) => {
@@ -54,18 +73,18 @@ describe('Transactional actor membership and assignment', () => {
   });
   it.each(['fan', 'player', 'coach', 'team_manager', null])('junction role %s overrides legacy league-owner privilege', async (role) => {
     const { mock, tx } = adapter();
-    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role });
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role, status: 'active' });
     await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).rejects.toBeInstanceOf(ForbiddenException);
   });
-  it.each(['league_owner', 'super_admin'])('allows active exact-tenant %s oversight without assignment', async (role) => {
+  it.each(['league_owner'])('allows active exact-tenant %s oversight without assignment', async (role) => {
     const { mock, tx } = adapter();
-    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role });
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role, status: 'active' });
     await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, scorerId: null })).resolves.toBeUndefined();
   });
-  it('allows legacy membership only when the exact-tenant junction row is absent', async () => {
+  it('denies missing membership even if legacy arrays still grant access', async () => {
     const { mock, tx } = adapter();
     mock.query.userTenantRoles.findFirst.mockResolvedValue(undefined);
-    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).resolves.toBeUndefined();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).rejects.toBeInstanceOf(ForbiddenException);
     mock.query.users.findFirst.mockResolvedValue({ id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TEAM_B] });
     await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).rejects.toBeInstanceOf(ForbiddenException);
   });

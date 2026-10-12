@@ -1,197 +1,127 @@
 "use client"
 
-import { useState } from "react"
+import React, { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@mtk/ui/components/ui/table"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Input } from "@mtk/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@mtk/ui/components/ui/select"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@mtk/ui/components/ui/dialog"
 import { Search, Loader2 } from "lucide-react"
 import { toast } from "sonner"
-import { updateUserRole, toggleUserStatus } from "@/app/actions/users"
-import { UserRole } from "@/lib/rbac"
+import { updateUserRole, toggleUserStatus, type MemberRoleChange } from "@/app/actions/users"
 
-interface User {
+interface Member {
   id: string
+  membershipId: string
   email: string
   displayName: string | null
   avatarUrl: string | null
   role: string
-  isActive: boolean
+  status: "active" | "suspended"
+  accountActive: boolean
+  protectedAccess: boolean
+  version: number
   createdAt: Date
 }
 
-interface UserListTableProps {
-  initialUsers: User[]
-  currentUserId?: string | null
-}
-
 const ROLE_OPTIONS = [
-  { value: "league_owner", label: "League Owner" },
   { value: "team_manager", label: "Team Manager" },
   { value: "coach", label: "Coach" },
   { value: "scorer", label: "Scorer" },
   { value: "player", label: "Player" },
   { value: "fan", label: "Fan" },
-]
+] as const
 
-export function UserListTable({ initialUsers, currentUserId }: UserListTableProps) {
-  const [usersList, setUsersList] = useState<User[]>(initialUsers)
+export function UserListTable({ initialUsers, currentUserId, tenantId, tenantName }: {
+  initialUsers: Member[]; currentUserId?: string | null; tenantId: string; tenantName: string
+}) {
+  const router = useRouter()
+  const [members, setMembers] = useState(initialUsers)
   const [search, setSearch] = useState("")
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [confirmation, setConfirmation] = useState<Member | null>(null)
+  const [notice, setNotice] = useState("")
+  useEffect(() => { setMembers(initialUsers) }, [initialUsers])
 
-  const handleRoleChange = async (userId: string, newRole: string) => {
-    setUpdatingId(userId)
+  const save = async (member: Member, change: { role: MemberRoleChange["role"] } | { status: "active" | "suspended" }) => {
+    if (updatingId) return
+    setUpdatingId(member.membershipId)
+    setNotice("Saving league membership…")
     try {
-      const res = await updateUserRole(userId, newRole as UserRole)
-      if (res.success) {
-        setUsersList(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u))
-        toast.success("User role updated successfully")
-      } else {
-        toast.error("Failed to update user role")
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update user role")
-    } finally {
-      setUpdatingId(null)
-    }
+      const key = { tenantId, membershipId: member.membershipId, expectedVersion: member.version }
+      const result = "role" in change ? await updateUserRole({ ...key, ...change }) : await toggleUserStatus({ ...key, ...change })
+      // Only the confirmed server state updates the controlled select/status.
+      setMembers(previous => previous.map(row => row.membershipId === result.member.membershipId ? { ...row, ...result.member } : row))
+      setConfirmation(null)
+      setNotice(`Membership saved in ${tenantName}.`)
+      toast.success(`Membership saved in ${tenantName}`)
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save membership. Reload and try again."
+      setNotice(message)
+      toast.error(message)
+      // No local success, role change or status toggle on rejection/conflict.
+      router.refresh()
+    } finally { setUpdatingId(null) }
   }
-
-  const handleStatusToggle = async (userId: string, currentStatus: boolean) => {
-    setUpdatingId(userId)
-    const newStatus = !currentStatus
-    try {
-      const res = await toggleUserStatus(userId, newStatus)
-      if (res.success) {
-        setUsersList(prev => prev.map(u => u.id === userId ? { ...u, isActive: newStatus } : u))
-        toast.success(`User ${newStatus ? "enabled" : "disabled"} successfully`)
-      } else {
-        toast.error("Failed to toggle user status")
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to toggle user status")
-    } finally {
-      setUpdatingId(null)
-    }
-  }
-
-  const filteredUsers = usersList.filter(u => {
-    const term = search.toLowerCase()
-    return (
-      u.email.toLowerCase().includes(term) ||
-      (u.displayName && u.displayName.toLowerCase().includes(term))
-    )
-  })
-
+  const filtered = members.filter(member => `${member.email} ${member.displayName ?? ""}`.toLowerCase().includes(search.toLowerCase()))
   return (
     <div className="space-y-4">
-      {/* Search and Filters */}
+      <p className="text-sm text-muted-foreground">Active membership permits only this league's role. A suspended platform account stays blocked everywhere. Owner and self access are protected.</p>
       <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by name or email..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-        />
+        <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        <Input aria-label="Search loaded league members" placeholder="Search loaded members…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9 min-h-11" />
       </div>
-
-      {/* Users Table */}
-      <div className="rounded-xl border bg-card">
+      <p role="status" aria-live="polite" className="text-sm">{notice}</p>
+      <div className="rounded-xl border bg-card overflow-x-auto">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
+          <TableHeader><TableRow>
+            <TableHead>Member</TableHead><TableHead>Email</TableHead><TableHead>League role</TableHead><TableHead>League access</TableHead><TableHead className="text-right">Actions</TableHead>
+          </TableRow></TableHeader>
           <TableBody>
-            {filteredUsers.map((user) => {
-              const isSelf = user.id === currentUserId
-              const isSuperAdmin = user.role === "super_admin"
-              const isPendingUpdate = updatingId === user.id
-
-              return (
-                <TableRow key={user.id} className="hover:bg-muted/10">
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
-                        {user.displayName ? user.displayName.charAt(0) : user.email.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-sm block">
-                          {user.displayName || "No Display Name"}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          Joined {new Date(user.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm font-medium">{user.email}</TableCell>
-                  <TableCell>
-                    {isSuperAdmin ? (
-                      <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
-                        Super Admin
-                      </Badge>
-                    ) : (
-                      <div className="max-w-[160px]">
-                        <Select
-                          disabled={isSelf || isPendingUpdate}
-                          defaultValue={user.role}
-                          onValueChange={(val) => handleRoleChange(user.id, val)}
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="Select role" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLE_OPTIONS.map(opt => (
-                              <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={`text-xs ${user.isActive ? "bg-success/5 text-success border-success/20" : "bg-muted text-muted-foreground border-border"}`}>
-                      {user.isActive ? "Active" : "Disabled"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {isPendingUpdate ? (
-                      <Loader2 className="h-4 w-4 animate-spin inline-block text-muted-foreground" />
-                    ) : (
-                      !isSuperAdmin && !isSelf && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={user.isActive ? "text-destructive hover:text-destructive hover:bg-destructive/10" : "text-success hover:text-success hover:bg-success/10"}
-                          onClick={() => handleStatusToggle(user.id, user.isActive)}
-                        >
-                          {user.isActive ? "Disable" : "Enable"}
-                        </Button>
-                      )
-                    )}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-            {filteredUsers.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground text-sm">
-                  No users found matching your search.
+            {filtered.map(member => {
+              const protectedMember = member.protectedAccess || member.id === currentUserId || ["league_owner", "super_admin"].includes(member.role)
+              return <TableRow key={member.membershipId}>
+                <TableCell><span className="font-semibold block">{member.displayName || "No display name"}</span><span className="text-xs text-muted-foreground">Joined {new Date(member.createdAt).toLocaleDateString()}</span></TableCell>
+                <TableCell>{member.email}</TableCell>
+                <TableCell>{protectedMember ? <Badge variant="outline">{member.role.replaceAll("_", " ")}</Badge> :
+                  <Select disabled={updatingId !== null} value={member.role} onValueChange={value => void save(member, { role: value as MemberRoleChange["role"] })}>
+                    <SelectTrigger className="min-h-11 min-w-[150px]" aria-label={`League role for ${member.displayName || member.email}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>{ROLE_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>}
                 </TableCell>
+                <TableCell><Badge variant="outline">{member.status === "active" ? "Active in league" : "Suspended in league"}</Badge>
+                  {!member.accountActive && <span className="block text-xs text-destructive">Platform account blocked</span>}
+                </TableCell>
+                <TableCell className="text-right">{!protectedMember && <Button variant="outline" size="sm" className="min-h-11" disabled={updatingId !== null} onClick={() => setConfirmation(member)}>
+                  {updatingId === member.membershipId && <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+                  {member.status === "active" ? "Suspend in league" : "Reactivate in league"}
+                </Button>}</TableCell>
               </TableRow>
-            )}
+            })}
+            {filtered.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center">No league members match this search.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </div>
+      <p className="text-xs text-muted-foreground">Showing up to 100 members in this league. Search applies to loaded members only.</p>
+      <Dialog open={confirmation !== null} onOpenChange={open => { if (!open && !updatingId) setConfirmation(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmation?.status === "active" ? "Suspend league membership?" : "Reactivate league membership?"}</DialogTitle>
+            <DialogDescription>
+              This affects {confirmation?.displayName || confirmation?.email} in {tenantName} only.
+              {confirmation?.status === "active" ? " New authorized scoring writes and administrative access will be blocked. Pending offline work is retained for review, not accepted automatically." : " Existing permitted league roles and assignments become usable again, unless the platform account is blocked."}
+              {" "}No other league or global account is changed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={updatingId !== null} onClick={() => setConfirmation(null)}>Cancel</Button>
+            <Button disabled={updatingId !== null} onClick={() => { if (confirmation) void save(confirmation, { status: confirmation.status === "active" ? "suspended" : "active" }) }}>{updatingId ? "Saving…" : "Confirm league change"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

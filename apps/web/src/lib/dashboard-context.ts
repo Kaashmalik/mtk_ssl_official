@@ -18,7 +18,7 @@ export async function getDashboardContext(clerkId: string): Promise<DashboardAcc
   try {
     const actor = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
     if (!actor || actor.isActive !== true) return { status: "denied" }
-    const requestTenant = await getTenantFromRequest()
+    const requestTenant = await getTenantFromRequest(true)
     // Same host-first selection as the shared resolver, but do not swallow errors
     // and silently switch workspaces during an outage.
     const tenantId = requestTenant?.id ?? (await (await import("@/app/actions/tenants")).getMyTenant())?.id
@@ -26,11 +26,11 @@ export async function getDashboardContext(clerkId: string): Promise<DashboardAcc
     const membership = await db.query.userTenantRoles.findFirst({ where: and(
       eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
     ) })
-    // Preserve the existing migration-era fallback only for an absent row, not errors.
-    if (membership && (membership.userId !== actor.id || membership.tenantId !== tenantId)) {
+    if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
+      || membership.status !== "active" || membership.role === "super_admin") {
       return { status: "denied" }
     }
-    const role = membership ? membership.role : (actor.tenantIds.includes(tenantId) ? actor.role : null)
+    const role = membership.role
     if (!role || !hasPermission(role, "match:read")) return { status: "denied" }
     const tenant = await db.query.tenants.findFirst({ where: and(eq(tenants.id, tenantId), eq(tenants.isActive, true)) })
     if (!tenant || tenant.id !== tenantId || tenant.isActive !== true) return { status: "denied" }

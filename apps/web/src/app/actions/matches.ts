@@ -280,12 +280,12 @@ export const assignScorer = withAuth("match:update", async (matchId: string, sco
   })
 })
 
-export const getScorersForTenant = withAuth("match:read", async () => {
+export const getScorersForTenant = withAuth("match:update", async () => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
-  await requirePermissionServer("match:read", tenantId)
+  await requirePermissionServer("match:update", tenantId)
   return db.select({ id: users.id, displayName: users.displayName, email: users.email })
     .from(users)
     .where(scorerMembership(tenantId))
