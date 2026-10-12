@@ -10,6 +10,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@mtk/database/lib/scoring-delivery": path.resolve(__dirname, "../../packages/database/src/lib/scoring-delivery.ts"),
       "@mtk/database/lib/live-scoring-state": path.resolve(__dirname, "../../packages/database/src/lib/live-scoring-state.ts"),
+      "@mtk/database/lib/tournament-configuration": path.resolve(__dirname, "../../packages/database/src/lib/tournament-configuration.ts"),
     },
   },
 })

@@ -11,9 +11,10 @@ import { useRouter } from "next/navigation"
 
 interface CompletionScreenProps {
   formData: TournamentFormData
+  tournamentId: string
 }
 
-export function CompletionScreen({ formData }: CompletionScreenProps) {
+export function CompletionScreen({ formData, tournamentId }: CompletionScreenProps) {
   const { t } = useLanguage()
   const router = useRouter()
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 })
@@ -80,7 +81,10 @@ export function CompletionScreen({ formData }: CompletionScreenProps) {
               </div>
             </div>
 
-            <div className="flex gap-4 justify-center">
+            <div className="flex flex-wrap gap-4 justify-center">
+              <Button onClick={() => router.push(`/dashboard/tournaments/${tournamentId}`)}>
+                View tournament
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => router.push("/dashboard")}

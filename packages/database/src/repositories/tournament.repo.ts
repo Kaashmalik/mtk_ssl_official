@@ -1,6 +1,7 @@
 import { ilike, eq, desc, asc, and, type SQL } from "drizzle-orm";
-import { tournaments } from "../schema/tournaments";
+import { tournaments, type NewTournament, type Tournament } from "../schema/tournaments";
 import { TenantScopedRepository } from "./base";
+import { db } from "../client";
 
 /**
  * Tenant-scoped repository for tournaments.
@@ -13,6 +14,19 @@ export class TournamentRepo extends TenantScopedRepository {
   table = tournaments;
   idColumn = tournaments.id;
   tenantCol = tournaments.tenantId;
+
+  /** Validate dependent settings against the locked row, then write atomically. */
+  async updateWithLock(id: string, prepare: (existing: Tournament) => Partial<Omit<NewTournament,
+    "id" | "tenantId" | "createdBy" | "createdAt">>): Promise<Tournament | null> {
+    const where = and(this.tenantScope(), eq(tournaments.id, id));
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(tournaments).where(where).limit(1).for("update");
+      if (!existing) return null;
+      const values = prepare(existing);
+      const [updated] = await tx.update(tournaments).set(values).where(where).returning();
+      return updated ?? null;
+    });
+  }
 
   /**
    * Find tournaments with optional status/search filter, sorted and paginated.
@@ -56,7 +70,7 @@ export class TournamentRepo extends TenantScopedRepository {
           : tournaments.createdAt;
 
     const [data, countResult] = await Promise.all([
-      this.findMany({
+      this.findMany<Tournament>({
         where: whereClause,
         limit: pageSize,
         offset,

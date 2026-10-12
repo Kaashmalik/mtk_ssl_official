@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { tournamentWizardSchema, TOURNAMENT_STEP_FIELDS, type TournamentFormData } from "@/lib/tournament-wizard"
+import { tournamentWizardSchema, tournamentWizardToInput, TOURNAMENT_STEP_FIELDS, type TournamentFormData } from "@/lib/tournament-wizard"
 import { Stepper, Card, CardContent, Button, Progress } from "@mtk/ui"
 import { ChevronLeft, ChevronRight, Languages } from "lucide-react"
 import { StepFormat } from "./steps/step-format"
@@ -35,7 +35,7 @@ const STEPS = [
   { label: "Match Type", description: "Select format" },
   { label: "Details", description: "Tournament info" },
   { label: "Registration", description: "Teams & fees" },
-  { label: "Schedule", description: "Auto-generate" },
+  { label: "Schedule", description: "Preview estimates" },
   { label: "Seeding", description: "Team order" },
   { label: "Branding", description: "Customize" },
 ]
@@ -44,6 +44,10 @@ export function TournamentWizard() {
   const [currentStep, setCurrentStep] = useState(0)
   const [isCompleted, setIsCompleted] = useState(false)
   const [isPending, setIsPending] = useState(false)
+  const [logoReading, setLogoReading] = useState(false)
+  const [createdTournamentId, setCreatedTournamentId] = useState<string | null>(null)
+  const [savedFormData, setSavedFormData] = useState<TournamentFormData | null>(null)
+  const submitting = useRef(false)
   const { language, toggleLanguage, t } = useLanguage()
 
   const form = useForm<TournamentFormData>({
@@ -70,7 +74,7 @@ export function TournamentWizard() {
   const progress = ((currentStep + 1) / STEPS.length) * 100
 
   const nextStep = async () => {
-    if (isPending) return
+    if (isPending || logoReading) return
     if (currentStep === STEPS.length - 1) {
       await handleSubmit()
       return
@@ -89,41 +93,41 @@ export function TournamentWizard() {
   }
 
   const handleSubmit = async () => {
-    const isValid = await form.trigger()
-    if (isValid) {
-      const data = form.getValues()
-      setIsPending(true)
-      try {
-        await createTournament({
-          name: data.name,
-          description: data.description || null,
-          format: data.format,
-          startDate: data.startDate || null,
-          endDate: data.endDate || null,
-          maxTeams: data.maxTeams,
-          status: "draft",
-          registrationOpen: false,
-        })
+    if (submitting.current || logoReading) return
+    submitting.current = true
+    try {
+      const isValid = await form.trigger()
+      if (isValid) {
+        const data = tournamentWizardSchema.parse(form.getValues())
+        setIsPending(true)
+        const result = await createTournament(tournamentWizardToInput(data))
+        setCreatedTournamentId(result.tournament.id)
+        setSavedFormData(data)
         toast.success("Tournament created successfully!")
         setIsCompleted(true)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to create tournament"
-        toast.error(message)
-      } finally {
-        setIsPending(false)
+      } else {
+        const invalidStep = TOURNAMENT_STEP_FIELDS.findIndex((fields) => fields.some((field) => form.getFieldState(field).invalid))
+        if (invalidStep >= 0) setCurrentStep(invalidStep)
+        toast.error("Please review the highlighted tournament settings.")
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create tournament"
+      toast.error(message)
+    } finally {
+      submitting.current = false
+      setIsPending(false)
     }
   }
 
-  if (isCompleted) {
-    return <CompletionScreen formData={form.getValues()} />
+  if (isCompleted && savedFormData && createdTournamentId) {
+    return <CompletionScreen formData={savedFormData} tournamentId={createdTournamentId} />
   }
 
   return (
     <div className="w-full">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div>
             <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
               {t("createTournament")}
@@ -132,8 +136,8 @@ export function TournamentWizard() {
               {t("createTournamentDescription")}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <CopyFromPrevious form={form} />
+          <div className="flex flex-wrap items-center gap-3">
+            <CopyFromPrevious form={form} disabled={isPending || logoReading} />
             <Button
               variant="outline"
               onClick={toggleLanguage}
@@ -157,30 +161,32 @@ export function TournamentWizard() {
       {/* Form Steps */}
       <Card>
         <CardContent className="p-6 md:p-8">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentStep}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.3 }}
-            >
-              {currentStep === 0 && <StepFormat form={form} />}
-              {currentStep === 1 && <StepMatchType form={form} />}
-              {currentStep === 2 && <StepTournamentDetails form={form} />}
-              {currentStep === 3 && <StepRegistration form={form} />}
-              {currentStep === 4 && <StepSchedule form={form} />}
-              {currentStep === 5 && <StepSeeding form={form} />}
-              {currentStep === 6 && <StepBranding form={form} />}
-            </motion.div>
-          </AnimatePresence>
+          <fieldset disabled={isPending || logoReading} className="min-w-0">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentStep}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                {currentStep === 0 && <StepFormat form={form} />}
+                {currentStep === 1 && <StepMatchType form={form} />}
+                {currentStep === 2 && <StepTournamentDetails form={form} />}
+                {currentStep === 3 && <StepRegistration form={form} />}
+                {currentStep === 4 && <StepSchedule form={form} />}
+                {currentStep === 5 && <StepSeeding form={form} />}
+                {currentStep === 6 && <StepBranding form={form} onUploadPendingChange={setLogoReading} />}
+              </motion.div>
+            </AnimatePresence>
+          </fieldset>
 
           {/* Navigation */}
           <div className="flex items-center justify-between mt-8 pt-6 border-t">
             <Button
               variant="outline"
               onClick={prevStep}
-              disabled={currentStep === 0 || isPending}
+              disabled={currentStep === 0 || isPending || logoReading}
               className="min-w-[120px]"
             >
               <ChevronLeft className="w-4 h-4 mr-2" />
@@ -194,10 +200,10 @@ export function TournamentWizard() {
             <Button
               onClick={nextStep}
               className="min-w-[120px]"
-              disabled={isPending}
+              disabled={isPending || logoReading}
             >
-              {isPending ? (
-                "Saving..."
+              {isPending || logoReading ? (
+                logoReading ? "Reading logo..." : "Saving..."
               ) : (
                 <>
                   {currentStep === STEPS.length - 1 ? t("create") : t("next")}

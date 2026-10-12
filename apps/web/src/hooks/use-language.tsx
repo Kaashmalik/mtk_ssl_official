@@ -189,8 +189,8 @@ const translations: Translations = {
     ur: "شیڈول کا پیش منظر",
   },
   schedulePreviewDescription: {
-    en: "Auto-generated schedule based on your settings",
-    ur: "آپ کی ترتیبات کے مطابق خودکار طور پر بنایا گیا شیڈول",
+    en: "Estimated matches based on your settings",
+    ur: "آپ کی ترتیبات کے مطابق میچوں کا تخمینہ",
   },
   totalMatches: {
     en: "Total Matches",

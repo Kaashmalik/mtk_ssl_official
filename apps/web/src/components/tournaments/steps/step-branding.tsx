@@ -5,24 +5,46 @@ import { Card, CardContent, Input, Label } from "@mtk/ui"
 import { Image as ImageIcon } from "lucide-react"
 import { TournamentFormData } from "../tournament-wizard"
 import { useLanguage } from "@/hooks/use-language"
-import { useState } from "react"
+import { useEffect, useRef } from "react"
+import { tournamentLogoFileError } from "@/lib/tournament-logo"
+import { logoSchema } from "@mtk/database/lib/tournament-configuration"
 
 interface StepBrandingProps {
   form: UseFormReturn<TournamentFormData>
+  onUploadPendingChange: (pending: boolean) => void
 }
 
-export function StepBranding({ form }: StepBrandingProps) {
+export function StepBranding({ form, onUploadPendingChange }: StepBrandingProps) {
   const { t } = useLanguage()
-  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const logoPreview = form.watch("logo")
+  const uploadVersion = useRef(0)
+  useEffect(() => () => {
+    uploadVersion.current++
+    onUploadPendingChange(false)
+  }, [onUploadPendingChange])
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    const version = ++uploadVersion.current
     if (file) {
+      const error = tournamentLogoFileError(file)
+      if (error) {
+        onUploadPendingChange(false)
+        form.setError("logo", { message: error })
+        e.target.value = ""
+        return
+      }
       const reader = new FileReader()
+      onUploadPendingChange(true)
       reader.onloadend = () => {
-        const result = reader.result as string
-        setLogoPreview(result)
-        form.setValue("logo", result)
+        if (version !== uploadVersion.current) return
+        onUploadPendingChange(false)
+        const result = logoSchema.safeParse(reader.result)
+        if (!result.success) {
+          form.setError("logo", { message: "Could not read this image. Try another file." })
+          return
+        }
+        form.setValue("logo", result.data, { shouldValidate: true, shouldDirty: true })
       }
       reader.readAsDataURL(file)
     }
@@ -49,7 +71,7 @@ export function StepBranding({ form }: StepBrandingProps) {
                   <input
                     id="logo"
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp"
                     onChange={handleLogoUpload}
                     className="hidden"
                   />
@@ -72,6 +94,8 @@ export function StepBranding({ form }: StepBrandingProps) {
                     </div>
                   </label>
                 </div>
+                <p className="text-xs text-muted-foreground mt-2">PNG, JPEG or WebP. Maximum 128 KB.</p>
+                {form.formState.errors.logo && <p role="alert" className="text-sm text-destructive">{form.formState.errors.logo.message}</p>}
               </div>
 
               <div>
@@ -86,11 +110,12 @@ export function StepBranding({ form }: StepBrandingProps) {
                   <Input
                     type="text"
                     value={form.watch("primaryColor") || "#10b981"}
-                    onChange={(e) => form.setValue("primaryColor", e.target.value)}
+                    onChange={(e) => form.setValue("primaryColor", e.target.value, { shouldValidate: true, shouldDirty: true })}
                     placeholder="#10b981"
                     className="flex-1"
                   />
                 </div>
+                {form.formState.errors.primaryColor && <p role="alert" className="text-sm text-destructive mt-1">{form.formState.errors.primaryColor.message}</p>}
               </div>
             </div>
           </CardContent>

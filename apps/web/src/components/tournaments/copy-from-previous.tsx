@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { UseFormReturn } from "react-hook-form"
 import { Button } from "@mtk/ui/components/ui/button"
 import {
@@ -13,67 +13,69 @@ import {
 } from "@mtk/ui/components/ui/dialog"
 import { Copy, Loader2 } from "lucide-react"
 import { TournamentFormData } from "./tournament-wizard"
-import { getTournaments } from "@/app/actions/tournaments"
+import { getTournament, getTournamentCopyOptions } from "@/app/actions/tournaments"
 import { useLanguage } from "@/hooks/use-language"
 import { toast } from "sonner"
+import { tournamentToWizardDefaults } from "@/lib/tournament-wizard"
 
-interface TournamentListItem {
-  id: string
-  name: string
-  format: "knockout" | "league" | "hybrid"
-  maxTeams: number | null
-  description: string | null
-}
+type TournamentListItem = Awaited<ReturnType<typeof getTournamentCopyOptions>>[number]
 
 interface CopyFromPreviousProps {
   form: UseFormReturn<TournamentFormData>
+  disabled?: boolean
 }
 
-export function CopyFromPrevious({ form }: CopyFromPreviousProps) {
+export function CopyFromPrevious({ form, disabled = false }: CopyFromPreviousProps) {
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [tournaments, setTournaments] = useState<TournamentListItem[]>([])
   const [loading, setLoading] = useState(false)
+  const selectionVersion = useRef(0)
+  useEffect(() => {
+    if (disabled) {
+      selectionVersion.current++
+      setOpen(false)
+      setLoading(false)
+    }
+  }, [disabled])
+  useEffect(() => () => { selectionVersion.current++ }, [])
 
   const loadTournaments = async () => {
+    const version = ++selectionVersion.current
     setLoading(true)
     try {
-      const result = await getTournaments({
-        page: 1,
-        pageSize: 50,
-        sortBy: "createdAt",
-        sortOrder: "desc"
-      })
-      // Map formatting to match
-      const mapped = (result.data as any[]).map(item => ({
-        id: item.id,
-        name: item.name,
-        format: (item.format === "round_robin" ? "league" : item.format) as "knockout" | "league" | "hybrid",
-        maxTeams: item.maxTeams,
-        description: item.description,
-      }))
-      setTournaments(mapped)
+      const options = await getTournamentCopyOptions()
+      if (version === selectionVersion.current) setTournaments(options)
     } catch (err) {
       console.error(err)
-      toast.error("Failed to load previous tournaments")
+      if (version === selectionVersion.current) toast.error("Failed to load previous tournaments")
     } finally {
-      setLoading(false)
+      if (version === selectionVersion.current) setLoading(false)
     }
   }
 
-  const handleSelect = (tournament: TournamentListItem) => {
-    form.setValue("format", tournament.format)
-    form.setValue("maxTeams", tournament.maxTeams || 8)
-    if (tournament.description) {
-      form.setValue("description", tournament.description)
+  const handleSelect = async (option: TournamentListItem) => {
+    if (disabled) return
+    const version = ++selectionVersion.current
+    setLoading(true)
+    try {
+      const tournament = await getTournament(option.id)
+      if (version !== selectionVersion.current) return
+      if (!tournament) throw new Error("Tournament is no longer available")
+      form.reset({ ...form.getValues(), ...tournamentToWizardDefaults(tournament) })
+      toast.success(`Settings copied from "${tournament.name}"`)
+      setOpen(false)
+    } catch (error) {
+      if (version === selectionVersion.current) toast.error(error instanceof Error ? error.message : "Could not copy tournament settings")
+    } finally {
+      if (version === selectionVersion.current) setLoading(false)
     }
-    toast.success(`Settings copied from "${tournament.name}"`)
-    setOpen(false)
   }
 
   return (
     <Dialog open={open} onOpenChange={(newOpen) => {
       setOpen(newOpen)
+      if (!newOpen) { selectionVersion.current++; setLoading(false) }
       if (newOpen) {
         loadTournaments()
       }
@@ -81,6 +83,7 @@ export function CopyFromPrevious({ form }: CopyFromPreviousProps) {
       <DialogTrigger asChild>
         <Button
           variant="outline"
+          disabled={disabled}
           className="flex items-center gap-2"
         >
           <Copy className="w-4 h-4" />

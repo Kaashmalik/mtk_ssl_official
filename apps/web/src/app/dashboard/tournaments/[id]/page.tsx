@@ -14,6 +14,7 @@ import { db, teams, matches, matchInnings, leagueRegistrations } from "@mtk/data
 import { eq, asc, and } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
+import { TournamentSettingsSummary } from "@/components/tournaments/tournament-settings-summary"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -83,16 +84,16 @@ export default async function TournamentDetailPage({ params }: { params: Promise
 
   // Fetch all matches for the tournament
   const tournamentMatchesRaw = await db.select().from(matches)
-    .where(eq(matches.tournamentId, id))
+    .where(and(eq(matches.tournamentId, id), eq(matches.tenantId, tournament.tenantId)))
     .orderBy(asc(matches.scheduledDate))
 
   // Fetch match details & team names
   const tournamentMatches = await Promise.all(tournamentMatchesRaw.map(async (m) => {
-    const [teamA] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(eq(teams.id, m.teamAId)).limit(1)
-    const [teamB] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(eq(teams.id, m.teamBId)).limit(1)
+    const [teamA] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(and(eq(teams.id, m.teamAId), eq(teams.tenantId, tournament.tenantId))).limit(1)
+    const [teamB] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(and(eq(teams.id, m.teamBId), eq(teams.tenantId, tournament.tenantId))).limit(1)
 
     // Fetch innings scores
-    const innings = await db.select().from(matchInnings).where(eq(matchInnings.matchId, m.id))
+    const innings = await db.select().from(matchInnings).where(and(eq(matchInnings.matchId, m.id), eq(matchInnings.tenantId, tournament.tenantId)))
     const teamAInn = innings.find(inn => inn.teamId === m.teamAId)
     const teamBInn = innings.find(inn => inn.teamId === m.teamBId)
 
@@ -263,6 +264,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-4">
+            <TournamentSettingsSummary tournament={tournament} />
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Tournament Information</CardTitle>

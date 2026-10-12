@@ -6,6 +6,7 @@ import { Calendar, Clock, MapPin } from "lucide-react"
 import { TournamentFormData } from "../tournament-wizard"
 import { useLanguage } from "@/hooks/use-language"
 import { PointsTablePreview } from "../points-table-preview"
+import { estimateTournamentSchedule } from "@/lib/tournament-schedule-preview"
 
 interface StepScheduleProps {
   form: UseFormReturn<TournamentFormData>
@@ -18,38 +19,7 @@ export function StepSchedule({ form }: StepScheduleProps) {
   const startDate = form.watch("startDate")
   const endDate = form.watch("endDate")
 
-  // Calculate schedule preview
-  const calculateMatches = () => {
-    if (!maxTeams) return { total: 0, days: 0, matchesPerDay: 0 }
-
-    let totalMatches = 0
-    if (format === "knockout") {
-      totalMatches = maxTeams - 1
-    } else if (format === "league") {
-      totalMatches = (maxTeams * (maxTeams - 1)) / 2
-    } else if (format === "hybrid") {
-      const groups = Math.ceil(maxTeams / 4)
-      const perGroup = Math.ceil(maxTeams / groups)
-      const groupMatches = groups * ((perGroup * (perGroup - 1)) / 2)
-      const knockoutMatches = groups - 1
-      totalMatches = groupMatches + knockoutMatches
-    }
-
-    const days = endDate && startDate
-      ? Math.ceil(
-          (new Date(endDate).getTime() - new Date(startDate).getTime()) /
-            (1000 * 60 * 60 * 24)
-        )
-      : 7
-
-    return {
-      total: totalMatches,
-      days: days || 7,
-      matchesPerDay: Math.ceil(totalMatches / (days || 7)),
-    }
-  }
-
-  const schedule = calculateMatches()
+  const schedule = estimateTournamentSchedule(format, maxTeams, startDate, endDate)
 
   return (
     <div className="space-y-6">
@@ -59,8 +29,9 @@ export function StepSchedule({ form }: StepScheduleProps) {
         </h2>
         <p className="text-gray-600 dark:text-gray-300">
           {t("schedulePreviewDescription") ||
-            "Auto-generated schedule based on your settings"}
+            "Estimated matches based on your settings"}
         </p>
+        <p className="text-sm text-muted-foreground mt-2">Preview only. Fixtures are created separately after teams are confirmed. Hybrid assumes balanced groups of up to four, with one qualifier per group.</p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-6 mb-6">
@@ -84,7 +55,7 @@ export function StepSchedule({ form }: StepScheduleProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{schedule.days}</p>
+            <p className="text-3xl font-bold">{schedule.days ?? "—"}</p>
             <p className="text-sm text-muted-foreground">days</p>
           </CardContent>
         </Card>
@@ -97,7 +68,7 @@ export function StepSchedule({ form }: StepScheduleProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{schedule.matchesPerDay}</p>
+            <p className="text-3xl font-bold">{schedule.matchesPerDay ?? "—"}</p>
           </CardContent>
         </Card>
       </div>

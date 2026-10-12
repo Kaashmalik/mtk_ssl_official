@@ -48,7 +48,8 @@ export function StepRegistration({ form }: StepRegistrationProps) {
             id="registrationFee"
             type="number"
             min={0}
-            step={100}
+            step={0.01}
+            max={99999999.99}
             {...form.register("registrationFee", { valueAsNumber: true })}
             placeholder="0"
             className="mt-2"
@@ -56,6 +57,7 @@ export function StepRegistration({ form }: StepRegistrationProps) {
           <p className="text-xs text-muted-foreground mt-1">
             {t("optional") || "Optional - Leave 0 for free registration"}
           </p>
+          {form.formState.errors.registrationFee && <p role="alert" className="text-sm text-destructive">{form.formState.errors.registrationFee.message}</p>}
         </div>
 
         <div>
@@ -64,7 +66,8 @@ export function StepRegistration({ form }: StepRegistrationProps) {
             id="prizePool"
             type="number"
             min={0}
-            step={1000}
+            step={0.01}
+            max={99999999.99}
             {...form.register("prizePool", { valueAsNumber: true })}
             placeholder="0"
             className="mt-2"
@@ -72,6 +75,7 @@ export function StepRegistration({ form }: StepRegistrationProps) {
           <p className="text-xs text-muted-foreground mt-1">
             {t("optional") || "Optional - Total prize money"}
           </p>
+          {form.formState.errors.prizePool && <p role="alert" className="text-sm text-destructive">{form.formState.errors.prizePool.message}</p>}
         </div>
       </div>
     </div>

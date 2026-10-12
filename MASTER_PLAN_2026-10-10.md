@@ -386,7 +386,8 @@ remaining limitations, not planned results.
 - [ ] Finish remaining scoring P0 integration work: authenticated mobile replay,
   mixed-extras rules, legacy-score review, and real concurrency/network verification.
 - [ ] Complete **TENANT-01** across remaining product operations.
-- [ ] Complete **TOUR-02** configuration persistence and round-trip loading.
+- [x] Complete **TOUR-02** configuration persistence and round-trip loading (Batch 4;
+  browser/PostgreSQL staging acceptance remains open).
 - [ ] Verify live snapshot initialization and scorer assignments.
 - [ ] Establish authenticated two-tenant staging and browser/E2E verification.
 - [ ] Continue the responsive design, white-label, billing, and launch phases.
@@ -557,13 +558,89 @@ verified. Expected fault-path tests log simulated database/cache errors.
   internal service credentials; normalize mobile delivery runs.
 - [ ] Propagate verified actor identity and enforce assignment/player eligibility
   in canonical service transactions.
-- [ ] Persist the remaining tournament wizard configuration (TOUR-02).
+- [x] Persist the remaining tournament wizard configuration (TOUR-02, Batch 4).
 - [ ] Verify real two-tenant authorization, PostgreSQL isolation, Socket.IO
   reconnects, and interrupted queue writes in staging/E2E.
 - [ ] Continue the remaining phases against their original acceptance criteria.
 
 Remote delivery must be verified after the reviewed commit and normal push;
 record/report a blocker instead of assuming a push succeeded.
+
+### 2026-10-12 — Batch 4: tournament configuration persistence and round-trip loading
+
+#### Completed implementation
+
+- [x] Synchronized with `origin/main` using `git pull --ff-only origin main`
+  before implementation; baseline `dd09b57` was clean and already up to date.
+- [x] **TOUR-02:** persist match type, overs, location, bracket slot order, and
+  branding in a validated version-1 `rules.wizard` envelope. Use existing columns;
+  no migration is needed. Standard T20/ODI overs are fixed; custom/tape-ball overs
+  must be explicitly selected.
+- [x] Store registration fees in the existing decimal `entryFee` column and prize
+  amounts in a versioned decimal-string `prizePool` envelope. Validate numeric
+  bounds/precision instead of silently dropping collected amounts.
+- [x] Validate calendar dates, date ordering, integer overs/capacity, complete
+  unique bracket slot permutations, bounded raster logo data/HTTPS URLs, and
+  six-digit brand colors at the server boundary.
+- [x] Round-trip settings through the tenant-authorized copy picker and detail
+  summary. Copy reusable preferences, not names, dates, identities, or registration
+  state. Lightweight picker responses omit logos/rules; load one selected record.
+- [x] Update existing tournaments in a short tenant-scoped row-lock transaction.
+  Validate partial dates against the locked row, resize seed slots when capacity
+  changes, and retain sibling rules/branding. Ordinary edits do not overwrite
+  existing rules or legacy prize distributions unless an amount is explicitly set.
+- [x] Preserve stable bracket slot labels during reordering/capacity changes and
+  clarify that slots are not registered team UUIDs or generated fixtures.
+- [x] Correct single-day/inclusive schedule estimates and balanced hybrid groups;
+  label estimates explicitly in English/Urdu rather than claiming fixture generation.
+- [x] Prevent overlapping local create submissions; wait for logo reading, freeze
+  fields during save, route invalid submissions to the relevant step, and link
+  successful creation to the returned tournament ID.
+- [x] Add explicit tenant predicates to tournament-detail match, team-name, and
+  innings reads. This is localized hardening, not platform-wide tenant completion.
+- [x] Add regression tests for persistence contracts, legacy-template fallback,
+  unsafe branding, exact monetary storage, invalid dates/slots, partial edits,
+  locked read-before-write ordering, and tenant predicates on both read/write.
+
+#### Test-only verification
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 201 tests / 19 files |
+| `corepack pnpm --filter @mtk/database test` | PASS — 103 tests / 5 files |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 78 tests / 6 suites |
+
+**382 tests pass; 93 additional passing regressions compared with Batch 3.**
+No build, lint, standalone type check, migration, or remote database write was
+performed. Vitest exercises source validation/mapping/actions and repository
+query construction with mocked auth/database infrastructure; Jest retains the
+canonical scoring regressions. Expected scoring fault-path logs are simulated.
+`git diff --check` passes.
+
+#### Rollout and remaining acceptance
+
+- Deploy the web app with rebuilt workspace packages through the normal pipeline;
+  the new browser-safe configuration module and locked repository method must be
+  available together. This session intentionally did not run a build.
+- Legacy/unknown JSON settings are not rewritten. Monetary amounts have no
+  configured currency/payment collection yet; do not describe them as paid billing.
+- Logos are bounded inline raster data (128 KB) or HTTPS references. Managed
+  storage, image-content inspection/processing, and tenant-wide branding/domain
+  enforcement remain white-label follow-ups; this saves tournament preferences.
+- Schedule estimates and seed order do not generate or bind real fixtures.
+  Advanced settings editing, registered-team assignment, and fixture generation
+  using saved preferences remain separate work.
+- Local duplicate-click prevention is not durable creation idempotency. Ambiguous
+  network responses and concurrent creators still need a persisted request-key
+  workflow; do not blindly retry a create after a lost response.
+- Browser reload/copy/upload journeys and real PostgreSQL locking/rollback need
+  authenticated staging verification. No deployed service/database was modified.
+- [ ] Complete the Clerk/Supabase mobile identity bridge, authenticated replay,
+  and shared mobile run normalization without exposing internal credentials.
+- [ ] Propagate actor identity and enforce revoked assignments/player eligibility
+  inside canonical scoring transactions.
+- [ ] Continue full cricket rules, corrections, platform tenant consistency,
+  white-label/billing phases, and the original staging/E2E acceptance criteria.
 
 ### Definition of done for each batch
 

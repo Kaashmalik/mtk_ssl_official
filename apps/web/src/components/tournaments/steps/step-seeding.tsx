@@ -23,6 +23,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { TournamentFormData } from "../tournament-wizard"
 import { useLanguage } from "@/hooks/use-language"
+import { reconcileSlotOrder } from "@/lib/tournament-wizard"
 
 export interface StepSeedingProps {
   form: UseFormReturn<TournamentFormData>
@@ -62,7 +63,7 @@ function SortableTeamItem({
       <div className="flex-1">
         <p className="font-medium">{name}</p>
       </div>
-      <div className="text-sm text-muted-foreground">#{id}</div>
+      <div className="text-sm text-muted-foreground">Drag to seed</div>
     </div>
   )
 }
@@ -71,27 +72,21 @@ export function StepSeeding({ form }: StepSeedingProps) {
   const { t } = useLanguage()
   const maxTeams = form.watch("maxTeams")
   const format = form.watch("format")
-
-  // Generate placeholder teams
+  const seedKey = (form.watch("teamSeeding") ?? []).join(",")
+  // Stable bracket slots; registered teams are assigned later.
   const generateTeams = useCallback(() => {
-    const teams = form.watch("teamSeeding") || []
-    if (teams.length === 0) {
-      return Array.from({ length: maxTeams }, (_, i) => ({
-        id: `team-${i + 1}`,
-        name: `Team ${i + 1}`,
-      }))
-    }
-    return teams.map((id, index) => ({
-      id,
-      name: `Team ${index + 1}`,
-    }))
-  }, [form, maxTeams])
+    return reconcileSlotOrder(seedKey ? seedKey.split(",") : [], maxTeams)
+      .map((id) => ({ id, name: `Slot ${id.slice(5)}` }))
+  }, [seedKey, maxTeams])
 
   const [teams, setTeams] = useState(() => generateTeams())
 
   useEffect(() => {
-    setTeams(generateTeams())
-  }, [generateTeams])
+    const next = generateTeams()
+    setTeams(next)
+    const order = next.map((team) => team.id)
+    if (order.join(",") !== seedKey) form.setValue("teamSeeding", order, { shouldValidate: true })
+  }, [generateTeams, form, seedKey])
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -104,16 +99,12 @@ export function StepSeeding({ form }: StepSeedingProps) {
     const { active, over } = event
 
     if (over && active.id !== over.id) {
-      setTeams((items) => {
-        const oldIndex = items.findIndex((item) => item.id === active.id)
-        const newIndex = items.findIndex((item) => item.id === over.id)
-        const newItems = arrayMove(items, oldIndex, newIndex)
-        form.setValue(
-          "teamSeeding",
-          newItems.map((item) => item.id)
-        )
-        return newItems
-      })
+      const oldIndex = teams.findIndex((item) => item.id === active.id)
+      const newIndex = teams.findIndex((item) => item.id === over.id)
+      if (oldIndex < 0 || newIndex < 0) return
+      const newItems = arrayMove(teams, oldIndex, newIndex)
+      setTeams(newItems)
+      form.setValue("teamSeeding", newItems.map((item) => item.id), { shouldValidate: true, shouldDirty: true })
     }
   }
 
@@ -138,10 +129,12 @@ export function StepSeeding({ form }: StepSeedingProps) {
         <p className="text-gray-600 dark:text-gray-300">
           {t("dragToReorder")}
         </p>
+        <p className="text-sm text-muted-foreground mt-2">This sets bracket slot order. Registered teams are assigned to slots when fixtures are created.</p>
       </div>
 
       <Card>
         <CardContent className="p-6">
+          {form.formState.errors.teamSeeding && <p role="alert" className="text-sm text-destructive mb-3">{form.formState.errors.teamSeeding.message}</p>}
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}

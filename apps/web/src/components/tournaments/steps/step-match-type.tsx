@@ -62,7 +62,7 @@ export function StepMatchType({ form }: StepMatchTypeProps) {
         {matchTypes.map((type) => {
           const Icon = type.icon
           const isSelected = selectedType === type.value
-          const isCustom = type.value === "custom"
+          const isCustom = type.value === "custom" || type.value === "tape_ball"
 
           return (
             <motion.div
@@ -118,6 +118,7 @@ export function StepMatchType({ form }: StepMatchTypeProps) {
                         className="mt-2"
                         placeholder="e.g., 10, 15, 30"
                       />
+                      {form.formState.errors.customOvers && <p role="alert" className="text-sm text-destructive mt-1">{form.formState.errors.customOvers.message}</p>}
                     </motion.div>
                   )}
 
