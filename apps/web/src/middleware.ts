@@ -30,7 +30,7 @@ const isPublicRoute = createRouteMatcher([
   "/offline",
   // Token-gated handoff: the HMAC-signed single-use token is the auth.
   "/impersonation/callback",
-  // Invite redemption: the hashed single-use token is the auth.
+  // Bearer-link preview is public; redemption still requires verified session identity.
   "/accept-invite",
   "/matches/(.*)",
   "/tournaments/(.*)",

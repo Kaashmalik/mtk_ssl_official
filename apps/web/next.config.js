@@ -105,6 +105,16 @@ const nextConfig = {
           { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
         ],
       },
+      // Invitation tokens also travel in authentication return URLs. Do not
+      // forward them as Referer headers or index/cache these handoff pages.
+      ...["/accept-invite", "/sign-in/:path*", "/sign-up/:path*"].map(source => ({
+        source,
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      })),
     ];
   },
 };

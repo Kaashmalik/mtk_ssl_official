@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState, useTransition } from "react"
+import React, { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useUser } from "@clerk/nextjs"
 import { toast } from "sonner"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
@@ -35,46 +36,61 @@ const STATUS_BADGE: Record<string, string> = {
   expired: "bg-red-600 text-white",
 }
 
-export function InviteManager() {
+export function InviteManager({ tenantId }: { tenantId: string }) {
+  const { user } = useUser()
+  const identityKey = `${tenantId}/${user?.id}`
+  const currentIdentity = useRef(identityKey)
+  currentIdentity.current = identityKey
   const [rows, setRows] = useState<InviteRow[]>([])
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([])
   const [email, setEmail] = useState("")
   const [role, setRole] = useState("team_manager")
   const [teamId, setTeamId] = useState("none")
   const [lastLink, setLastLink] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const refresh = useCallback(async () => {
     try {
-      const [invites, teamList] = await Promise.all([getInvites(), getTeams({ page: 1, pageSize: 100, sortBy: "name", sortOrder: "asc" })])
+      const [invites, teamList] = await Promise.all([getInvites(tenantId), getTeams({ page: 1, pageSize: 100, sortBy: "name", sortOrder: "asc" })])
+      if (currentIdentity.current !== identityKey) return
+      setLoadError(null)
       setRows(invites as unknown as InviteRow[])
       const list = (teamList as unknown as { data?: { id: string; name: string }[] })?.data ?? []
       setTeams(list)
     } catch {
-      /* not authorised */
+      if (currentIdentity.current !== identityKey) return
+      setRows([])
+      setTeams([])
+      setLastLink(null)
+      setLoadError("Unable to load invitations in this workspace. Reload before making changes.")
     }
-  }, [])
+  }, [tenantId, identityKey])
 
   useEffect(() => {
+    setRows([])
+    setLastLink(null)
     refresh()
-  }, [refresh])
+  }, [refresh, user?.id])
 
   const submit = () =>
     startTransition(async () => {
       try {
         const res = await createInvite({
+          tenantId,
           email,
           role: role as "team_manager" | "coach" | "scorer",
           teamId: teamId === "none" ? null : teamId,
         })
+        if (currentIdentity.current !== identityKey) return
         setLastLink(res.link)
         setEmail("")
-        // The invite is valid and the link is shown below either way; this only
-        // tells the owner whether to expect the email to arrive.
-        if (res.emailAccepted) {
+        if (res.emailState === "provider_accepted") {
           toast.success("Invitation created — email provider accepted it; delivery is not confirmed")
+        } else if (res.emailState === "unknown") {
+          toast.success("Invitation saved — email outcome is unknown. Use the link; do not assume delivery.")
         } else {
-          toast.success("Invitation created — email could not be sent, copy the link below")
+          toast.success("Invitation saved — email is unconfigured or rejected. Copy the link below.")
         }
         await refresh()
       } catch (e) {
@@ -89,10 +105,11 @@ export function InviteManager() {
           <UserPlus className="h-5 w-5" /> Invite Team Staff
         </CardTitle>
         <CardDescription>
-          Send a single-use invite link to a team manager, coach, or scorer. The link expires in 7 days.
+          Invite a team manager, coach, or scorer. Verify the invited email through the sign-in provider before acceptance. Links expire in 7 days; email delivery is not tracked yet.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="sm:col-span-2">
             <Label htmlFor="invite-email">Email</Label>
@@ -107,8 +124,8 @@ export function InviteManager() {
           </div>
           <div>
             <Label>Role</Label>
-            <Select value={role} onValueChange={setRole}>
-              <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+            <Select disabled={isPending} value={role} onValueChange={value => { setRole(value); setTeamId("none") }}>
+              <SelectTrigger className="mt-1.5" aria-label="Invited league role"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="team_manager">Team Manager</SelectItem>
                 <SelectItem value="coach">Coach</SelectItem>
@@ -116,20 +133,21 @@ export function InviteManager() {
               </SelectContent>
             </Select>
           </div>
-          <div>
+          {role === "team_manager" && <div>
             <Label>Team</Label>
-            <Select value={teamId} onValueChange={setTeamId}>
-              <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+            <Select disabled={isPending} value={teamId} onValueChange={setTeamId}>
+              <SelectTrigger className="mt-1.5" aria-label="Team for invited manager"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Whole league</SelectItem>
+                <SelectItem value="none">Choose a team</SelectItem>
                 {teams.map((t) => (
                   <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </div>}
         </div>
-        <Button onClick={submit} disabled={isPending || !email}>
+        <p className="text-xs text-muted-foreground">Coach and scorer invitations grant a league role only. Scorers still need an explicit match assignment. Team-scoped coach/scorer grants are not available.</p>
+        <Button onClick={submit} disabled={isPending || !!loadError || !email || (role === "team_manager" && teamId === "none")}>
           {isPending ? "Creating..." : "Create Invitation"}
         </Button>
 
@@ -141,12 +159,16 @@ export function InviteManager() {
               size="sm"
               variant="outline"
               onClick={async () => {
-                await navigator.clipboard.writeText(lastLink)
-                toast.success("Link copied")
+                try {
+                  await navigator.clipboard.writeText(lastLink)
+                  toast.success("Link copied — share only with the invited recipient")
+                } catch { toast.error("Clipboard access failed. Copy the link manually.") }
               }}
             >
               <Copy className="h-3.5 w-3.5 mr-1.5" /> Copy link
             </Button>
+            <p className="text-xs text-muted-foreground">Secret link shown once. If lost, revoke the pending invitation and create a replacement; this invalidates the old link.</p>
+            <Button size="sm" variant="ghost" onClick={() => setLastLink(null)}>Hide link</Button>
           </div>
         )}
 
@@ -178,10 +200,12 @@ export function InviteManager() {
                         <Button
                           size="sm"
                           variant="outline"
+                          disabled={isPending}
                           onClick={() =>
                             startTransition(async () => {
                               try {
-                                await revokeInvite(r.id)
+                                await revokeInvite({ tenantId, inviteId: r.id })
+                                setLastLink(null)
                                 toast.success("Invitation revoked")
                                 await refresh()
                               } catch (e) {

@@ -31,7 +31,7 @@ export default async function UserManagementPage() {
 
       {/* Invitations are shown only to the authorized league owner. */}
       <MotionWrapper variant="fadeInUp" delay={0.05}>
-        <InviteManager key={tenantId} />
+        <InviteManager key={`${tenantId}/${currentUserId}`} tenantId={tenantId} />
       </MotionWrapper>
 
       {/* Table Section */}

@@ -1,132 +1,81 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import React, { useEffect, useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useUser, UserButton } from "@clerk/nextjs"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
-import { Badge } from "@mtk/ui/components/ui/badge"
 import { acceptInvite, getInvitePreview } from "@/app/actions/users-invites"
+import { InvitedEmailVerification } from "@/components/users/invited-email-verification"
 
-interface InvitePreview {
-  email: string
-  role: string
-  status: string
-  tenantName: string
-  teamName: string | null
-  expired: boolean
-}
+type Preview = NonNullable<Awaited<ReturnType<typeof getInvitePreview>>>
 
 export default function AcceptInvitePage() {
-  const params = useSearchParams()
-  const token = params.get("token") ?? ""
+  const token = useSearchParams().get("token") ?? ""
   const router = useRouter()
-  const [preview, setPreview] = useState<InvitePreview | null>(null)
+  const { user, isLoaded: identityLoaded, isSignedIn } = useUser()
+  const [preview, setPreview] = useState<Preview | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState("")
+  const [reloadKey, setReloadKey] = useState(0)
   const [isPending, startTransition] = useTransition()
-
   useEffect(() => {
-    if (!token) {
-      setLoaded(true)
-      return
+    let cancelled = false
+    setLoaded(false)
+    setPreview(null)
+    setError("")
+    if (!token) { setLoaded(true); return }
+    getInvitePreview(token).then(value => { if (!cancelled) setPreview(value) })
+      .catch(() => { if (!cancelled) setError("Unable to check this invitation. Retry when access is available.") })
+      .finally(() => { if (!cancelled) setLoaded(true) })
+    return () => { cancelled = true }
+  }, [token, user?.id, reloadKey])
+
+  const address = preview?.recipientEmail ? user?.emailAddresses.find(item =>
+    item.emailAddress.trim().toLowerCase() === preview.recipientEmail!.trim().toLowerCase()) : null
+  const verified = address?.verification.status === "verified"
+  const returnPath = `/accept-invite?token=${encodeURIComponent(token)}`
+  const accept = () => startTransition(async () => {
+    try {
+      const result = await acceptInvite(token)
+      toast.success(`Invitation accepted as ${result.role.replaceAll("_", " ")}. Match assignments are separate.`)
+      // Do not claim acceptance selects the invited league: host/default routing
+      // is independent and the account may have other primary memberships.
+      setPreview(null)
+      router.replace("/dashboard")
+      router.refresh()
+    } catch {
+      setError("Invitation could not be accepted. Recheck it; your verification, membership, inviter or team access may have changed.")
     }
-    getInvitePreview(token)
-      .then((p) => setPreview(p as InvitePreview | null))
-      .catch(() => setPreview(null))
-      .finally(() => setLoaded(true))
-  }, [token])
+  })
 
-  const accept = () =>
-    startTransition(async () => {
-      try {
-        const res = await acceptInvite(token)
-        toast.success(`You joined as ${res.role.replace("_", " ")}`)
-        router.push("/dashboard")
-        router.refresh()
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to accept invitation")
-      }
-    })
-
-  if (!loaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">Checking invitation…</p>
-      </div>
-    )
-  }
-
-  if (!token || !preview) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Invitation not found</CardTitle>
-            <CardDescription>This link is invalid or has already been used.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/sign-in">Go to sign in</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  const blocked =
-    preview.expired || preview.status === "revoked" || preview.status === "expired" || preview.status === "accepted"
-
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Join {preview.tenantName}</CardTitle>
-          <CardDescription>
-            You have been invited as <b>{preview.role.replace("_", " ")}</b>
-            {preview.teamName ? ` for ${preview.teamName}` : ""}.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="rounded-lg border p-3 space-y-1 text-sm">
-            <p><span className="text-muted-foreground">Email:</span> {preview.email}</p>
-            <p className="flex items-center gap-2">
-              <span className="text-muted-foreground">Status:</span>
-              <Badge variant="outline">{preview.status}</Badge>
-            </p>
-          </div>
-
-          {preview.expired && <p className="text-sm text-destructive">This invitation has expired. Ask your league owner for a new one.</p>}
-          {preview.status === "accepted" && <p className="text-sm text-muted-foreground">This invitation was already accepted.</p>}
-          {preview.status === "revoked" && <p className="text-sm text-destructive">This invitation was revoked.</p>}
-
-          {!blocked && (
-            <div className="space-y-2">
-              <Button asChild className="w-full">
-                <Link href={`/sign-in?redirect_url=${encodeURIComponent(`/accept-invite?token=${token}`)}`}>
-                  Sign in to accept
-                </Link>
-              </Button>
-              <Button asChild variant="outline" className="w-full">
-                <Link href={`/sign-up?redirect_url=${encodeURIComponent(`/accept-invite?token=${token}`)}`}>
-                  Create an account
-                </Link>
-              </Button>
-              <Button
-                className="w-full"
-                disabled={isPending}
-                onClick={accept}
-              >
-                {isPending ? "Accepting..." : "Accept Invitation"}
-              </Button>
-              <p className="text-xs text-muted-foreground text-center">
-                Sign in or create an account with <b>{preview.email}</b>, then accept this invitation.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
+  return <div className="min-h-screen flex items-center justify-center p-4">
+    <Card className="w-full max-w-md">
+      <CardHeader>
+        <CardTitle>{!loaded || !identityLoaded ? "Checking invitation…" : preview ? `Join ${preview.tenantName}` : "Invitation unavailable"}</CardTitle>
+        <CardDescription>{preview ? `Invited as ${preview.role.replaceAll("_", " ")}${preview.teamName ? ` for ${preview.teamName}` : ""}.` : "Expired, revoked or already-used links cannot grant membership."}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {loaded && <Button variant="outline" disabled={isPending} onClick={() => setReloadKey(key => key + 1)}>Recheck invitation</Button>}
+        {preview && identityLoaded && <>
+          <p className="text-sm">Invited mailbox: <b>{preview.recipientHint}</b></p>
+          {!isSignedIn ? <div className="space-y-2">
+            <Button asChild className="w-full"><Link href={`/sign-in?redirect_url=${encodeURIComponent(returnPath)}`}>Sign in to verify and accept</Link></Button>
+            <Button asChild variant="outline" className="w-full"><Link href={`/sign-up?redirect_url=${encodeURIComponent(returnPath)}`}>Create an account</Link></Button>
+          </div> : <>
+            <UserButton />
+            {!address ? <p role="alert">This account does not contain the invited email. Switch accounts using the account menu; do not accept on behalf of another person.</p> : <>
+              {!verified && preview.recipientEmail && <InvitedEmailVerification key={`${user?.id}/${address.id}`} email={preview.recipientEmail} onVerified={() => setReloadKey(key => key + 1)} />}
+              {verified && <p className="text-sm">Invited email verified. League authority will be rechecked when you accept.</p>}
+              <Button className="w-full" disabled={isPending || !verified} onClick={accept}>{isPending ? "Accepting…" : "Accept invitation"}</Button>
+            </>}
+          </>}
+          <p className="text-xs text-muted-foreground">Email verification proves identity, not permission. Suspended memberships cannot be restored through an invitation. Scorers also need a match assignment.</p>
+        </>}
+      </CardContent>
+    </Card>
+  </div>
 }
