@@ -465,16 +465,105 @@ authenticated device journeys still require staging/E2E verification.
 - Durable event outbox, multi-tab/device coordination, assigned-scorer enforcement,
   and complete live-state snapshot/broadcast remain separate follow-ups.
 
-This batch is prepared for a reviewed commit and normal push. Verify delivery via
-repository history/remote status; report any push blocker explicitly.
+Batch 2 was committed and pushed to `main` as `5f50ab1`; the remote SHA and clean
+working tree were verified after delivery.
 
 #### Next implementation batch
 
 - [ ] Complete authenticated mobile scoring/replay and shared run normalization.
-- [ ] Enforce scorer-to-match assignment and validate player/team eligibility.
-- [ ] Initialize and reconcile the full live snapshot on fresh visits/reconnect.
+- [x] Enforce scorer-to-match assignment on the authenticated web scoring path (Batch 3).
+- [ ] Validate player/team eligibility and carry verified actor identity into service transactions.
+- [x] Initialize and reconcile full innings snapshots on fresh visits/reconnect (Batch 3).
 - [ ] Add real two-tenant PostgreSQL and network-interruption E2E scenarios.
 - [ ] Implement mixed extras, complete wicket rules, and audited legacy corrections.
+
+### 2026-10-12 — Batch 3: match-scoped scoring access and live initialization
+
+#### Completed implementation
+
+- [x] Confirmed a clean working tree and synchronized with `origin/main` using
+  `git pull --ff-only origin main` before making changes (baseline `5f50ab1`).
+- [x] Enforce the exact active tenant's permissions and match ownership before
+  record, undo, innings creation, and innings completion. Scorers must match
+  `matches.scorerId` using the provisioned database UUID, not their Clerk ID.
+  Authorized league owners/tenant administrators retain oversight access.
+- [x] Scope scorer assignment and candidate lists to the active tenant. Junction
+  membership roles take precedence; legacy membership is used only when that
+  tenant has no junction row. Validate assignment IDs and support unassignment.
+- [x] Return scoring capability to the scoring page, disable unauthorized mutation
+  controls, and show an explanatory read-only notice. Voice/quick scoring checks
+  player selection and routes wickets through the dismissal selector.
+- [x] **LIVE-01:** share a validated v2 snapshot contract with innings identities,
+  teams, lifecycle, total/legal balls, run rate, and all extras categories.
+  Include second innings and super over, not just numeric score updates.
+- [x] Read match/innings snapshots in a read-only repeatable-read transaction and
+  scope innings to the owning match tenant. Reject incomplete/cross-match cache
+  payloads; reduce the polling cache TTL from one hour to five seconds.
+- [x] Bypass polling cache for joins and broadcasts. Broadcast a complete fresh
+  snapshot after every successful HTTP scoring mutation, including undo and
+  lifecycle transitions. A failed broadcast does not report a committed write
+  as rejected. Reject malformed room IDs and leave a failed join's room.
+- [x] Initialize null client innings and keep status/extras on reconnect. Ignore
+  malformed/cross-match traffic and older per-innings timestamps. A newer
+  authoritative undo may reduce totals; never force a score to be monotonic.
+- [x] Preserve unconfirmed local deliveries while a snapshot arrives and request
+  a fresh snapshot after acknowledgement, rather than applying older totals.
+- [x] Extract the connection lifecycle for direct event tests. Rejoin on reconnect,
+  remove listeners on cleanup, and reference-count shared match subscriptions.
+  A dropped broadcast socket alone no longer means HTTP scoring is offline.
+- [x] Clear stale innings/history when changing matches. Hydrate scoring reloads
+  into the existing chase/super over, preserve operation IDs and delivery order,
+  and use the toss/innings batting team rather than assuming Team A bats first.
+- [x] Add regression tests for authorization, assignment scope, snapshot decoding,
+  post-commit broadcasts, reconnect/cleanup, offline preservation, and hydration.
+
+#### Test-only verification
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 155 tests / 18 files |
+| `corepack pnpm --filter @mtk/database test` | PASS — 56 tests / 3 files |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 78 tests / 6 suites |
+
+**289 tests pass; the passing test inventory grew by 82 from Batch 2.** No builds,
+lint, standalone type checks, migrations, or remote-database writes were run.
+`git diff --check` passes. Tests use real accounting/store/contract code with
+mocked database/auth/network infrastructure. Browser rendering, real PostgreSQL
+isolation, deployed Socket.IO delivery, and authenticated devices are not yet
+verified. Expected fault-path tests log simulated database/cache errors.
+
+#### Rollout and remaining work
+
+- Deploy web, scoring service, and workspace packages together for the v2
+  snapshot contract. Old numeric-only cache entries are deliberately discarded.
+  No schema migration is required for this batch.
+- Assignment checks currently live in the authenticated web boundary. Service
+  mutations still require their existing internal token and tenant guard;
+  verified actor propagation and transactional assignment-revocation checks
+  remain open before adding other clients.
+- Timestamp-based stale-snapshot rejection is not a durable event revision or
+  cross-instance delivery guarantee. Transactional outbox/revision sequencing,
+  multi-instance room adapters, and missed-event recovery remain open.
+- Snapshots initialize aggregate innings state; full remote ball history/player
+  statistics, multi-tab coordination, and correction timelines remain follow-ups.
+- **All phases are not complete.** Mobile authentication/run normalization,
+  player eligibility, full cricket rules, tournament configuration persistence,
+  platform-wide tenant consistency, white-label/billing phases, and staging/E2E
+  acceptance criteria remain tracked work, not implicitly marked done.
+
+#### Next implementation batch
+
+- [ ] Authenticate mobile replay through a user-facing API/BFF without exposing
+  internal service credentials; normalize mobile delivery runs.
+- [ ] Propagate verified actor identity and enforce assignment/player eligibility
+  in canonical service transactions.
+- [ ] Persist the remaining tournament wizard configuration (TOUR-02).
+- [ ] Verify real two-tenant authorization, PostgreSQL isolation, Socket.IO
+  reconnects, and interrupted queue writes in staging/E2E.
+- [ ] Continue the remaining phases against their original acceptance criteria.
+
+Remote delivery must be verified after the reviewed commit and normal push;
+record/report a blocker instead of assuming a push succeeded.
 
 ### Definition of done for each batch
 

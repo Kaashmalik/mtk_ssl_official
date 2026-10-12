@@ -9,7 +9,8 @@ import {
 import { eq, and, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
-import { resolveActiveTenantId } from "@/lib/rbac-server"
+import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
+import { canScoreMatch, requireMatchScoringAccess } from "@/lib/scoring-access"
 import { withAuth } from "./action-guard"
 import {
   proxyRecordBall,
@@ -54,6 +55,7 @@ export type CreateInningsInput = z.infer<typeof createInningsSchema>
 async function requireTenant() {
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:read", tenantId)
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
   if (!tenant) throw new Error("Tenant not found")
   return tenant
@@ -72,12 +74,7 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
     throw new Error("Batsman and bowler are required")
   }
 
-  // Verify match belongs to tenant and is scorable
-  const [match] = await db.select().from(matches)
-    .where(and(eq(matches.id, validated.matchId), eq(matches.tenantId, tenant.id)))
-    .limit(1)
-
-  if (!match) throw new Error("Match not found")
+  await requireMatchScoringAccess(userId, tenant.id, validated.matchId)
   const [innings] = await db.select().from(matchInnings)
     .where(and(eq(matchInnings.id, validated.inningsId), eq(matchInnings.matchId, validated.matchId),
       eq(matchInnings.tenantId, tenant.id)))
@@ -141,10 +138,9 @@ export const undoBall = withAuth("match:score", async (matchId: string, ballId: 
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
 
-  const [match] = await db.select({ id: matches.id }).from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-    .limit(1)
-  if (!match) throw new Error("Match not found")
+  z.string().uuid().parse(matchId)
+  z.string().uuid().parse(ballId)
+  await requireMatchScoringAccess(userId, tenant.id, matchId)
 
   await proxyUndoBall(matchId, ballId, tenant.id)
 
@@ -164,14 +160,7 @@ export const createInnings = withAuth("match:score", async (input: CreateInnings
   const tenant = await requireTenant()
   const validated = createInningsSchema.parse(input)
 
-  // Tenant boundary: scoring-service has no Clerk session and cannot tell which
-  // tenant the caller belongs to, so the ownership check must happen here.
-  const [match] = await db.select({ id: matches.id })
-    .from(matches)
-    .where(and(eq(matches.id, validated.matchId), eq(matches.tenantId, tenant.id)))
-    .limit(1)
-
-  if (!match) throw new Error("Match not found")
+  await requireMatchScoringAccess(userId, tenant.id, validated.matchId)
 
   const innings = await proxyCreateInnings(validated, tenant.id)
 
@@ -194,6 +183,7 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
     .limit(1)
 
   if (!match) throw new Error("Match not found")
+  const canScore = await canScoreMatch(userId, tenant.id, match)
 
   const [teamA, teamB, allInnings, recentBalls] = await Promise.all([
     db.select({ id: teams.id, name: teams.name }).from(teams)
@@ -210,6 +200,7 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
   ])
 
   return {
+    canScore,
     match: {
       id: match.id,
       status: match.status,
@@ -219,6 +210,7 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
       teamBId: match.teamBId,
       tossWinnerId: match.tossWinnerId,
       tossDecision: match.tossDecision,
+      updatedAt: match.updatedAt,
     },
     teamA: teamA[0] ?? { id: match.teamAId, name: "Team A" },
     teamB: teamB[0] ?? { id: match.teamBId, name: "Team B" },
@@ -268,6 +260,9 @@ export const completeInnings = withAuth("match:score", async (matchId: string, i
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
+  z.string().uuid().parse(matchId)
+  z.string().uuid().parse(inningsId)
+  await requireMatchScoringAccess(userId, tenant.id, matchId)
 
   // Tenant boundary. This must scope the innings to the caller's tenant *before*
   // forwarding the mutation: scoring-service is tenant-agnostic and will
@@ -326,5 +321,5 @@ export const getBallHistory = withAuth("match:read", async (matchId: string, inn
       eq(matchBalls.inningsId, inningsId),
       eq(matchBalls.tenantId, tenant.id),
     ))
-    .orderBy(asc(matchBalls.overNumber), asc(matchBalls.ballNumber))
+    .orderBy(asc(matchBalls.ballSequence))
 })

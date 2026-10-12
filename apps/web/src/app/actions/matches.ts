@@ -4,11 +4,13 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db, withTenantContext } from "@mtk/database"
 import { matches, teams, tournaments, users } from "@mtk/database"
-import { eq, and, desc, asc, count, or, arrayContains } from "drizzle-orm"
+import { eq, and, desc, asc, count, or } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
 import { checkPlanFeature, type PlanKey } from "@mtk/database"
+import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
+import { scorerMembership } from "@/lib/scorer-membership"
 
 
 
@@ -256,17 +258,21 @@ export const startStream = withAuth("match:update", async (matchId: string, sour
 export const assignScorer = withAuth("match:update", async (matchId: string, scorerId: string | null) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  return withTenantContext({ userId, tenantId: tenant.id }, async () => {
+  z.string().uuid().parse(matchId)
+  z.string().uuid().nullable().parse(scorerId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:update", tenantId)
+  return withTenantContext({ userId, tenantId }, async () => {
     if (scorerId) {
       const [scorer] = await db.select({ id: users.id }).from(users)
-        .where(and(eq(users.id, scorerId), eq(users.role, "scorer")))
+        .where(and(eq(users.id, scorerId), scorerMembership(tenantId)))
         .limit(1)
-      if (!scorer) throw new Error("Selected user is not a scorer")
+      if (!scorer) throw new Error("Selected user is not a scorer in this tenant")
     }
     const [match] = await db.update(matches)
       .set({ scorerId, updatedAt: new Date() })
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
+      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
       .returning()
     if (!match) throw new Error("Match not found")
     revalidatePath(`/dashboard/matches/${matchId}`)
@@ -277,10 +283,12 @@ export const assignScorer = withAuth("match:update", async (matchId: string, sco
 export const getScorersForTenant = withAuth("match:read", async () => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:read", tenantId)
   return db.select({ id: users.id, displayName: users.displayName, email: users.email })
     .from(users)
-    .where(and(eq(users.role, "scorer"), arrayContains(users.tenantIds, [tenant.id])))
+    .where(scorerMembership(tenantId))
 })
 
 export const endStream = withAuth("match:update", async (matchId: string) => {

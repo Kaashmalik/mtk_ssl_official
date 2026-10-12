@@ -1,133 +1,60 @@
-/**
- * Cache-decode contract for the scoring SoT's match state.
- *
- * `getMatchState` reads from Redis and, on a hit, returns the decoded value
- * directly — and that value is then broadcast over the WebSocket gateway to
- * every subscriber of `match:<id>`. A truncated, stale, or tampered cache entry
- * would therefore become the authoritative match state for all viewers.
- *
- * These tests pin the fail-closed behaviour of `parseCachedMatchState`.
- */
-
 import { parseCachedMatchState } from './match-state';
 
-/**
- * Written out independently of the implementation on purpose. If the spec read
- * the same constant the guard uses, adding a status to both would keep the test
- * green even if the guard itself were wrong. The full list is enforced against
- * the real enum at compile time by `_exhaustive` in `match-state.ts`.
- */
-const EXPECTED_STATUSES = [
-  'scheduled',
-  'toss',
-  'live',
-  'innings_break',
-  'completed',
-  'abandoned',
-  'cancelled',
-  'no_result',
-] as const;
-
-function validScorecard(innings: number) {
+const MATCH = '00000000-0000-4000-8000-000000000001';
+function innings(number = 1) {
   return {
-    matchId: 'match-1',
-    innings,
-    totalRuns: 120,
-    totalWickets: 3,
-    overs: 18,
-    balls: 2,
-    runRate: 6.6,
+    matchId: MATCH, innings: number,
+    inningsId: '00000000-0000-4000-8000-000000000002',
+    teamId: '00000000-0000-4000-8000-000000000003', status: 'in_progress',
+    totalRuns: 120, totalWickets: 3, totalBalls: 110, overs: 18, balls: 2, runRate: 6.6,
+    extras: 10, wides: 3, noBalls: 1, byes: 4, legByes: 2,
+    updatedAt: '2026-10-12T12:00:00.000Z',
   };
 }
+function state() {
+  return { version: 2, matchId: MATCH, status: 'live', currentInnings: 1,
+    updatedAt: '2026-10-12T12:00:00.000Z', innings1: innings() };
+}
 
-describe('parseCachedMatchState', () => {
-  it('accepts a well-formed minimal state', () => {
-    const raw = JSON.stringify({ matchId: 'match-1', status: 'live', currentInnings: 1 });
-    expect(parseCachedMatchState(raw)).toEqual({
-      matchId: 'match-1',
-      status: 'live',
-      currentInnings: 1,
-    });
+describe('parseCachedMatchState v2', () => {
+  it('accepts complete innings metadata and extras needed for fresh viewers', () => {
+    expect(parseCachedMatchState(JSON.stringify(state()))).toEqual(state());
   });
 
-  it('accepts every status the enum actually defines', () => {
-    // Guards against the enum growing without the guard being updated. The old
-    // hand-written union was missing `cancelled` and `no_result` entirely.
-    for (const status of EXPECTED_STATUSES) {
-      const raw = JSON.stringify({ matchId: 'm', status, currentInnings: 1 });
-      expect(parseCachedMatchState(raw)).not.toBeNull();
-    }
+  it.each(['scheduled', 'toss', 'live', 'innings_break', 'completed', 'abandoned', 'cancelled', 'no_result'])(
+    'accepts database status %s', (status) => {
+      expect(parseCachedMatchState(JSON.stringify({ ...state(), status }))).not.toBeNull();
+    },
+  );
+
+  it('accepts a super-over snapshot', () => {
+    expect(parseCachedMatchState(JSON.stringify({ ...state(), currentInnings: 3, superOver: innings(3) }))?.superOver?.innings).toBe(3);
   });
 
-  it('accepts optional innings scorecards', () => {
-    const raw = JSON.stringify({
-      matchId: 'match-1',
-      status: 'innings_break',
-      currentInnings: 2,
-      innings1: validScorecard(1),
-      innings2: validScorecard(2),
-    });
-    const parsed = parseCachedMatchState(raw);
-    expect(parsed?.innings1?.totalRuns).toBe(120);
-    expect(parsed?.innings2?.innings).toBe(2);
-  });
-
-  it('rejects malformed JSON', () => {
-    expect(parseCachedMatchState('{not json')).toBeNull();
-  });
-
-  it('rejects non-object payloads', () => {
-    expect(parseCachedMatchState('null')).toBeNull();
-    expect(parseCachedMatchState('42')).toBeNull();
-    expect(parseCachedMatchState('"a string"')).toBeNull();
-    expect(parseCachedMatchState('[]')).toBeNull();
-  });
-
-  it('rejects a missing or non-string matchId', () => {
-    expect(parseCachedMatchState(JSON.stringify({ status: 'live', currentInnings: 1 }))).toBeNull();
-    expect(
-      parseCachedMatchState(JSON.stringify({ matchId: 7, status: 'live', currentInnings: 1 })),
-    ).toBeNull();
-  });
-
-  it('rejects a status outside the enum', () => {
-    // The exact value the old, incorrect `MatchState.status` union asserted.
-    expect(
-      parseCachedMatchState(JSON.stringify({ matchId: 'm', status: 'not_started', currentInnings: 1 })),
-    ).toBeNull();
-    expect(
-      parseCachedMatchState(JSON.stringify({ matchId: 'm', status: 'in_progress', currentInnings: 1 })),
-    ).toBeNull();
-  });
-
-  it('rejects a non-numeric currentInnings', () => {
-    expect(
-      parseCachedMatchState(JSON.stringify({ matchId: 'm', status: 'live', currentInnings: '1' })),
-    ).toBeNull();
-  });
-
-  it('rejects a partially-shaped innings scorecard', () => {
-    const partial = { ...validScorecard(1), runRate: undefined };
-    const raw = JSON.stringify({
-      matchId: 'm',
-      status: 'live',
-      currentInnings: 1,
-      innings1: partial,
-    });
+  it.each(['{not json', 'null', '42', '[]', '"text"'])('rejects invalid input %s', (raw) => {
     expect(parseCachedMatchState(raw)).toBeNull();
   });
 
-  it('does not let extra unknown fields through', () => {
-    // Extra keys are dropped rather than forwarded, so a poisoned payload
-    // cannot smuggle additional properties into the broadcast state.
-    const raw = JSON.stringify({
-      matchId: 'm',
-      status: 'live',
-      currentInnings: 1,
-      adminOverride: true,
-    });
-    const parsed = parseCachedMatchState(raw);
-    expect(parsed).not.toBeNull();
-    expect(parsed).not.toHaveProperty('adminOverride');
+  it('rejects the old numeric-only cache contract instead of forwarding an incomplete state', () => {
+    expect(parseCachedMatchState(JSON.stringify({ matchId: MATCH, status: 'live', currentInnings: 1 }))).toBeNull();
+  });
+
+  it.each([
+    { totalRuns: -1 }, { totalRuns: 1.5 }, { balls: 6 }, { runRate: null },
+    { totalBalls: 109 }, { inningsId: undefined }, { extras: 121 }, { status: 'unknown' },
+    { matchId: '00000000-0000-4000-8000-000000000099' }, { innings: 2 },
+  ])('rejects corrupt or mismatched innings %s', (change) => {
+    expect(parseCachedMatchState(JSON.stringify({ ...state(), innings1: { ...innings(), ...change } }))).toBeNull();
+  });
+
+  it('rejects a bad current innings or match status', () => {
+    expect(parseCachedMatchState(JSON.stringify({ ...state(), currentInnings: 4 }))).toBeNull();
+    expect(parseCachedMatchState(JSON.stringify({ ...state(), status: 'in_progress' }))).toBeNull();
+  });
+
+  it('drops unknown properties at both match and innings level', () => {
+    const parsed = parseCachedMatchState(JSON.stringify({ ...state(), secret: 'private', innings1: { ...innings(), secret: 'private' } }));
+    expect(parsed).not.toHaveProperty('secret');
+    expect(parsed?.innings1).not.toHaveProperty('secret');
   });
 });

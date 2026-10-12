@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { calculateDeliveryDelta, scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery";
+import type { LiveMatchState } from "@mtk/database/lib/live-scoring-state";
 
 export type BallInput = 0 | 1 | 2 | 3 | 4 | 6 | "W" | "WD" | "NB" | "LB" | "B";
 export type WicketType = "bowled" | "caught" | "lbw" | "run_out" | "stumped" | "hit_wicket";
@@ -28,6 +29,7 @@ export interface BallData {
 }
 
 export interface InningsState {
+  lastSnapshotAt?: string;
   inningsId: string;
   teamId: string;
   totalRuns: number;
@@ -55,6 +57,8 @@ interface InningsHistory {
 
 export interface ScoringState {
   matchId: string;
+  matchStatus: LiveMatchState["status"];
+  matchUpdatedAt?: string;
   currentInnings: 1 | 2 | "super_over";
   innings1: InningsState | null;
   innings2: InningsState | null;
@@ -125,6 +129,7 @@ export const useScoringStore = create<ScoringState>()(
   persist(
     (set, get) => ({
       matchId: "",
+      matchStatus: "scheduled",
       currentInnings: 1,
       innings1: null,
       innings2: null,
@@ -134,7 +139,12 @@ export const useScoringStore = create<ScoringState>()(
       superOverHistory: createEmptyHistory(),
       isOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
 
-      setMatchId: (matchId: string) => set({ matchId }),
+      setMatchId: (matchId: string) => set((state) => state.matchId === matchId ? {} : ({
+        matchId, matchStatus: "scheduled", matchUpdatedAt: undefined,
+        currentInnings: 1, innings1: null, innings2: null, superOver: null,
+        innings1History: createEmptyHistory(), innings2History: createEmptyHistory(),
+        superOverHistory: createEmptyHistory(),
+      })),
 
       acknowledgeBall: (localId, serverId, clientOpId) => set((state) => {
         const acknowledge = (innings: InningsState | null): InningsState | null => innings && ({

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import { matchBalls, matchInnings, scoringEvents, scorecardProjections } from '@mtk/database';
+import { db, matchBalls, matchInnings, scoringEvents, scorecardProjections } from '@mtk/database';
 import { ScoringService, BallEvent } from './scoring.service';
 import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 
@@ -11,7 +11,7 @@ const INNINGS = '00000000-0000-4000-8000-000000000003';
 const BATTER = '00000000-0000-4000-8000-000000000004';
 const BOWLER = '00000000-0000-4000-8000-000000000005';
 const dialect = new PgDialect();
-const mockRedis = { del: jest.fn().mockResolvedValue(1) };
+const mockRedis = { del: jest.fn().mockResolvedValue(1), get: jest.fn(), set: jest.fn() };
 let mockTx: ReturnType<typeof createTransaction>;
 let sequence = 10;
 
@@ -43,8 +43,9 @@ function createTransaction() {
       id: INNINGS, tenantId: TENANT, matchId: MATCH, teamId: TENANT,
       inningsNumber: 1, status: 'in_progress', totalRuns: 0, totalWickets: 0,
       totalBalls: 0, extras: 0, byes: 0, legByes: 0, wides: 0, noBalls: 0,
+      updatedAt: new Date('2026-10-12T12:00:00.000Z'),
     },
-    match: { id: MATCH, tenantId: TENANT, status: 'live', startDate: new Date() },
+    match: { id: MATCH, tenantId: TENANT, status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     balls: [] as Array<Record<string, any>>,
     events: [] as Array<Record<string, any>>,
     projection: {} as Record<string, any>,
@@ -55,7 +56,8 @@ function createTransaction() {
     execute: jest.fn().mockResolvedValue([]),
     query: {
       matches: { findFirst: jest.fn(async () => ({ ...state.match })) },
-      matchInnings: { findFirst: jest.fn(async () => ({ ...state.innings })) },
+      matchInnings: { findFirst: jest.fn(async () => ({ ...state.innings })),
+        findMany: jest.fn(async (_options: { where: SQL; orderBy: unknown[] }) => [{ ...state.innings }]) },
       players: { findFirst: jest.fn(async () => ({ name: 'Player' })) },
       scorecardProjections: { findFirst: jest.fn(async () => state.projection) },
       matchBalls: { findFirst: jest.fn(async ({ where }) => {
@@ -118,12 +120,42 @@ describe('Canonical delivery record, replay and undo', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRedis.get.mockReset().mockResolvedValue(null);
+    mockRedis.set.mockReset().mockResolvedValue('OK');
     mockTx = createTransaction();
     mockRedis.del.mockImplementation(async () => {
       expect(mockTx.inTransaction).toBe(false);
       return 1;
     });
     service = new ScoringService(publisher as unknown as KafkaScoringPublisher);
+  });
+
+  it('returns complete live metadata from a tenant-scoped consistent read transaction', async () => {
+    mockTx.state.innings.extras = 2;
+    mockTx.state.innings.totalRuns = 5;
+    const state = await service.getMatchState(MATCH, true);
+    expect(state).toMatchObject({ version: 2, matchId: MATCH, innings1: {
+      inningsId: INNINGS, teamId: TENANT, extras: 2, totalRuns: 5, status: 'in_progress',
+    } });
+    expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'repeatable read', accessMode: 'read only' });
+    const query = dialect.sqlToQuery(mockTx.query.matchInnings.findMany.mock.calls[0][0].where);
+    expect(query.params).toEqual([MATCH, TENANT]);
+    expect(mockRedis.get).not.toHaveBeenCalled();
+    expect(mockRedis.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects an old cached contract and bounds polling cache freshness', async () => {
+    mockRedis.get.mockResolvedValue(JSON.stringify({ matchId: MATCH, status: 'live', currentInnings: 1 }));
+    expect((await service.getMatchState(MATCH))?.version).toBe(2);
+    expect(mockRedis.del).toHaveBeenCalledWith(`match:state:${MATCH}`);
+    expect(mockRedis.set).toHaveBeenCalledWith(`match:state:${MATCH}`, expect.any(String), 'EX', 5);
+  });
+
+  it('does not return a valid cache snapshot belonging to another match', async () => {
+    const foreign = await service.getMatchState(MATCH, true);
+    mockRedis.get.mockResolvedValue(JSON.stringify({ ...foreign, matchId: BATTER, innings1: { ...foreign.innings1, matchId: BATTER } }));
+    expect((await service.getMatchState(MATCH))?.matchId).toBe(MATCH);
+    expect(mockRedis.del).toHaveBeenCalledWith(`match:state:${MATCH}`);
   });
 
   it.each([

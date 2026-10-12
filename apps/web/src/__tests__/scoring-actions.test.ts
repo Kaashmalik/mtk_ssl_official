@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { recordBall, type RecordBallInput } from "@/app/actions/scoring"
+import { recordBall, undoBall, createInnings, completeInnings, type RecordBallInput } from "@/app/actions/scoring"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), resolveTenant: vi.fn(), authorize: vi.fn(), findTenant: vi.fn(),
   limit: vi.fn(), proxy: vi.fn(),
+  scoringAccess: vi.fn(), undo: vi.fn(), create: vi.fn(), complete: vi.fn(),
 }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
@@ -11,7 +12,11 @@ vi.mock("@/lib/rbac-server", () => ({
   requirePermissionServer: mocks.authorize,
   resolveActiveTenantId: mocks.resolveTenant,
 }))
-vi.mock("@/lib/scoring-service-client", () => ({ proxyRecordBall: mocks.proxy }))
+vi.mock("@/lib/scoring-access", () => ({ requireMatchScoringAccess: mocks.scoringAccess }))
+vi.mock("@/lib/scoring-service-client", () => ({
+  proxyRecordBall: mocks.proxy, proxyUndoBall: mocks.undo,
+  proxyCreateInnings: mocks.create, proxyCompleteInnings: mocks.complete,
+}))
 vi.mock("@mtk/database", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@mtk/database")>()
   const chain = { from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: mocks.limit }
@@ -36,12 +41,12 @@ describe("Scoring action explicit command bridge", () => {
     vi.clearAllMocks()
     mocks.limit.mockReset()
     mocks.proxy.mockReset()
+    mocks.scoringAccess.mockReset().mockResolvedValue({ id: MATCH, tenantId: TENANT })
     mocks.auth.mockResolvedValue({ userId: "user_clerk" })
     mocks.resolveTenant.mockResolvedValue(TENANT)
     mocks.authorize.mockResolvedValue(undefined)
     mocks.findTenant.mockResolvedValue({ id: TENANT })
-    mocks.limit.mockResolvedValue([]).mockResolvedValueOnce([{ id: MATCH, status: "live" }])
-      .mockResolvedValueOnce([{ status: "in_progress" }])
+    mocks.limit.mockResolvedValue([{ status: "in_progress" }])
     mocks.proxy.mockImplementation(async (command) => ({
       ballId: "saved", clientOpId: command.clientOpId,
       scorecard: { matchId: MATCH, innings: 1, totalRuns: 1, totalWickets: 0, overs: 0, balls: 0, runRate: 0 },
@@ -72,9 +77,19 @@ describe("Scoring action explicit command bridge", () => {
   })
 
   it("lets the canonical service decide whether a completed match request is a replay", async () => {
-    mocks.limit.mockReset().mockResolvedValueOnce([{ id: MATCH, status: "completed" }])
-      .mockResolvedValueOnce([{ status: "completed" }])
+    mocks.limit.mockResolvedValueOnce([{ status: "completed" }])
     await recordBall(input())
     expect(mocks.proxy).toHaveBeenCalledOnce()
+  })
+
+  it.each(["record", "undo", "create", "complete"])("denies unassigned scorer before %s proxy mutation", async (operation) => {
+    mocks.scoringAccess.mockRejectedValue(new Error("Not assigned"))
+    const run = () => operation === "record" ? recordBall(input()) : operation === "undo"
+      ? undoBall(MATCH, input().inningsId) : operation === "create"
+        ? createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1 })
+        : completeInnings(MATCH, input().inningsId)
+    await expect(run()).rejects.toThrow("Not assigned")
+    expect(mocks.scoringAccess).toHaveBeenCalledWith("user_clerk", TENANT, MATCH)
+    for (const proxy of [mocks.proxy, mocks.undo, mocks.create, mocks.complete]) expect(proxy).not.toHaveBeenCalled()
   })
 })

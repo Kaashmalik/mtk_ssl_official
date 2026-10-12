@@ -15,6 +15,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ScoringService } from './scoring.service';
 import { ScoringServiceAuthGuard } from './common/guards/scoring-service-auth.guard';
 import { TenantScopeGuard } from './common/guards/tenant-scope.guard';
+import { ScoringGateway } from './scoring.gateway';
 
 /**
  * Reads the tenant validated and attached by `TenantScopeGuard`.
@@ -59,7 +60,7 @@ const MUTATION_GUARDS = [
 @Controller('scoring')
 @UseGuards(ThrottlerGuard)
 export class ScoringController {
-  constructor(private readonly scoringService: ScoringService) {}
+  constructor(private readonly scoringService: ScoringService, private readonly gateway: ScoringGateway) {}
 
   // Reads stay unauthenticated so public scoreboards can poll state. They only
   // ever expose scorecard numbers for a match the caller already holds a UUID
@@ -86,10 +87,12 @@ export class ScoringController {
   @HttpCode(HttpStatus.CREATED)
   async recordBall(@Req() req: Request, @Body() dto: RecordBallDto) {
     // The canonical service validates the full command for every entry point.
-    return this.scoringService.recordBall(tenantIdOf(req), {
+    const result = await this.scoringService.recordBall(tenantIdOf(req), {
       ...dto,
       timestamp: new Date(),
     });
+    await this.gateway.broadcastMatchState(dto.matchId);
+    return result;
   }
 
   @Post('ball/undo')
@@ -99,11 +102,13 @@ export class ScoringController {
     @Req() req: Request,
     @Body() body: { matchId: string; ballId: string },
   ) {
-    return this.scoringService.undoBall(
+    const result = await this.scoringService.undoBall(
       tenantIdOf(req),
       body.matchId,
       body.ballId,
     );
+    await this.gateway.broadcastMatchState(body.matchId);
+    return result;
   }
 
   @Post('innings')
@@ -111,11 +116,13 @@ export class ScoringController {
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   async createInnings(@Req() req: Request, @Body() dto: CreateInningsDto) {
-    return this.scoringService.createInnings(tenantIdOf(req), {
+    const result = await this.scoringService.createInnings(tenantIdOf(req), {
       matchId: dto.matchId,
       teamId: dto.teamId,
       inningsNumber: Number(dto.inningsNumber),
     });
+    await this.gateway.broadcastMatchState(dto.matchId);
+    return result;
   }
 
   /**
@@ -131,11 +138,13 @@ export class ScoringController {
     @Param('inningsId') inningsId: string,
     @Body() body: { matchId: string },
   ) {
-    return this.scoringService.completeInnings(
+    const result = await this.scoringService.completeInnings(
       tenantIdOf(req),
       body.matchId,
       inningsId,
     );
+    await this.gateway.broadcastMatchState(body.matchId);
+    return result;
   }
 
   @Post('match/:matchId/complete')
@@ -153,6 +162,7 @@ export class ScoringController {
       body.winnerId,
       body.result,
     );
+    await this.gateway.broadcastMatchState(matchId);
     return { success: true, matchId, status: 'completed' };
   }
 }

@@ -44,54 +44,11 @@ import { LanguageSelector } from "@/components/scoring/language-selector";
 import { queueBall, removeQueuedBall } from "@/lib/offline-ball-queue";
 import { resolveActionError } from "@/lib/plan-limit-error";
 import { useOfflineBallSync } from "@/hooks/use-offline-ball-sync";
+import { hydrateScoringState, type ScoringPageSnapshot } from "@/lib/scoring-hydration";
 
 // ─── Types ────────────────────────────────────────────────────
 
-interface MatchData {
-  match: {
-    id: string;
-    status: string;
-    matchFormat: string | null;
-    totalOvers: number | null;
-    teamAId: string;
-    teamBId: string;
-    tossWinnerId: string | null;
-    tossDecision: string | null;
-  };
-  teamA: { id: string; name: string };
-  teamB: { id: string; name: string };
-  innings: Array<{
-    id: string;
-    matchId: string;
-    teamId: string;
-    inningsNumber: number;
-    totalRuns: number;
-    totalWickets: number;
-    totalBalls: number;
-    extras: number;
-    byes: number;
-    legByes: number;
-    wides: number;
-    noBalls: number;
-    status: string;
-  }>;
-  recentBalls: Array<{
-    id: string;
-    inningsId: string;
-    overNumber: number;
-    ballNumber: number;
-    runs: number;
-    isWicket: boolean;
-    isWide: boolean;
-    isNoBall: boolean;
-    isBye: boolean;
-    isLegBye: boolean;
-    isFour: boolean;
-    isSix: boolean;
-    batsmanId: string | null;
-    bowlerId: string | null;
-  }>;
-}
+type MatchData = ScoringPageSnapshot;
 
 interface PlayersData {
   teamA: Array<{ id: string; name: string; role: string | null }>;
@@ -138,10 +95,7 @@ function ScoringInterface() {
   // Live updates from scoring-service WebSocket (reconnect + backoff)
   useScoringSocket(matchId);
 
-  const currentTeamId =
-    currentInningsNum === 1 ? matchData?.match.teamAId :
-    currentInningsNum === 2 ? matchData?.match.teamBId :
-    null;
+  const currentTeamId = currentInningsData?.teamId;
 
   const [dbWriteFailed, setDbWriteFailed] = useState(false);
 
@@ -192,96 +146,9 @@ function ScoringInterface() {
 
         setMatchData(matchResult as MatchData);
         setPlayersData(playersResult as PlayersData);
-        // Hydrate the Zustand store from DB data
-        const state = useScoringStore.getState();
-        const isNewMatch = state.matchId !== matchId;
+        // Apply DB metadata even when an initial socket snapshot arrived first.
         setMatchId(matchId);
-        const mr = matchResult as MatchData;
-
-        if (isNewMatch || !state.innings1) {
-          const inn1 = mr.innings.find((i) => i.inningsNumber === 1);
-          const inn2 = mr.innings.find((i) => i.inningsNumber === 2);
-
-          // Build innings state from DB data
-          const buildInningsState = (
-            inn: MatchData["innings"][number] | undefined,
-            num: number
-          ): InningsState | null => {
-            if (!inn) {
-              if (num === 1) {
-                // Create default innings 1
-                return {
-                  inningsId: `pending-innings-1-${matchId}`,
-                  teamId: mr.match.teamAId,
-                  totalRuns: 0,
-                  totalWickets: 0,
-                  totalBalls: 0,
-                  extras: 0,
-                  byes: 0,
-                  legByes: 0,
-                  wides: 0,
-                  noBalls: 0,
-                  status: "not_started",
-                  currentOver: 0,
-                  currentBall: 0,
-                  balls: [],
-                };
-              }
-              return null;
-            }
-
-            // Map DB balls to store format
-            const inningsBalls = mr.recentBalls
-              .filter((b) => b.inningsId === inn.id)
-              .map((b) => ({
-                id: b.id,
-                overNumber: b.overNumber,
-                ballNumber: b.ballNumber,
-                input: (b.isWicket ? "W" : b.isWide ? "WD" : b.isNoBall ? "NB" :
-                  b.isBye ? "B" : b.isLegBye ? "LB" : b.runs) as BallInput,
-                runs: b.runs,
-                isWicket: b.isWicket,
-                isWide: b.isWide,
-                isNoBall: b.isNoBall,
-                isBye: b.isBye,
-                isLegBye: b.isLegBye,
-                isFour: b.isFour,
-                isSix: b.isSix,
-                batsmanId: b.batsmanId ?? undefined,
-                bowlerId: b.bowlerId ?? undefined,
-                timestamp: Date.now(),
-              }));
-
-            const totalBalls = inn.totalBalls;
-            return {
-              inningsId: inn.id,
-              teamId: inn.teamId,
-              totalRuns: inn.totalRuns,
-              totalWickets: inn.totalWickets,
-              totalBalls: inn.totalBalls,
-              extras: inn.extras,
-              byes: inn.byes,
-              legByes: inn.legByes,
-              wides: inn.wides,
-              noBalls: inn.noBalls,
-              status: inn.status as InningsState["status"],
-              currentOver: Math.floor(totalBalls / 6),
-              currentBall: totalBalls % 6,
-              balls: inningsBalls,
-            };
-          };
-
-          useScoringStore.setState({
-            matchId,
-            innings1: buildInningsState(inn1, 1),
-            innings1History: { history: [], historyIndex: -1 },
-            innings2: buildInningsState(inn2, 2),
-            innings2History: { history: [], historyIndex: -1 },
-            superOver: null,
-            superOverHistory: { history: [], historyIndex: -1 },
-            currentInnings: 1,
-          });
-        }
+        useScoringStore.setState(hydrateScoringState(useScoringStore.getState(), matchResult));
       } catch (err) {
         if (!cancelled) {
           console.error("Failed to load match data:", err);
@@ -405,6 +272,7 @@ function ScoringInterface() {
 
   // ─── Handle Undo with DB persistence ───────────────────────
   const handleUndo = useCallback(async () => {
+    if (!matchData?.canScore) return;
     const state = useScoringStore.getState();
     const currentInningsState = state.currentInnings === 1 ? state.innings1 :
       state.currentInnings === 2 ? state.innings2 :
@@ -437,11 +305,20 @@ function ScoringInterface() {
         });
       }
     }
-  }, []);
+  }, [matchData?.canScore]);
 
   // ─── Voice Command ─────────────────────────────────────────
   const handleVoiceCommand = useCallback(async (input: BallInput) => {
-    if (!currentInningsData) return;
+    if (!currentInningsData || !matchData?.canScore || isPending || offlineSync.syncing ||
+        currentInningsData.status === "completed") return;
+    if (!selectedBatsman || !selectedBowler) {
+      toast.error("Select a batter and bowler before recording a delivery.");
+      return;
+    }
+    if (input === "W") {
+      toast.info("Use the wicket button to select the dismissal type.");
+      return;
+    }
     const overNumber = currentInningsData.currentBall === 6 ? currentInningsData.currentOver + 1 : currentInningsData.currentOver;
     const ballNumber = currentInningsData.currentBall === 6 ? 1 : currentInningsData.currentBall + 1;
     addBall({
@@ -459,7 +336,8 @@ function ScoringInterface() {
     });
     // Persist to DB directly (with retry)
     await persistBallToDB();
-  }, [currentInningsData, addBall, selectedBatsman, selectedBowler, persistBallToDB]);
+  }, [currentInningsData, addBall, selectedBatsman, selectedBowler, persistBallToDB,
+    matchData?.canScore, isPending, offlineSync.syncing]);
 
   const targetRuns = innings1 && currentInningsNum === 2 ? innings1.totalRuns + 1 : undefined;
 
@@ -544,7 +422,7 @@ function ScoringInterface() {
           <div className="flex gap-1.5 shrink-0">
             <Button
               onClick={handleUndo}
-              disabled={isPending || offlineSync.syncing}
+              disabled={!matchData?.canScore || isPending || offlineSync.syncing}
               variant="outline"
               size="sm"
               className="touch-manipulation min-h-11 min-w-11 px-3 sm:px-3"
@@ -568,6 +446,12 @@ function ScoringInterface() {
           </div>
         </div>
       </div>
+
+      {matchData && !matchData.canScore && (
+        <Card className="p-3 text-sm" role="status">
+          Read-only scoreboard. Ask your league owner to assign you as this match’s scorer to record deliveries.
+        </Card>
+      )}
 
       {offlineSync.pending > 0 && (
         <Card className="p-3 flex flex-wrap items-center justify-between gap-3" role="status">
@@ -708,7 +592,7 @@ function ScoringInterface() {
                     variant="outline"
                     size="sm"
                     className="touch-manipulation min-h-11"
-                    disabled={isPending}
+                    disabled={!matchData?.canScore || isPending || offlineSync.syncing || offlineSync.pending > 0}
                     onClick={async () => {
                       try {
                         await completeInningsAction(matchId, currentInningsData.inningsId);
@@ -728,7 +612,7 @@ function ScoringInterface() {
               </div>
             </div>
             <BallInputComponent
-              disabled={isPending || offlineSync.syncing || currentInningsData?.status === "completed"}
+              disabled={!matchData?.canScore || isPending || offlineSync.syncing || currentInningsData?.status === "completed"}
               batsmanId={selectedBatsman}
               bowlerId={selectedBowler}
               onBallAdded={persistBallToDB}

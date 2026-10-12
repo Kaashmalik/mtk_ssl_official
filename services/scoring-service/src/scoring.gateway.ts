@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { ScoringService } from './scoring.service';
 import { Logger } from '@nestjs/common';
 import { corsAllowlist } from './env';
+import { z } from 'zod';
 
 /**
  * Read/broadcast gateway only.
@@ -68,11 +69,9 @@ export class ScoringGateway implements OnGatewayConnection, OnGatewayDisconnect 
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { matchId: string },
   ) {
-    const { matchId } = data;
-
-    if (!matchId) {
-      return { success: false, error: 'matchId is required' };
-    }
+    const parsed = z.object({ matchId: z.string().uuid() }).safeParse(data);
+    if (!parsed.success) return { success: false, error: 'Valid matchId is required' };
+    const { matchId } = parsed.data;
 
     // Join the match room
     await client.join(`match:${matchId}`);
@@ -85,9 +84,11 @@ export class ScoringGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
     // Send current match state
     try {
-      const matchState = await this.scoringService.getMatchState(matchId);
+      const matchState = await this.scoringService.getMatchState(matchId, true);
       client.emit('match-state', matchState);
     } catch (error) {
+      await client.leave(`match:${matchId}`);
+      this.connectedClients.get(matchId)?.delete(client.id);
       this.logger.error(`Failed to fetch match state for match ${matchId}:`, error instanceof Error ? error.stack : String(error));
       return { success: false, error: 'Unable to load match state' };
     }
@@ -124,8 +125,13 @@ export class ScoringGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
   // Broadcast match state to all connected clients
   async broadcastMatchState(matchId: string) {
-    const matchState = await this.scoringService.getMatchState(matchId);
-    this.server.to(`match:${matchId}`).emit('match-state', matchState);
+    try {
+      const matchState = await this.scoringService.getMatchState(matchId, true);
+      this.server.to(`match:${matchId}`).emit('match-state', matchState);
+    } catch (error) {
+      // The mutation already committed; do not report its broadcast as a failed write.
+      this.logger.warn(`Failed to broadcast state for ${matchId}: ${String(error)}`);
+    }
   }
 
   // Get connected client count for a match

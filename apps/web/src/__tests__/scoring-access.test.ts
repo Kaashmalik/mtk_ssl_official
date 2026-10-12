@@ -1,0 +1,69 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { PgDialect } from "drizzle-orm/pg-core"
+import { requireMatchScoringAccess } from "@/lib/scoring-access"
+import { scorerMembership } from "@/lib/scorer-membership"
+
+const mocks = vi.hoisted(() => ({ permission: vi.fn(), role: vi.fn(), match: vi.fn(), user: vi.fn() }))
+vi.mock("@/lib/rbac-server", () => ({ requirePermissionServer: mocks.permission, getUserRoleForTenant: mocks.role }))
+vi.mock("@mtk/database", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@mtk/database")>(),
+  db: { query: { matches: { findFirst: mocks.match }, users: { findFirst: mocks.user } } },
+}))
+
+describe("Match-scoped scorer authorization", () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.permission.mockResolvedValue(undefined)
+    mocks.role.mockResolvedValue("scorer")
+    mocks.match.mockResolvedValue({ id: "match", tenantId: "tenant", scorerId: "db-user" })
+    mocks.user.mockResolvedValue({ id: "db-user" })
+  })
+
+  it("uses the tenant-filtered match and database UUID, not the Clerk ID", async () => {
+    await requireMatchScoringAccess("clerk-user", "tenant", "match")
+    expect(mocks.permission).toHaveBeenCalledWith("match:score", "tenant")
+    expect(mocks.role).toHaveBeenCalledWith("clerk-user", "tenant")
+    const query = new PgDialect().sqlToQuery(mocks.match.mock.calls[0][0].where)
+    expect(query.params).toEqual(["match", "tenant"])
+  })
+
+  it.each([null, "other-user", "clerk-user"])("rejects a scorer assigned as %s", async (scorerId) => {
+    mocks.match.mockResolvedValue({ tenantId: "tenant", scorerId })
+    await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("assigned scorer")
+  })
+
+  it.each(["league_owner", "super_admin"])("allows %s oversight only after exact-tenant permission", async (role) => {
+    mocks.role.mockResolvedValue(role)
+    await requireMatchScoringAccess("clerk-user", "tenant", "match")
+    expect(mocks.permission).toHaveBeenCalledWith("match:score", "tenant")
+    expect(mocks.user).not.toHaveBeenCalled()
+  })
+
+  it.each([null, "coach", "fan"])("fails closed for role %s", async (role) => {
+    mocks.role.mockResolvedValue(role)
+    await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("Forbidden")
+  })
+
+  it("does not allow a missing/unprovisioned user", async () => {
+    mocks.user.mockResolvedValue(undefined)
+    await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("assigned scorer")
+  })
+
+  it("fails closed for a cross-tenant match even if returned by the adapter", async () => {
+    mocks.match.mockResolvedValue({ tenantId: "other-tenant" })
+    await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("Match not found")
+  })
+
+  it("does not query a match if the tenant permission is denied", async () => {
+    mocks.permission.mockRejectedValue(new Error("Forbidden"))
+    await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("Forbidden")
+    expect(mocks.match).not.toHaveBeenCalled()
+  })
+
+  it("scopes scorer candidates to junction membership with legacy fallback only when absent", () => {
+    const query = new PgDialect().sqlToQuery(scorerMembership("active-tenant"))
+    expect(query.sql).toContain("NOT EXISTS")
+    expect(query.sql).toContain("ANY")
+    expect(query.params).toEqual(["active-tenant", "active-tenant", "active-tenant"])
+  })
+})

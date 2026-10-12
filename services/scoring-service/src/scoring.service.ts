@@ -180,13 +180,14 @@ export class ScoringService {
     });
   }
 
-  async getMatchState(matchId: string): Promise<MatchState | null> {
+  async getMatchState(matchId: string, fresh = false): Promise<MatchState | null> {
+    if (!z.string().uuid().safeParse(matchId).success) throw new BadRequestException('Invalid match ID');
     const cacheKey = `match:state:${matchId}`;
     try {
-      const cached = await this.redis.get(cacheKey);
+      const cached = fresh ? null : await this.redis.get(cacheKey);
       if (cached) {
         const parsed = parseCachedMatchState(cached);
-        if (parsed) {
+        if (parsed && parsed.matchId === matchId) {
           this.logger.debug(`Cache hit for match state: ${matchId}`);
           return parsed;
         }
@@ -202,52 +203,55 @@ export class ScoringService {
     }
 
     try {
-      const match = await db.query.matches.findFirst({
-        where: eq(matches.id, matchId),
-      });
+      // One consistent read snapshot; no match/innings mixture across commits.
+      const state = await db.transaction(async (tx) => {
+        const match = await tx.query.matches.findFirst({
+          where: eq(matches.id, matchId),
+        });
+        if (!match) throw new NotFoundException(`Match ${matchId} not found`);
 
-      if (!match) {
-        throw new NotFoundException(`Match ${matchId} not found`);
-      }
-
-      const innings = await db.query.matchInnings.findMany({
-        where: eq(matchInnings.matchId, matchId),
-        orderBy: [matchInnings.inningsNumber],
-      });
-
-      const state: MatchState = {
-        matchId,
-        // No cast: `MatchState.status` is derived from the same column, so this
-        // is a genuine type match rather than an assertion hiding a mismatch.
-        status: match.status,
-        currentInnings: 1,
-      };
-
-      for (const inn of innings) {
-        const scorecard: Scorecard = {
+        const innings = await tx.query.matchInnings.findMany({
+          where: and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, match.tenantId)),
+          orderBy: [matchInnings.inningsNumber],
+        });
+        const state: MatchState = {
+          version: 2,
           matchId,
-          innings: inn.inningsNumber,
-          totalRuns: inn.totalRuns,
-          totalWickets: inn.totalWickets,
-          overs: Math.floor(inn.totalBalls / 6),
-          balls: inn.totalBalls % 6,
-          runRate: inn.totalBalls > 0 ? (inn.totalRuns / (inn.totalBalls / 6)) : 0,
+          status: match.status,
+          currentInnings: 1,
+          updatedAt: match.updatedAt.toISOString(),
         };
-
-        if (inn.inningsNumber === 1) {
-          state.innings1 = scorecard;
-        } else if (inn.inningsNumber === 2) {
-          state.innings2 = scorecard;
-          state.currentInnings = 2;
-        }
-
-        if (inn.status === 'in_progress') {
+        for (const inn of innings) {
+          const scorecard = {
+            matchId,
+            innings: inn.inningsNumber,
+            inningsId: inn.id,
+            teamId: inn.teamId,
+            status: inn.status,
+            extras: inn.extras,
+            wides: inn.wides,
+            noBalls: inn.noBalls,
+            byes: inn.byes,
+            legByes: inn.legByes,
+            totalBalls: inn.totalBalls,
+            updatedAt: inn.updatedAt.toISOString(),
+            totalRuns: inn.totalRuns,
+            totalWickets: inn.totalWickets,
+            overs: Math.floor(inn.totalBalls / 6),
+            balls: inn.totalBalls % 6,
+            runRate: inn.totalBalls > 0 ? (inn.totalRuns / (inn.totalBalls / 6)) : 0,
+          };
+          if (inn.inningsNumber === 1) state.innings1 = scorecard;
+          else if (inn.inningsNumber === 2) state.innings2 = scorecard;
+          else if (inn.inningsNumber === 3) state.superOver = scorecard;
           state.currentInnings = inn.inningsNumber;
         }
-      }
+        return state;
+      }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
 
       try {
-        await this.redis.set(cacheKey, JSON.stringify(state), 'EX', 3600); // 1 hour TTL
+        // Fresh joins/broadcasts never publish or populate a potentially stale cache.
+        if (!fresh) await this.redis.set(cacheKey, JSON.stringify(state), 'EX', 5);
       } catch (cacheErr) {
         this.logger.warn(`Failed to write match state to Redis cache: ${cacheErr}`);
       }

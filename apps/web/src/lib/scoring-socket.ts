@@ -1,6 +1,7 @@
 "use client";
 
 import { io, type Socket } from "socket.io-client";
+import type { LiveMatchState } from "@mtk/database/lib/live-scoring-state";
 
 export type ScoringScorecard = {
   matchId: string;
@@ -12,13 +13,7 @@ export type ScoringScorecard = {
   runRate: number;
 };
 
-export type ScoringMatchState = {
-  matchId: string;
-  status: string;
-  innings1?: ScoringScorecard;
-  innings2?: ScoringScorecard;
-  currentInnings: number;
-};
+export type ScoringMatchState = LiveMatchState;
 
 const DEFAULT_WS_URL = "http://localhost:4002";
 
