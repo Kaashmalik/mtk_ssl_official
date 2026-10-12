@@ -391,6 +391,8 @@ remaining limitations, not planned results.
 - [ ] Verify live snapshot initialization and scorer assignments.
 - [ ] Establish authenticated two-tenant staging and browser/E2E verification.
 - [ ] Continue the responsive design, white-label, billing, and launch phases.
+- [x] Implement responsive role-aware dashboard workflows and authorized active-
+  tenant dashboard/shell reads (Batch 6; browser/device acceptance remains open).
 
 Commit/push results must be reported separately if remote delivery is blocked.
 
@@ -734,6 +736,93 @@ existing repository transaction patterns and loaded Postgres locking guidance we
   Actor metadata on delivery/undo events does not finish those larger features.
 - [ ] Consolidate platform-wide tenant/role authorization and continue white-label,
   billing, premium product, and all original staging/E2E acceptance criteria.
+
+### 2026-10-12 — Batch 6: role-aware dashboard and active workspace reads
+
+#### Completed implementation
+
+- [x] Started from clean `e9f4951` and synchronized with `origin/main` using
+  `git pull --ff-only origin main` before implementation (already up to date).
+- [x] Advance the dashboard portion of Phase 2 with a responsive league workspace
+  header, permission-aware quick actions, first-record setup checklist for
+  organizers, and assigned-match scoring shortcuts for scorers. Other roles get
+  browsing actions rather than unsupported creation/scoring controls.
+- [x] Resolve the request tenant before primary membership, then independently
+  verify an active provisioned account, exact-tenant role, and active tenant before
+  dashboard business reads. Junction roles override legacy roles; missing role
+  rows alone permit legacy membership fallback. Lookup failures fail closed instead
+  of upgrading privilege or silently switching to a primary workspace.
+- [x] Use that same authorization policy in dashboard navigation and pass the
+  authorized active tenant to the trial notice. Never display another membership's
+  subscription or show billing notices to roles without settings-management access.
+- [x] Extract dashboard data/model/server sections for focused tests. Keep every
+  count, fixture, team-name, innings, and task query tenant-filtered, with explicit
+  columns, ordered five-match limits, and two batched related-resource lookups
+  instead of N+1 queries. Prioritize live assignments; put undated fixtures last.
+- [x] Match scores to actual batting team IDs, not fixed Team A/first-innings order.
+  Preserve legal-ball over notation, exclude unrelated innings, label super-over
+  summaries, and avoid invented chase targets. Fixture times explicitly use UTC;
+  recent results show the record update time rather than implying a scheduled time
+  is the actual completion timestamp.
+- [x] Show active-team/player counts with matching query predicates. Remove the
+  old misleading growth percentages and the ad-hoc fixed-points standings widget
+  from the home dashboard; replace the latter with organizer assignment/registration
+  tasks. Competition-aware standings/NRR remain separate planned work, not fabricated
+  by this dashboard. Existing tournament pages are unchanged.
+- [x] Separate true empty/zero states from unavailable data. Stream independently
+  loading sections with accessible status text; outages show a real full-page
+  refresh link and never mark setup tasks incomplete from failed counts.
+- [x] Use responsive grids, wrapping labels, visible focus rings, decorative icon
+  semantics, 44px action targets, and reduced-motion-aware skeletons. This is
+  implementation and server-rendered verification, not visual/browser certification.
+- [x] Add 126 regressions across authorization, SQL predicates/batching/limits,
+  team-order score summaries, role journeys, server-rendered HTML, route/layout
+  integration, and tenant-scoped trial-notice behavior.
+
+#### Test-only verification
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 357 tests / 26 files |
+| `corepack pnpm --filter @mtk/database test` | PASS — 103 tests / 5 files |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 155 tests / 8 suites |
+
+**615 tests pass; 126 additional regressions compared with Batch 5.** Auth,
+database, and subscription/network boundaries are mocked. Rendering tests use
+React's server renderer; they verify actual escaped HTML, labels, links, and class
+contracts, not a real browser's layout/focus/animation behavior. Scoring fault-path
+logs are expected test simulations. Current Next.js streaming and Drizzle aggregate/
+bounded-query documentation was consulted through Context7. No build, lint,
+standalone type-check, migration, remote-database write, or new dependency install
+was performed. `git diff --check` passes.
+
+#### Scope and remaining acceptance
+
+- This is a focused Phase 2 dashboard batch, **not completion of Phase 2**. The
+  existing RLS/database schema (including `user_tenant_roles`) must be deployed;
+  missing role tables intentionally result in unavailable access.
+- Dashboard scores are explicitly page-load summaries, not live Socket.IO widgets.
+  Open the existing match center/scoring page for live updates. Multi-innings test
+  cricket, mixed extras, XI readiness, authoritative standings/NRR, and revised
+  chase targets are not supplied by the new summaries/checklist.
+- Setup checks track league-level records only. Two active teams plus a player
+  do not establish tournament registration, fixture eligibility, or approved XI.
+- Authorization is current at render time, not a transaction locking every dashboard
+  read against concurrent revocation. Canonical scoring still performs Batch 5's
+  transactional recheck; a dashboard shortcut does not grant mutation authority.
+- Dashboard shell role filtering is not a replacement for each page/action's
+  resource authorization. Some linked legacy product pages/actions still resolve
+  primary membership rather than request tenant. Full downstream tenant-context
+  consolidation and two-membership navigation acceptance remain **TENANT-01** work;
+  this batch does not claim those destinations are repaired.
+- [ ] Verify mobile/desktop visual layout, keyboard and screen-reader journeys,
+  reduced motion, refresh retries, streamed loading, and authenticated host/primary
+  tenant mismatch/revocation scenarios in a real browser and PostgreSQL staging.
+- [ ] Continue role-specific manager/coach/player journeys, localized display,
+  user timezone selection, durable onboarding drafts, and broader responsive forms.
+- [ ] Finish mobile authenticated API/BFF identity mapping and normalized replay,
+  complete cricket rules/audited corrections, and remaining white-label/billing and
+  original staging/E2E rollout requirements. No client receives internal credentials.
 
 ### Definition of done for each batch
 
