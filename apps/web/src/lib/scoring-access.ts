@@ -1,13 +1,25 @@
 import { db, matches, users } from "@mtk/database"
 import { and, eq } from "drizzle-orm"
 import { getUserRoleForTenant, requirePermissionServer } from "./rbac-server"
+import { z } from "zod"
+
+/** Clerk session identity -> provisioned database UUID; never a client argument. */
+export async function requireScoringActorId(clerkId: string): Promise<string> {
+  const user = await db.query.users.findFirst({
+    where: eq(users.clerkId, clerkId), columns: { id: true, isActive: true },
+  })
+  if (!user || user.isActive !== true || !z.string().uuid().safeParse(user.id).success) {
+    throw new Error("Scoring account is unavailable or inactive")
+  }
+  return user.id
+}
 
 export async function canScoreMatch(clerkId: string, tenantId: string, match: { scorerId: string | null }) {
   const role = await getUserRoleForTenant(clerkId, tenantId)
-  if (role === "league_owner" || role === "super_admin") return true
-  if (role !== "scorer") return false
+  if (!["league_owner", "super_admin", "scorer"].includes(role ?? "")) return false
   const user = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
-  return !!user && match.scorerId === user.id
+  if (!user || user.isActive !== true) return false
+  return role === "league_owner" || role === "super_admin" || match.scorerId === user.id
 }
 
 /** Role checks and assignment checks must use the exact mutation tenant. */

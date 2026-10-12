@@ -16,6 +16,7 @@ import { ScoringService } from './scoring.service';
 import { ScoringServiceAuthGuard } from './common/guards/scoring-service-auth.guard';
 import { TenantScopeGuard } from './common/guards/tenant-scope.guard';
 import { ScoringGateway } from './scoring.gateway';
+import { ScoringActorGuard } from './common/guards/scoring-actor.guard';
 
 /**
  * Reads the tenant validated and attached by `TenantScopeGuard`.
@@ -29,6 +30,12 @@ function tenantIdOf(req: Request): string {
     throw new BadRequestException('Tenant scope missing from request context');
   }
   return tenantId;
+}
+
+function actorIdOf(req: Request): string {
+  const actorId = (req as Request & { scoringActorId?: string }).scoringActorId;
+  if (!actorId) throw new BadRequestException('Scoring actor missing from request context');
+  return actorId;
 }
 
 class RecordBallDto {
@@ -50,11 +57,12 @@ class CreateInningsDto {
   inningsNumber: number;
 }
 
-/** Guards for every scoring mutation: service token **and** tenant scope. */
+/** Every scoring mutation requires service authentication, tenant, and actor. */
 const MUTATION_GUARDS = [
   ThrottlerGuard,
   ScoringServiceAuthGuard,
   TenantScopeGuard,
+  ScoringActorGuard,
 ] as const;
 
 @Controller('scoring')
@@ -87,7 +95,7 @@ export class ScoringController {
   @HttpCode(HttpStatus.CREATED)
   async recordBall(@Req() req: Request, @Body() dto: RecordBallDto) {
     // The canonical service validates the full command for every entry point.
-    const result = await this.scoringService.recordBall(tenantIdOf(req), {
+    const result = await this.scoringService.recordBall(tenantIdOf(req), actorIdOf(req), {
       ...dto,
       timestamp: new Date(),
     });
@@ -104,6 +112,7 @@ export class ScoringController {
   ) {
     const result = await this.scoringService.undoBall(
       tenantIdOf(req),
+      actorIdOf(req),
       body.matchId,
       body.ballId,
     );
@@ -116,7 +125,7 @@ export class ScoringController {
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   async createInnings(@Req() req: Request, @Body() dto: CreateInningsDto) {
-    const result = await this.scoringService.createInnings(tenantIdOf(req), {
+    const result = await this.scoringService.createInnings(tenantIdOf(req), actorIdOf(req), {
       matchId: dto.matchId,
       teamId: dto.teamId,
       inningsNumber: Number(dto.inningsNumber),
@@ -140,6 +149,7 @@ export class ScoringController {
   ) {
     const result = await this.scoringService.completeInnings(
       tenantIdOf(req),
+      actorIdOf(req),
       body.matchId,
       inningsId,
     );
@@ -158,6 +168,7 @@ export class ScoringController {
   ) {
     await this.scoringService.completeMatch(
       tenantIdOf(req),
+      actorIdOf(req),
       matchId,
       body.winnerId,
       body.result,

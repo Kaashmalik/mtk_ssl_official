@@ -10,7 +10,7 @@ import { eq, and, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
-import { canScoreMatch, requireMatchScoringAccess } from "@/lib/scoring-access"
+import { canScoreMatch, requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { withAuth } from "./action-guard"
 import {
   proxyRecordBall,
@@ -75,6 +75,7 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
   }
 
   await requireMatchScoringAccess(userId, tenant.id, validated.matchId)
+  const actorId = await requireScoringActorId(userId)
   const [innings] = await db.select().from(matchInnings)
     .where(and(eq(matchInnings.id, validated.inningsId), eq(matchInnings.matchId, validated.matchId),
       eq(matchInnings.tenantId, tenant.id)))
@@ -102,7 +103,7 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
     bowlerId: validated.bowlerId,
     extras: delivery.extras,
     wicket,
-  }, tenant.id)
+  }, tenant.id, actorId)
 
   if (validated.clientOpId && result.clientOpId !== validated.clientOpId) {
     throw new Error("Scoring service did not acknowledge this operation ID")
@@ -141,8 +142,9 @@ export const undoBall = withAuth("match:score", async (matchId: string, ballId: 
   z.string().uuid().parse(matchId)
   z.string().uuid().parse(ballId)
   await requireMatchScoringAccess(userId, tenant.id, matchId)
+  const actorId = await requireScoringActorId(userId)
 
-  await proxyUndoBall(matchId, ballId, tenant.id)
+  await proxyUndoBall(matchId, ballId, tenant.id, actorId)
 
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)
@@ -161,8 +163,9 @@ export const createInnings = withAuth("match:score", async (input: CreateInnings
   const validated = createInningsSchema.parse(input)
 
   await requireMatchScoringAccess(userId, tenant.id, validated.matchId)
+  const actorId = await requireScoringActorId(userId)
 
-  const innings = await proxyCreateInnings(validated, tenant.id)
+  const innings = await proxyCreateInnings(validated, tenant.id, actorId)
 
   revalidatePath(`/matches/${validated.matchId}/scoring`)
 
@@ -237,11 +240,13 @@ export const getMatchPlayersForScoring = withAuth("match:read", async (matchId: 
   const [teamAPlayers, teamBPlayers] = await Promise.all([
     db.select({ id: players.id, name: players.name, role: players.role })
       .from(players)
-      .where(and(eq(players.teamId, match.teamAId), eq(players.tenantId, tenant.id)))
+      .where(and(eq(players.teamId, match.teamAId), eq(players.tenantId, tenant.id),
+        eq(players.isActive, true), eq(players.status, "active")))
       .orderBy(asc(players.name)),
     db.select({ id: players.id, name: players.name, role: players.role })
       .from(players)
-      .where(and(eq(players.teamId, match.teamBId), eq(players.tenantId, tenant.id)))
+      .where(and(eq(players.teamId, match.teamBId), eq(players.tenantId, tenant.id),
+        eq(players.isActive, true), eq(players.status, "active")))
       .orderBy(asc(players.name)),
   ])
 
@@ -263,11 +268,10 @@ export const completeInnings = withAuth("match:score", async (matchId: string, i
   z.string().uuid().parse(matchId)
   z.string().uuid().parse(inningsId)
   await requireMatchScoringAccess(userId, tenant.id, matchId)
+  const actorId = await requireScoringActorId(userId)
 
-  // Tenant boundary. This must scope the innings to the caller's tenant *before*
-  // forwarding the mutation: scoring-service is tenant-agnostic and will
-  // happily complete any match/innings pair it is handed, so relying on it to
-  // reject a cross-tenant id would be an isolation hole.
+  // Early tenant boundary; the canonical transaction also checks tenant,
+  // actor membership, and current assignment before completing the innings.
   const [owned] = await db.select({ id: matchInnings.id })
     .from(matchInnings)
     .where(and(
@@ -279,7 +283,7 @@ export const completeInnings = withAuth("match:score", async (matchId: string, i
 
   if (!owned) throw new Error("Innings not found")
 
-  const result = await proxyCompleteInnings(matchId, inningsId, tenant.id)
+  const result = await proxyCompleteInnings(matchId, inningsId, tenant.id, actorId)
 
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)

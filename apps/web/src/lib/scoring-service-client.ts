@@ -6,8 +6,12 @@
  * runs as `service_role`, which bypasses RLS, so this header is what lets it
  * scope each query and reject a cross-tenant id instead of trusting the caller.
  * `tenantId` must therefore always come from the server-side session, never
- * from a value the browser supplied.
+ * from a value the browser supplied. `x-scoring-actor-id` similarly carries the
+ * provisioned database UUID resolved from the authenticated server session.
+ * The canonical transaction rechecks active membership and assignment.
  */
+
+import { z } from "zod";
 
 const DEFAULT_SCORING_URL = "http://localhost:4002";
 
@@ -75,6 +79,7 @@ async function scoringFetch<T>(
   path: string,
   init: RequestInit,
   tenantId: string,
+  actorId: string,
 ): Promise<T> {
   const url = `${scoringBaseUrl()}${path}`;
   if (!tenantId) {
@@ -85,19 +90,23 @@ async function scoringFetch<T>(
       `scoring-service call to ${path} requires a tenantId (internal programming error)`,
     );
   }
+  if (!z.string().uuid().safeParse(actorId).success) {
+    throw new Error("Scoring service mutation requires a valid server-derived actor UUID");
+  }
   // Internal service token: the web app authenticates the user, then proxies.
   // This never reaches the browser (read from a server-only env var).
   const serviceToken = process.env.SCORING_SERVICE_TOKEN?.trim();
+  if (!serviceToken) throw new Error("Scoring service token is not configured");
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set(TENANT_HEADER, tenantId);
+  headers.set("x-scoring-actor-id", actorId);
+  headers.set("x-scoring-service-token", serviceToken);
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        [TENANT_HEADER]: tenantId,
-        ...(serviceToken ? { "x-scoring-service-token": serviceToken } : {}),
-        ...(init.headers || {}),
-      },
+      headers,
       cache: "no-store",
     });
   } catch (err) {
@@ -127,6 +136,7 @@ async function scoringFetch<T>(
 export async function proxyRecordBall(
   input: ScoringProxyBallInput,
   tenantId: string,
+  actorId: string,
 ): Promise<ScoringProxyBallResult> {
   return scoringFetch<ScoringProxyBallResult>(
     "/scoring/ball",
@@ -135,6 +145,7 @@ export async function proxyRecordBall(
       body: JSON.stringify(input),
     },
     tenantId,
+    actorId,
   );
 }
 
@@ -142,6 +153,7 @@ export async function proxyUndoBall(
   matchId: string,
   ballId: string,
   tenantId: string,
+  actorId: string,
 ): Promise<unknown> {
   return scoringFetch(
     "/scoring/ball/undo",
@@ -150,6 +162,7 @@ export async function proxyUndoBall(
       body: JSON.stringify({ matchId, ballId }),
     },
     tenantId,
+    actorId,
   );
 }
 
@@ -164,6 +177,7 @@ export async function proxyCreateInnings(
     inningsNumber: number;
   },
   tenantId: string,
+  actorId: string,
 ): Promise<ScoringInnings> {
   return scoringFetch<ScoringInnings>(
     "/scoring/innings",
@@ -172,6 +186,7 @@ export async function proxyCreateInnings(
       body: JSON.stringify(input),
     },
     tenantId,
+    actorId,
   );
 }
 
@@ -183,6 +198,7 @@ export async function proxyCompleteInnings(
   matchId: string,
   inningsId: string,
   tenantId: string,
+  actorId: string,
 ): Promise<ScoringCompleteInningsResult> {
   return scoringFetch<ScoringCompleteInningsResult>(
     `/scoring/innings/${encodeURIComponent(inningsId)}/complete`,
@@ -191,5 +207,6 @@ export async function proxyCompleteInnings(
       body: JSON.stringify({ matchId }),
     },
     tenantId,
+    actorId,
   );
 }

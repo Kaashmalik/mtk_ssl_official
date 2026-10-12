@@ -19,21 +19,18 @@ import { timingSafeEqual } from 'crypto';
 @Injectable()
 export class ScoringServiceAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
-    const requiredToken = process.env.SCORING_SERVICE_TOKEN;
+    const requiredToken = process.env.SCORING_SERVICE_TOKEN?.trim();
 
-    // Fail closed in production; permissive only for local development.
+    // Actor headers are trusted assertions: there must be no development bypass.
     if (!requiredToken) {
-      if (process.env.NODE_ENV === 'production') {
-        throw new UnauthorizedException(
-          'Scoring service is not configured (SCORING_SERVICE_TOKEN missing)',
-        );
-      }
-      return true;
+      throw new UnauthorizedException(
+        'Scoring service is not configured (SCORING_SERVICE_TOKEN missing)',
+      );
     }
 
     const request = context.switchToHttp().getRequest();
     const header = request?.headers?.['x-scoring-service-token'];
-    const provided = Array.isArray(header) ? header[0] : header;
+    const provided = header;
 
     if (typeof provided !== 'string' || provided.length === 0) {
       throw new UnauthorizedException('Missing scoring service token');

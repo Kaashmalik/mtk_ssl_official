@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const TENANT_HEADER = 'x-tenant-id';
 
@@ -45,7 +45,7 @@ export class TenantScopeGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
     const raw = request?.headers?.[TENANT_HEADER];
-    const value = Array.isArray(raw) ? raw[0] : raw;
+    const value = raw;
 
     // Fail closed. A missing or malformed tenant must never fall back to
     // "no tenant" (i.e. unscoped), which would re-open the original hole.

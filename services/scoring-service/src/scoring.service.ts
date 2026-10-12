@@ -26,6 +26,7 @@ import { calculateDeliveryDelta } from '@mtk/database/lib/scoring-delivery';
 import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
 import { z } from 'zod';
 import { env } from './env';
+import { requireScoringWriteAccess, requireDeliveryParticipants, requireMatchTeams } from './scoring-write-access';
 import {
   KafkaScoringPublisher,
   ScoringBallEventPayload,
@@ -166,6 +167,12 @@ function assertTenantScope(
   }
 }
 
+function validateMutationIds(...ids: string[]) {
+  if (ids.some((id) => !z.string().uuid().safeParse(id).success)) {
+    throw new BadRequestException('Invalid scoring resource ID');
+  }
+}
+
 @Injectable()
 export class ScoringService {
   private readonly logger = new Logger(ScoringService.name);
@@ -263,7 +270,7 @@ export class ScoringService {
     }
   }
 
-  async recordBall(tenantId: string, ballEvent: BallEvent): Promise<BallResult> {
+  async recordBall(tenantId: string, actorId: string, ballEvent: BallEvent): Promise<BallResult> {
     const validated = deliveryCommandSchema.safeParse(ballEvent);
     if (!validated.success) {
       throw new BadRequestException(validated.error.issues.map((issue) => issue.message));
@@ -295,6 +302,7 @@ export class ScoringService {
 
       assertTenantScope(tenantId, match, 'Match', matchId);
 
+      await requireScoringWriteAccess(tx, tenantId, actorId, match);
       // 2. Validate innings exists within this tenant and this match
       const innings = await tx.query.matchInnings.findFirst({
         where: and(
@@ -345,6 +353,7 @@ export class ScoringService {
       if (command.over !== expectedOver || command.ball !== expectedBall) {
         throw new ConflictException(`Expected delivery ${expectedOver}.${expectedBall}; refresh match state`);
       }
+      await requireDeliveryParticipants(tx, tenantId, match, innings.teamId, command);
 
       // 4. Determine ball properties from event
       const isWide = ballEvent.extras?.type === 'wide';
@@ -424,6 +433,7 @@ export class ScoringService {
       const [recordedEvent] = await tx.insert(scoringEvents).values({
         tenantId, matchId, inningsId, eventType: 'ball_recorded', eventVersion: 2,
         aggregateId: inningsId, sequenceNumber: nextSeq,
+        metadata: { actor_user_id: actorId, actor_tenant_id: tenantId },
         payload: {
           ball_id: insertedBall.id, client_op_id: command.clientOpId ?? null, fingerprint,
           delta, runs: totalRuns, batsman_runs: delta.batterRuns,
@@ -560,7 +570,7 @@ export class ScoringService {
       };
 
       return { result, publishData, becameLive, match };
-    });
+    }, { isolationLevel: 'read committed' });
 
     if (!('publishData' in outcome)) return outcome.result;
     const { result, publishData, becameLive, match } = outcome;
@@ -584,7 +594,8 @@ export class ScoringService {
     return result;
   }
 
-  async undoBall(tenantId: string, matchId: string, ballId: string): Promise<BallResult> {
+  async undoBall(tenantId: string, actorId: string, matchId: string, ballId: string): Promise<BallResult> {
+    validateMutationIds(matchId, ballId);
     const result = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
         WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
@@ -592,6 +603,7 @@ export class ScoringService {
         where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
       });
       assertTenantScope(tenantId, match, 'Match', matchId);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match);
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException('This match can no longer be edited');
       }
@@ -707,6 +719,7 @@ export class ScoringService {
         inningsId: ball.inningsId,
         eventType: 'ball_undone',
         eventVersion: 2,
+        metadata: { actor_user_id: actorId, actor_tenant_id: tenantId },
         aggregateId: ball.inningsId,
         sequenceNumber: nextSeq,
         payload: {
@@ -777,7 +790,7 @@ export class ScoringService {
       };
 
       return result;
-    });
+    }, { isolationLevel: 'read committed' });
     await this.redis.del(`match:state:${matchId}`).catch((err) =>
       this.logger.warn(`Failed to invalidate match state cache: ${err}`));
     return result;
@@ -806,82 +819,49 @@ export class ScoringService {
    * that filter so a cross-tenant `matchId` resolves to nothing rather than to
    * another tenant's row.
    */
-  async createInnings(tenantId: string, input: CreateInningsInput): Promise<InningsSummary> {
-    const { matchId, teamId, inningsNumber } = input;
-
-    if (!Number.isInteger(inningsNumber) || inningsNumber < 1 || inningsNumber > 3) {
-      throw new BadRequestException('inningsNumber must be 1, 2, or 3');
-    }
-
-    const match = await db.query.matches.findFirst({
-      where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
-    });
-
-    assertTenantScope(tenantId, match, 'Match', matchId);
-
-    if (match.status === 'completed' || match.status === 'abandoned') {
-      throw new BadRequestException(
-        `Cannot add an innings to match ${matchId} which is already ${match.status}`,
-      );
-    }
-
-    if (teamId !== match.teamAId && teamId !== match.teamBId) {
-      throw new BadRequestException('Team does not belong to this match');
-    }
-
-    const existing = await db.query.matchInnings.findFirst({
-      where: and(
-        eq(matchInnings.matchId, matchId),
-        eq(matchInnings.inningsNumber, inningsNumber),
-        eq(matchInnings.tenantId, tenantId),
-      ),
-    });
-
-    if (existing) {
-      throw new BadRequestException(
-        `Innings ${inningsNumber} already exists for match ${matchId}`,
-      );
-    }
-
+  async createInnings(tenantId: string, actorId: string, input: CreateInningsInput): Promise<InningsSummary> {
+    const parsed = z.object({ matchId: z.string().uuid(), teamId: z.string().uuid(),
+      inningsNumber: z.number().int().min(1).max(3) }).safeParse(input);
+    if (!parsed.success) throw new BadRequestException('Invalid innings command');
+    const { matchId, teamId, inningsNumber } = parsed.data;
+    let created: InningsSummary;
     try {
-      const [innings] = await db
-        .insert(matchInnings)
-        .values({
-          tenantId: match.tenantId,
-          matchId,
-          teamId,
-          inningsNumber,
-          status: 'not_started',
-        })
-        .returning();
-
-      if (!innings) {
-        throw new InternalServerErrorException('Innings insert returned no row');
-      }
-
-      this.logger.log(
-        `Innings ${inningsNumber} created for match ${matchId} (team ${teamId})`,
-      );
-
-      return {
-        id: innings.id,
-        matchId: innings.matchId,
-        teamId: innings.teamId,
-        inningsNumber: innings.inningsNumber,
-        status: innings.status,
-      };
+      created = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
+          WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
+        const match = await tx.query.matches.findFirst({
+          where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
+        });
+        assertTenantScope(tenantId, match, 'Match', matchId);
+        await requireScoringWriteAccess(tx, tenantId, actorId, match);
+        if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
+          throw new BadRequestException(`Cannot add an innings while match is ${match.status}`);
+        }
+        if (teamId !== match.teamAId && teamId !== match.teamBId) {
+          throw new BadRequestException('Team does not belong to this match');
+        }
+        await requireMatchTeams(tx, tenantId, match);
+        const existing = await tx.query.matchInnings.findFirst({
+          where: and(eq(matchInnings.matchId, matchId), eq(matchInnings.inningsNumber, inningsNumber),
+            eq(matchInnings.tenantId, tenantId)),
+        });
+        if (existing) throw new BadRequestException(`Innings ${inningsNumber} already exists for match ${matchId}`);
+        const [innings] = await tx.insert(matchInnings).values({
+          tenantId, matchId, teamId, inningsNumber, status: 'not_started',
+        }).returning();
+        if (!innings) throw new InternalServerErrorException('Innings insert returned no row');
+        return { id: innings.id, matchId: innings.matchId, teamId: innings.teamId,
+          inningsNumber: innings.inningsNumber, status: innings.status };
+      }, { isolationLevel: 'read committed' });
     } catch (err) {
-      // The existence check above is TOCTOU-racy: two concurrent requests (or an
-      // impatient double-click) can both pass it and then collide on the
-      // `UNIQUE (match_id, innings_number)` constraint. Translate that into the
-      // same client-facing error the check would have produced.
-      if (isUniqueViolation(err)) {
-        throw new BadRequestException(
-          `Innings ${inningsNumber} already exists for match ${matchId}`,
-        );
-      }
+      // Constraint remains a backstop for writers outside this service.
+      if (isUniqueViolation(err)) throw new BadRequestException(`Innings ${inningsNumber} already exists for match ${matchId}`);
       throw err;
     }
+    await this.redis.del(`match:state:${matchId}`).catch((err) =>
+      this.logger.warn(`Failed to invalidate match state cache: ${err}`));
+    this.logger.log(`Innings ${inningsNumber} created for match ${matchId} (team ${teamId})`);
+    return created;
   }
 
   /**
@@ -895,18 +875,25 @@ export class ScoringService {
    * parent match. An unscoped `WHERE id = $inningsId` would let a caller
    * complete an innings belonging to some other match.
    *
-   * Idempotent: re-completing an already-completed innings is a no-op update,
+   * Idempotent: re-completing an already-completed innings performs no update,
    * and the break transition is guarded by the match's current status.
    */
   async completeInnings(
     tenantId: string,
+    actorId: string,
     matchId: string,
     inningsId: string,
   ): Promise<CompleteInningsResult> {
+    validateMutationIds(matchId, inningsId);
     const result = await db.transaction(async (tx) => {
       // Same lock ordering as delivery/undo; completion cannot race a write.
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
         WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
+      const match = await tx.query.matches.findFirst({
+        where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
+      });
+      assertTenantScope(tenantId, match, 'Match', matchId);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match);
       const innings = await tx.query.matchInnings.findFirst({
         where: and(
           eq(matchInnings.id, inningsId),
@@ -916,6 +903,15 @@ export class ScoringService {
       });
 
       assertTenantScope(tenantId, innings, 'Innings', inningsId);
+
+      if (innings.status === 'completed') {
+        return { innings: { id: innings.id, matchId: innings.matchId, teamId: innings.teamId,
+          inningsNumber: innings.inningsNumber, status: innings.status },
+          matchStatus: match.status, inningsBreakApplied: false };
+      }
+      if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
+        throw new BadRequestException('This match can no longer be edited');
+      }
 
       const [updated] = await tx
         .update(matchInnings)
@@ -928,12 +924,6 @@ export class ScoringService {
           `Innings ${inningsId} vanished during completion`,
         );
       }
-
-      const match = await tx.query.matches.findFirst({
-        where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
-      });
-
-      assertTenantScope(tenantId, match, 'Match', matchId);
 
       // Only the first innings triggers the break. Completing the second
       // innings ends the match, but that requires a winner and a result string,
@@ -962,7 +952,7 @@ export class ScoringService {
         matchStatus,
         inningsBreakApplied,
       };
-    });
+    }, { isolationLevel: 'read committed' });
 
     // `recordBall` and `getMatchState` share the `match:state:<id>` cache key.
     // Completing an innings changes both the scorecard and the match status, so
@@ -986,32 +976,41 @@ export class ScoringService {
 
   async completeMatch(
     tenantId: string,
+    actorId: string,
     matchId: string,
     winnerId?: string,
     result?: string,
   ): Promise<void> {
-    // Confirm ownership first: a bare UPDATE would silently succeed on a
-    // cross-tenant id (and would not even report that it matched nothing).
-    const match = await db.query.matches.findFirst({
-      where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
-    });
-
-    assertTenantScope(tenantId, match, 'Match', matchId);
-
-    // Idempotent: `completeMatch` may be called more than once (retry, double
-    // click, a client re-issuing the request). Only emit `MatchEnded` on the
-    // actual transition, otherwise every repeat would generate another summary.
-    const wasAlreadyComplete = match.status === 'completed';
-
-    await db.update(matches)
-      .set({
-        status: 'completed',
-        winnerId: winnerId || null,
-        result: result || null,
-        endDate: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)));
+    validateMutationIds(matchId);
+    const completion = z.object({ winnerId: z.string().uuid().optional(), result: z.string().min(1).max(2000).optional() })
+      .safeParse({ winnerId, result });
+    if (!completion.success) throw new BadRequestException('Invalid match completion command');
+    const wasAlreadyComplete = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
+        WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
+      const match = await tx.query.matches.findFirst({
+        where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
+      });
+      assertTenantScope(tenantId, match, 'Match', matchId);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match);
+      if (winnerId && winnerId !== match.teamAId && winnerId !== match.teamBId) {
+        throw new BadRequestException('Winner must be one of the match teams');
+      }
+      // An identical retry cannot overwrite the committed result/end timestamp.
+      if (match.status === 'completed') {
+        if ((winnerId || null) !== match.winnerId || (result || null) !== match.result) {
+          throw new ConflictException('Completed result requires an audited correction');
+        }
+        return true;
+      }
+      if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
+        throw new BadRequestException('This match can no longer be completed');
+      }
+      await tx.update(matches).set({ status: 'completed', winnerId: winnerId || null,
+        result: result || null, endDate: new Date(), updatedAt: new Date(),
+      }).where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)));
+      return false;
+    }, { isolationLevel: 'read committed' });
 
     // Same reasoning as completeInnings: the match-state cache holds a stale
     // status otherwise.
