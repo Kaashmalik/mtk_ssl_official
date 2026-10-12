@@ -1,0 +1,778 @@
+# Cricket SaaS 2026: League Isolation, User Control and Premium Experience
+
+## 1. Document Control and Status Rules
+
+| Field | Value |
+| --- | --- |
+| Created / last reviewed | **12 October 2026 (2026-10-12)** |
+| Repository | https://github.com/Kaashmalik/mtk_ssl_official |
+| Implementation baseline | `main` at `3d7e3fde559a3f96cfbed678543bf378d8a8a255` |
+| Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
+| Scope of this change | Documentation only; no application, authentication, schema, or remote-database changes |
+| Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
+| Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
+
+Status vocabulary:
+
+- **BUILT / `[x]`:** the narrowly stated behavior has implementation evidence, with the verification boundary recorded. It does not mean deployed or production-certified.
+- **PARTIAL / FOUNDATION:** source, schemas, or screens exist, but the whole journey is incomplete or insufficiently verified. Remaining work stays `[ ]`.
+- **PLANNED / `[ ]`:** proposed functionality or outstanding acceptance work; do not market it as delivered.
+- **UNVERIFIED / BLOCKED:** requires real authentication, devices, PostgreSQL, email, payment, or deployed infrastructure evidence.
+- A phase is complete only when its implementation AND exit gates pass. Do not turn all of a phase green because one batch passed unit tests.
+
+This is a professional living plan covering known requirements and failure cases, not a guarantee that every future edge case has been discovered. New rules, incidents, and product decisions must extend its acceptance matrix.
+
+### Contents
+
+1. Document control and status rules
+2. Executive direction and non-negotiable requirements
+3. Verified baseline and outstanding risks
+4. Target architecture and data ownership
+5. Identity, league membership and resource permissions
+6. Platform administration and league onboarding
+7. Organizer settings, member controls and scorer OTP flow
+8. Team, captain, player and registration journeys
+9. Tournament operations and match-day readiness
+10. Canonical scoring, offline operation and live match center
+11. Public hub, player records, awards and prizes
+12. Fan engagement, white-label and commercial features
+13. UI/UX, accessibility and backend synchronization
+14. Database, security, privacy and operational reliability
+15. Edge-case and acceptance matrix
+16. Phased implementation checklists: built and remaining
+17. Delivery gates, metrics and next batch
+18. Sources, evidence and maintenance
+
+## 2. Executive Direction and Non-Negotiable Requirements
+
+**Vision:** one cricket SaaS serving many independent leagues, with trustworthy operational controls and a shared public experience containing only published cricket information.
+
+**Priority:** league isolation -> membership/OTP controls -> registration and eligibility -> reliable match-day scoring -> rich published statistics -> commercial white-label -> moderated engagement and scale.
+
+1. One global login may have different memberships and jobs in different leagues. Global identity must not become global league authority.
+2. Every team, player registration, tournament, match, official assignment, fee, prize, and private operational record belongs to its correct league.
+3. Use role + capability + resource scope + current membership/assignment + valid lifecycle + entitlement. UI visibility alone is never authorization.
+4. Separate platform account suspension, league membership suspension, and match assignment revocation.
+5. Never allow a league organizer to create platform administrators or disable a person's account in other leagues.
+6. Treat email OTP as identity verification, not automatic membership or proof of administrative authority.
+7. Make the canonical scoring service the only delivery writer. Publish only server-confirmed events; preserve offline work without presenting it as official.
+8. Make every settings action database-backed, validated, auditable, and visible as pending/succeeded/failed.
+9. Public users see published leagues, matches, records, awards, and prizes, not private email, identity, payment, or registration data.
+10. Isolation, authentication, recovery, and score integrity are mandatory on every plan, not premium upgrades.
+11. Preserve historical statistics and eligibility; archive or correct official records rather than silently rewriting/deleting them.
+12. Do not claim verified payments, complete cricket rules, professional feed rights, or production readiness from scaffolding or mocked tests.
+
+## 3. Verified Baseline and Outstanding Risks
+
+### 3.1 Delivered implementation batches
+
+| Batch | Commit | Built behavior and boundary |
+| --- | --- | --- |
+| 1 | `73c7ac0` | Tournament authorization/author UUID, wizard validation, browser-safe plan guard, scorecard lookup fixes |
+| 2 | `5f50ab1` | Explicit delivery accounting, stable operation IDs, replay retention, sequence allocation, exact undo/projection reconciliation |
+| 3 | `dd09b57` | Web assignment enforcement, tenant-scoped assignment candidates, validated rich snapshots, reconnect/chase hydration |
+| 4 | `0080b88` | Wizard configuration persistence/reading/copying, validated dates/money/branding/seeds, locked partial updates |
+| 5 | `e9f4951` | Verified web actor propagation, transactional active-account/tenant-role/assignment checks, basic roster eligibility, delivery/undo actor metadata |
+| 6 | `3d7e3fd` | Role-aware responsive dashboard, authorized active-tenant dashboard/shell/trial reads, accurate summaries and honest error states |
+
+Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
+
+### 3.2 Existing foundations are not complete new features
+
+- Invitation tokens, email dispatch, atomic invitation claiming, and basic team-manager assignment exist. A hardened scorer OTP/settings journey is not established.
+- `user_tenant_roles` provides one role per user/tenant. League membership status, multiple resource-scoped grants, and the broader proposed roles need design/migration.
+- Team/player/match CRUD, registrations, public pages, branding, billing, reactions, and specialist services exist in varying states. Audit each before reuse; presence is not end-to-end acceptance.
+- Score snapshots, web queue retention, and canonical write authorization are implemented foundations. Mobile authenticated replay, outbox recovery, complete cricket rules, and private publication controls remain open.
+
+### 3.3 Release-critical gaps
+
+| ID | Current evidence | Required resolution |
+| --- | --- | --- |
+| GAP-01 | `actions/users.ts` changes global `users.role` / `users.isActive` | League-only membership role/status operations; separate platform authority |
+| GAP-02 | Some pages/actions still use primary membership or legacy global roles | One verified active league across page, action, repository, and notification paths |
+| GAP-03 | Legacy `users.tenantIds` can grant access when a junction row is absent | Reconcile membership data and remove authority fallback safely; deleting a role row alone is not full revocation today |
+| GAP-04 | Invitation dispatch can log a secret link and report delivery when the provider is absent | Redacted logs, queued delivery, accurate accepted/delivered/bounced/failed states, safe resend/recovery |
+| GAP-05 | Invite acceptance relies on application email and pre-transaction expiry checks | Provider-verified email; atomic expiry/revocation/scope checks at claim time; current grant authority |
+| GAP-06 | Mobile Supabase sessions and web Clerk identity are not a completed scoring transport contract | Approved identity strategy and explicit account mapping; no client internal tokens |
+| GAP-07 | Scoring sockets/state reads are currently anonymous public interfaces | Publication gates and protected private-match room/read access before offering private matches |
+| GAP-08 | Migration history, real locking, private networking, and deployed event delivery are not reverified | Local/staging schema proof, concurrency tests, infrastructure acceptance |
+| GAP-09 | Payment provider placeholders and unverified online paths remain | Signed-provider verification, replay protection and reconciliation before enabling checkout |
+| GAP-10 | Dashboard shortcuts can lead to legacy tenant-inconsistent destinations | Repair destination authorization; do not equate dashboard role filtering with safe CRUD |
+
+## 4. Target Architecture and Data Ownership
+
+```text
+Platform console        League web/mobile           Public cricket hub
+        |                      |                           |
+Verified identity + active league + scoped authorization   |
+        |                      |                    Published read model
+Platform operations     Next.js product CRUD                |
+                               |                           |
+                       Tenant-scoped PostgreSQL            |
+                               |                           |
+Scoring client -> authenticated BFF -> canonical Nest scoring transaction
+                               |
+                 Immutable events + projections + outbox
+                               |
+             Live delivery / notifications / analytics / overlays
+```
+
+- Next.js owns product CRUD; Nest owns authoritative scoring and other accepted specialists. No big-bang service rewrite.
+- Shared database with enforceable tenant ownership is the default. Dedicated enterprise deployments are optional later, not necessary for logical league separation.
+- Canonical scoring can use a privileged connection, so explicit transactional actor/tenant/resource checks remain necessary; RLS alone cannot protect a bypass-RLS service.
+- Public data crosses leagues intentionally through publication-approved representations. Administrative queries never become cross-league because a public hub exists.
+- Organization-level billing may own several leagues later; league remains the operational isolation boundary. Do not add unnecessary organization complexity to the first corrective batch.
+
+### Proposed boundaries to map onto existing tables
+
+| Boundary | Responsibility |
+| --- | --- |
+| Accounts and external identities | Internal account UUID; unique provider issuer/subject; no email-only account merging |
+| Platform role grants | Platform administration, support and abuse authority, independent of league roles |
+| League memberships | User/league relationship, status, expiry, join/revoke history |
+| Scoped role grants | Membership permissions limited to league, tournament, or team |
+| Invitations | Intended verified email, role/scope, issuer, expiry, token hash, acceptance/revocation |
+| Official/scorer assignments | Match scope, primary/backup, handover epoch, expiry and history |
+| League player/competition records | League-specific profile, squad registration, transfers, historical participation |
+| Match squads and decisions | Immutable eligibility/XI snapshots and official approvals |
+| Scoring events/projections/outbox | Authoritative deliveries, corrections, revisions and reliable event delivery |
+| Awards/prizes/votes | Approved recognition, announced prizes, payout records and separate fan voting |
+| Audits/notification delivery | Actor/resource changes, trace IDs, provider status, retries and retention |
+
+Names above are design boundaries, not approved migration/table names. Reuse and extend existing schemas where safe.
+
+## 5. Identity, League Membership and Resource Permissions
+
+### 5.1 Identity strategy
+
+Recommended direction: coherent Clerk authentication across web, platform admin, and mobile, with an explicit migration/linking decision for existing Supabase mobile identities. Use the supported Supabase third-party Clerk integration where direct data access is needed, not deprecated shared-secret JWT templates.
+
+- Validate token issuer, audience, signature and expiry; map provider subject to the application's UUID.
+- A provider-verified email may prove an invitation recipient but is not the enduring account key.
+- Do not assume `auth.uid()` equals `users.id` for a Clerk string subject. Design mappings/RLS against the chosen identity integration.
+- Do not trust client-editable metadata, a selected role, or an arbitrary tenant header as authority.
+- Require enrolled strong factors for privileged users; do not silently downgrade required MFA to an email-only check.
+- Document recovery, lost-device, email-change, duplicate-account and provider-outage journeys before mobile migration.
+
+### 5.2 Scope and roles
+
+| Role | Allowed job | Explicit restrictions |
+| --- | --- | --- |
+| Platform super admin | Platform plans, league onboarding, abuse, platform account suspension, audited support | Separate console; league access is explicit/audited, not ordinary organizer membership |
+| League owner | Own-league settings, staff, competitions, ownership and commercial configuration | Cannot grant platform roles or affect another league |
+| League administrator | Delegated staff and operational responsibilities | No ownership transfer or financial authority unless separately granted |
+| Tournament director | Registrations, fixtures, officials, result/award approvals | Assigned competitions only |
+| Finance manager | Fees, approved refunds, reconciliation, prize payment records | Cannot score or change access roles |
+| Team owner/manager | Team identity, roster, applications and delegated team staff | Assigned teams; cannot approve own application or another team's squad |
+| Captain | Availability, eligible XI, toss acknowledgement, match requests | Assigned team/fixtures; cannot mutate official score |
+| Coach | Approved squad information and analytics | No automatic roster changes, medical-data access or scoring rights |
+| Scorer | Deliveries and permitted corrections | Current assigned matches and valid membership; no other league authority |
+| Umpire/referee | Assigned match decisions, disputes and approved results | Assigned fixtures; score-writing only if explicitly granted |
+| Broadcaster | Stream configuration, score overlays and approved assets | Assigned streams; cannot change canonical scores |
+| Player | Own profile/availability, participation and correction requests | Cannot edit historical official statistics or others' records |
+| Fan | Published browsing, follows, moderated reactions and votes | No operational CRUD or private membership access |
+
+New roles/scopes are proposals; the current enum/permission matrix is smaller. Do not use a numeric role hierarchy to grant unrelated capabilities. Multiple scoped jobs may coexist; owner-only actions remain explicit. Team ownership, team management and captaincy are separate assignments.
+
+### 5.3 State and revocation model
+
+- Platform account: `active -> suspended -> restored` (platform-controlled).
+- League membership: `pending -> active -> suspended/expired/revoked` (league-scoped).
+- Invitation: `pending -> accepted/expired/revoked`; delivery status is a separate state machine.
+- Match assignment: `pending -> active -> ended/revoked`; primary/backup handover is separate from login.
+- Suspending League A membership never alters League B membership. Platform suspension blocks all authenticated operational access while retaining authorized historical/public records.
+- The next server-authorized mutation must respect revocation; serialize revocation and scoring writes to define which in-flight command committed first. Rejected offline commands stay retained for authorized reconciliation.
+- Last-owner removal, self-escalation and unauthorized delegation are rejected. Ownership transfer is a two-party, fresh-verified, audited workflow.
+- Support access is consented/time-limited where appropriate, with a visible banner, read-only default and no secret sharing.
+
+## 6. Platform Administration and League Onboarding
+
+### Organizer flow
+
+```text
+Sign up -> verify email -> create league application -> choose plan
+-> required review/payment checks -> activate workspace
+-> configure brand, timezone, rules and staff -> publish approved content
+```
+
+Platform application states: draft, submitted, needs-information, approved, rejected, withdrawn. Workspace states: setup, active, restricted, suspended, archived. Billing states remain separate.
+
+Platform console responsibilities:
+
+- Review league ownership/contact identity and required application information.
+- Approve/reject with reasons; prevent duplicate approval/provisioning on retries.
+- Configure plans/entitlements and monitor usage without reading every league's private operational records by default.
+- View operational health, domain/email delivery health, abuse reports, support cases and audit trails.
+- Restrict/suspend with a clear reason, effective policy, appeal/support path and preservation of records.
+- Archive/restore/export through explicit authorization and retention policies.
+
+Product decisions before implementation:
+
+1. Which league types are self-service versus approval-only?
+2. Is each owner initially allowed one or several leagues, and how does the plan limit apply?
+3. What happens to a live match during billing restriction? Recommended: permit safe completion/read access under a documented grace policy; do not silently lose scoring work.
+4. Security suspension may block writes immediately; billing restriction and public publication are not interchangeable.
+5. Approval of a league must not automatically approve its teams, fees, player eligibility or public data publication.
+
+## 7. Organizer Settings, Member Controls and Scorer OTP Flow
+
+### 7.1 Settings information architecture
+
+| Settings tab | Main controls |
+| --- | --- |
+| General | Name, contact, timezone, language, seasons, archive/restore |
+| Members and access | Invitations, scoped roles, league-only status, expiry, revocation and ownership transfer |
+| Teams and eligibility | Managers/captains, squad limits, transfer windows, approval/eligibility rules |
+| Scoring and officials | Match assignments, backup scorer, handover, correction rights, official approvals |
+| Competition rules | Format, overs, points, tie-breakers, qualification and rain-policy disclosure |
+| Branding and domains | Draft/published brand, logo, accessible palette, verified domain and email sender |
+| Notifications | Event subscriptions, recipient scope, reminders, language, quiet hours and unsubscribe |
+| Fees and prizes | Currency, registration amounts, reconciliation, announced prizes and payment status |
+| Privacy and publishing | League/match/profile visibility, consent and publication approvals |
+| Security and audit | Privileged authentication policy, scoped changes, access history and support access |
+| Personal account | Own authentication, devices/sessions and preferences; separate from league member control |
+
+### 7.2 Member UI
+
+Show verified identity, current league, roles/scopes, membership status, invitation delivery, expiry, assigned resources and allowed actions. Search/paginate within the authorized league. Do not show a member's unrelated league memberships.
+
+Actions: invite, resend, revoke, activate, suspend, reactivate, change scope, assign, unassign and remove membership. Separate destructive confirmation from ordinary toggles; show consequences and affected assignments. Never silently affect platform account status.
+
+### 7.3 Example: invite `aliscorer@gmail.com`
+
+```text
+Organizer -> Settings / Members and access / Invite scorer
+-> enter recipient email -> select this league's competition/match scope
+-> optional access expiry -> choose activation policy -> send invitation
+Recipient -> open invite -> sign in/sign up -> verify invited email by OTP
+-> review league, role and scope -> accept
+Backend -> atomically claim valid invite + establish membership/grants
+-> activate eligible assignment -> show only authorized scoring jobs
+```
+
+The Gmail address is a recipient, not a custom sending domain. Send through a verified platform/league sender with appropriate SPF/DKIM/DMARC; no Gmail impersonation. Custom-domain sender verification is a separate setup journey.
+
+Required checks at redemption:
+
+- Valid authenticated identity; invited email verified by the identity provider.
+- Unexpired/unrevoked invitation checked at atomic claim time, not merely at preview time.
+- Correct active league, current grant authority and still-existing allowed resources.
+- Existing membership/grants handled without demotion, duplicate side effects or unintended elevation.
+- If activation is off, verification/acceptance does not grant operational access until authorized activation.
+- Pending assignment cannot grant scoring before membership becomes active.
+- Response loss/retry returns a safe idempotent outcome for the same accepted identity without repeating notifications/grants.
+
+### 7.4 OTP and sensitive-action policy
+
+- Prefer provider-managed codes. Short-lived, single-use verification; bound attempts, resend cooldowns, recipient/account/IP abuse controls and generic unauthenticated responses.
+- Invitation TTL and OTP TTL differ. Set supported defaults after checking provider capabilities; do not invent guarantees the SDK cannot enforce.
+- Never show OTPs to organizers or put codes/secret invitation links in logs, analytics or referrers. No production development bypass/test codes.
+- A code verifies identity, not a role. Accepting an invitation additionally requires resource/membership checks.
+- No OTP on every ball. Use a valid authenticated scoring session, renewed safely as needed.
+- Ownership transfer, privileged grants, account recovery and sensitive financial changes require fresh server-enforced verification and the required enrolled factors. For action-specific single-use authorization, bind verification to the exact operation and consume it atomically.
+- Outages, bounce, provider acceptance and actual delivery must be distinguishable. Resend/revoke races and expired invitations need explicit UI outcomes.
+
+## 8. Team, Captain, Player and Registration Journeys
+
+### 8.1 Team manager
+
+```text
+Verified account -> authorized league/team membership -> create/manage team
+-> invite players/coaches -> submit competition application + squad
+-> resolve requested information -> track approval and fees -> manage approved participation
+```
+
+- A team in League A cannot be selected for League B's tournament, even by manipulating an ID.
+- Reusing a brand/team in another league creates an explicit league-specific record with consent, not a cross-tenant foreign key.
+- Team transfer of ownership is audited and does not transfer league administration.
+- Managers may propose player changes; eligibility/competition locks determine when changes take effect.
+
+### 8.2 Player
+
+```text
+Verify account -> accept league/team invitation -> approve permitted profile publication
+-> maintain own details/availability -> join approved squad -> participate
+-> view official records -> request corrections rather than edit statistics
+```
+
+- Separate account identity, league profile, competition registration and historical match participation.
+- No email/name-only player merging. Verified linking supports consented public career aggregation.
+- Transfers affect future participation, not past match team identity.
+- A player in two teams/leagues gets separate scopes. Double participation in one competition follows explicit rules, normally disallowed unless the competition permits it.
+- Handle injured/suspended/retired status, reinstatement, guardians/minors and account-less player profiles through documented policies.
+
+### 8.3 Captain and coach
+
+Captains submit availability and proposed playing XI for their assigned team/fixtures; officials approve eligibility as required. Toss acknowledgement is separate from the authoritative recorded toss. Coaches see only permitted squad/analytics information; private medical/identity information is not included by default.
+
+### 8.4 Tournament registration
+
+```text
+Published competition -> draft application -> submit -> pending review
+-> needs information / approved / rejected / waitlisted / withdrawn
+-> eligible competition squad -> fixture allocation
+```
+
+Maintain independent application, payment and squad-eligibility states. Payment does not imply approval, and approval does not prove payment. Handle deadlines, capacity/waitlist promotion, duplicate submissions, refunds, registration withdrawal and amended squads with request IDs and audit history.
+
+## 9. Tournament Operations and Match-Day Readiness
+
+### Competition lifecycle
+
+Draft -> configured -> registrations open -> registrations locked -> fixtures published -> in progress -> results under review -> finalized -> archived.
+
+- Persist rules/settings and season templates; saved preferences are not generated fixtures.
+- Support league, round robin, knockout, groups/hybrid formats only when fixture and qualification logic is implemented and tested.
+- Fixture generation must consider venues, availability, rest, duplicates, timezones, capacity and rescheduling notices.
+- Points, ties, no-results, abandoned matches, NRR and advancement use versioned competition rules. Do not invent fixed points for every tournament format.
+- Freeze or explicitly version material rule changes once matches start; disclose retrospective effects and require approval.
+- Store timezone/currency configuration; display localized schedules without altering recorded instants or interpreting money as floating-point values.
+
+### Match-day readiness checklist
+
+Approved teams -> eligible squad/XI -> officials/scorer -> venue/time -> toss -> striker/non-striker/bowler -> innings -> scoring -> break/chase -> review -> result -> awards/prizes/publication.
+
+The dashboard's existing first-record checklist is not XI or match-readiness certification. Readiness must validate real registrations and resource approvals.
+
+### Result governance
+
+- Provisional result, official approval, dispute, correction and finalized result are distinct states.
+- Record forfeits, cancellations and no-results explicitly; do not treat all missing winners as ties.
+- A participating scorer may require independent official approval by competition policy.
+- Corrected results recompute standings, qualification, public summaries and awards where relevant; notify affected parties and retain the earlier decision.
+
+## 10. Canonical Scoring, Offline Operation and Live Match Center
+
+### 10.1 Command lifecycle
+
+```text
+Scorer action -> durable local operation -> authenticated BFF
+-> validated actor + league + membership + assignment + expected revision
+-> match transaction / rules / deduplication
+-> delivery + immutable event + projection + durable outbox
+-> committed acknowledgement -> live broadcast / overlays / downstream statistics
+```
+
+Existing web actor/assignment transactions are a foundation. Complete memberships, revision checks, mobile identity, writer handover and outbox delivery remain required.
+
+### 10.2 Cricket engine
+
+- Explicit batter runs, wide/no-ball penalties, byes, leg-byes, penalties and legal balls; implement valid mixed combinations.
+- Striker/non-striker, over-end strike, wicket crossing/ends, bowler changes and dismissed-player identity follow the chosen laws/version and competition rules.
+- Validate dismissals on wides/no-balls/free hits, retired hurt/out, substitutes, injuries and appropriate fielder requirements.
+- Innings limits, all-out, winning chase delivery, ties, super overs, abandoned/no-result and revised targets need state-machine tests.
+- Gate unsupported formats. Complete test-cricket/multi-innings support is not established by a three-innings UI or a super-over label.
+- Rain calculators must disclose their basis; do not call a heuristic authoritative DLS without approved implementation/rights.
+- Undo of ambiguous historical extras stays blocked until a reviewed correction can establish the true delta. Corrections require reason, actor, before/after and durable history.
+
+### 10.3 Offline and concurrent writers
+
+- Queue before sending, preserve operation IDs and normalized run components, acknowledge per operation, retain rejection/conflict data.
+- Distinguish local provisional score from server-confirmed official score. Never broadcast an unaccepted offline delivery as official.
+- Scope queues to account + league + match; logout/switch/handover must not replay another person's work.
+- One active scoring writer: primary/backup assignment plus server-enforced handover epoch/fencing. A TTL alone is insufficient if a stale device can still write.
+- Reconcile expected revisions and snapshots after a gap/reconnect; do not discard unconfirmed operations simply because a snapshot arrives.
+- Assignment/membership revocation blocks new authoritative writes and unauthorized replay; retain work for approved reconciliation.
+- Define recovery for lost responses, expired sessions, application reload, multiple tabs, device replacement and undo while a queue is pending.
+
+### 10.4 Live Match Center
+
+Tabs: **Overview / Scorecard / Commentary / Analysis / Squads / Match info / Watch**.
+
+- Score/wickets/overs; current/required rates; target and runs/balls needed; batter/bowler figures; partnership and recent deliveries.
+- Full batting/bowling cards, extras, dismissal details, fall of wickets, innings summaries and eligible XI.
+- Timestamped commentary aligned to confirmed events, over summaries, highlights, filtering and corrections.
+- Worm/Manhattan, phase comparisons and spells; shot maps only when genuine shot data exists.
+- Toss, venue, officials, result, awards, stream and score-only fallback.
+- Durable revisions, stale/duplicate event rejection, authoritative fresh snapshots, last-confirmed freshness and reconnect messaging.
+- Outbox retries with idempotent consumers; recover multi-instance fan-out without duplicate score effects.
+- Private matches require HTTP and socket authorization before room join/snapshot delivery. Publication withdrawal must invalidate caches and terminate unauthorized room access.
+- Distinguish organizer scoring from optional licensed professional-feed data, including attribution, quotas, coverage, outages and redistribution rights.
+
+## 11. Public Hub, Player Records, Awards and Prizes
+
+Public users may browse **all published leagues**, not all private database records.
+
+### Public discovery
+
+- Live/upcoming matches, league/season filters, published teams, players and competition pages.
+- Followed entities, result notifications, league champions, award galleries and prize announcements.
+- Stable share URLs, SEO metadata and branded cards without leaking private information.
+- Public/unlisted/private visibility and explicit field allowlists. An unlisted link is not private authorization.
+
+### Records and rankings
+
+- Batting, bowling, fielding and wicketkeeping records by league, competition, season and format.
+- Career aggregation only after verified player linkage and appropriate publication consent.
+- Minimum qualification, tie-breakers, rule/version disclosure and correction provenance.
+- Do not equate fan votes, AI suggestions or cross-format raw totals with official ranking.
+- Historical scores remain authoritative; deletion/unlinking policies separate account access from lawful record retention/publication.
+
+### Awards
+
+Player of the Match, Player of the League/Tournament, best batter/bowler/fielder/keeper, emerging player, fair play and custom awards. Authorized officials approve with reason/evidence; fan favorite is independently labeled. Corrections/disputes can revise awards through recorded approvals.
+
+### Prizes
+
+Define sponsor, category, cash/non-cash type, currency/decimal amount, eligibility, recipient and approval. Track announced -> awarded -> payment pending -> paid/withdrawn/disputed as applicable. Publication does not prove funds exist or payout succeeded. Sensitive payout/refund workflows use the appropriate financial approvals and provider verification.
+
+## 12. Fan Engagement, White-Label and Commercial Features
+
+### Engagement
+
+- Follows, boundary/wicket/start/result notifications, moderated reactions and polls.
+- Fan-favorite voting with eligibility, per-user limits, rate limits, vote windows and abuse review.
+- Milestone/share cards, league hall of fame, weekly recaps and fan badges.
+- Report/block/moderation tools, community rules and clear separation of official decisions from popularity.
+- Push/email consent, quiet hours, delivery status, unsubscribe and deduplicated event notifications.
+- Later: consented highlight tagging/clips, coaching analytics and clearly labeled AI summaries using confirmed events only. AI must not invent deliveries or modify official scores.
+
+### White-label
+
+Brand Studio: league identity, logo/favicon, light/dark tokens, accessible fonts/colors, public templates, sponsor positions, email templates, scorecards, share images and broadcast graphics. Draft -> preview -> publish -> rollback; reload/tenant-switch must restore the correct identity.
+
+Domain flow: enter -> prove ownership -> show DNS -> verify routing -> provision HTTPS -> verify login/cookies/redirects/socket origins -> activate. Include failed verification, expiry, reassignment, removal and renewal recovery. Sender-domain verification is distinct from recipient OTP.
+
+### Proposed product tiers
+
+| Tier | Illustrative differentiation; pricing/limits require approval |
+| --- | --- |
+| Core | Safe memberships, necessary OTP, correct scoring, basic public pages and recovery |
+| Pro | Advanced statistics, registration tools, scheduling, reports and richer notifications |
+| White-label | Custom domain, Brand Studio, sponsor placements, branded email and overlays |
+| Enterprise | Multiple-workspace administration, approved SSO, scoped APIs/webhooks, audit exports, contractual support/isolation options |
+
+Apply limits on the backend; UI upsells never replace entitlement checks. Billing states, approvals and usage are reconciled through verified providers. Do not enable placeholder online payment paths. Avoid cash betting/fantasy wallets in the initial roadmap; rights, jurisdiction and financial compliance need separate review.
+
+## 13. UI/UX, Accessibility and Backend Synchronization
+
+### Role-first UX
+
+- Persistent league name/role and an explicit switcher; warn before cross-workspace navigation with pending work.
+- Separate platform console, league settings, team operations, personal account and public hub.
+- Organizer: readiness/tasks/registrations/scorer assignments. Scorer: assigned matches/queue/connectivity. Manager/captain: assigned teams/squads/XI. Player: own participation. Fan: published discovery.
+- Show only permitted actions and enforce the identical capability on the server. Explain read-only and missing-assignment states.
+- Mobile-first layouts, 44px action targets, keyboard focus, screen-reader labels, accessible contrast, reduced motion, outdoor scoring and Urdu/English including RTL where applicable.
+- Test WCAG 2.2 AA-relevant journeys; do not claim conformance from utility classes alone.
+- Preserve form drafts, validate per step then at final submission, show linked success destinations and avoid accidental duplicate creation.
+
+### Database-backed interaction contract
+
+```text
+UI -> session identity -> one active league -> scoped permission/resource checks
+-> validated command -> database transaction + audit/outbox
+-> confirmed response -> invalidate affected reads -> notify/update clients
+```
+
+- Changes use operation/request IDs and version checks where retries or conflicts matter.
+- Toggle UI: previous state -> saving -> confirmed state; on failure restore previous state with actionable error.
+- High-impact changes show affected league/resources, consequences and fresh verification/approval where needed.
+- Server derives actor and verifies selected league; no browser-supplied role grants or secret tokens.
+- Locked/stale resources return conflict guidance instead of last-write-wins permission changes.
+- Distinguish empty, zero, loading, offline, unauthorized, unavailable, pending and rejected; never represent failed reads as zero records or successful saves.
+- Optimism is limited to reversible local UX; official score, financial success and access grants require confirmed outcomes.
+- Keep durable unsent work isolated and visible when changing account/league; do not silently discard it.
+
+## 14. Database, Security, Privacy and Operational Reliability
+
+### Schema and migration design
+
+- Inspect deployed schema/history before changes; reconcile recorded migration divergence. No migration is applied by this document.
+- Add tenant-consistent relationship constraints (such as appropriate composite tenant/resource keys), unique membership/grant/idempotency constraints and status rules after auditing existing data.
+- Index tenant/status/resource access paths based on actual query plans; paginate/bound administrative and public queries.
+- RLS/grants protect exposed data paths. Prefer least-privileged application roles where viable; keep explicit safeguards for connections that bypass RLS.
+- Use verified request-local transaction context, not persistent pooled-connection tenant settings that can leak into another request.
+- Reconcile legacy membership sources, backfill, compare decisions, then remove fallback. Do not delete legacy authority until dependants and membership data are verified.
+- Decimal currency amounts, configured currency, UTC instants + display timezone, durable revisions and structured command errors.
+- Archive official resources; reviewed correction/export/deletion processes preserve relational and statistical integrity.
+
+### Security and privacy
+
+- Least privilege at every page/action/API/socket/export/job; database safety does not remove backend responsibility.
+- No internal service tokens, secret/service-role keys or OTP/invite secrets in browser/mobile bundles or logs.
+- Production MFA enrollment/recovery for privileged identities; token/session freshness and DB-backed membership revocation checked for sensitive operations.
+- CSRF/origin/session protections appropriate to each transport; replay and request-abuse controls.
+- Storage authorization includes tenant object paths, type/content/size checks, malware/risk handling and protected links; no trusted client filename/path alone.
+- Public representations allowlist fields; exclude private contact, identity, financial, medical and admin records.
+- Minors/guardians, consent withdrawal, account deletion/export, retention and regional privacy obligations require explicit policy/legal review.
+- Revoke publication across HTTP, sockets, caches, search and exports where supported; explain that already downloaded public copies cannot be recalled.
+
+### Operations
+
+- Private service networks, TLS, scoped secrets, documented rotation and environment isolation.
+- Backups and restore drills with approved recovery point/time objectives; tenant export and disaster recovery are not the same operation.
+- Transactional outbox retry/dead-letter handling, idempotent webhooks/consumers, queue observability and safe replay tools.
+- Monitor auth failures, OTP/email abuse, revoked writes, live latency, event gaps, queue age, payment mismatches and per-league load.
+- Rate limits and fair-use quotas prevent one league overwhelming the platform; load-test live event fan-out and cache consistency.
+- Publish rollout/rollback, incident response, maintenance and communication runbooks. Backfill/correction jobs must remain tenant-scoped and auditable.
+
+2026 compatibility note: Supabase's announced explicit Data API grant change applies to new exposed tables, with enforcement scheduled for existing projects on **30 October 2026**. Review needed grants/RLS for intended Data API access; direct Drizzle connections are not made safe or unsafe merely by that exposure setting. Do not grant every table publicly to make a client work.
+
+## 15. Edge-Case and Acceptance Matrix
+
+Each case requires positive and negative assertions plus evidence. The matrix is a required test backlog; no row is certified by this planning change.
+
+| Case | Required outcome | Owning phase |
+| --- | --- | --- |
+| A scorer in A, suspended member in B, outsider in C | Only A's assigned writes succeed; B/C cannot expose private data | 1/2/5 |
+| Organizer in A, player in B | A's administrative role never propagates to B | 1 |
+| Host tenant differs from primary membership | Authorize/read/write one explicit active tenant; no silent switch on lookup failure | 1 |
+| Forged tenant/team/player/tournament/match ID | Reject before mutation; no cross-league relation or disclosure | 1/3/4/5 |
+| Tenant/account/membership is inactive or expired | Enforce the correct scope without erasing historical records | 1/2 |
+| Deleted membership but legacy array remains | No residual grant after planned fallback retirement; test migration behavior | 1 |
+| Last owner removed or self-escalation attempted | Reject; audited two-party ownership transfer remains available | 2 |
+| Lower-role invite accepted by existing owner | No demotion, accidental extra scope or unrelated role grant | 2 |
+| Same person is captain/manager/scorer | Resource limits and configured independent approval still apply | 2/3/5 |
+| Invited email differs from logged-in account | Require provider-verified invited email; no email-only takeover | 2 |
+| Expired/revoked/used invite, including concurrent acceptance | Atomic valid single claim; safe same-actor response-loss recovery | 2 |
+| Inviter loses grant authority or resource disappears | Refuse/require reissue; no obsolete assignment becomes active | 2 |
+| OTP wrong/reused/expired or resend races | Provider-supported single-use/attempt controls; clear recovery, no bypass | 2 |
+| Email provider absent, accepted-but-not-delivered, bounce/outage | Truthful separate delivery states, redacted logs and controlled retry | 2 |
+| New account webhook/provisioning delayed | Recoverable pending state; never write a Clerk string into a UUID field | 2 |
+| Suspension while scorer has pending deliveries | Subsequent server checks deny; retain local work for approved reconciliation | 2/5 |
+| Two admins edit role/status simultaneously | Version conflict or serialized decision; no silent privilege overwrite | 2 |
+| Duplicate registration/payment callback | One business effect; payment and application states remain independent | 3/8 |
+| Waitlist slot opens, deadline passes, squad amended | Explicit policy and consistent audited promotion/eligibility | 3/4 |
+| Player transfers/suspends after earlier participation | Historical team/statistics stable; new eligibility correctly evaluated | 3/5/6 |
+| Same player joins two teams in one competition | Enforce configured participation policy at approval and match readiness | 3/4 |
+| Fixture overlaps, timezone/DST change, unavailable venue | Detect conflicts; preserve UTC instants and send scoped reschedule notices | 4 |
+| Rule/fee/prize changed after publication | Version/approval policy; no undisclosed retrospective effects | 4/6/8 |
+| Double-click/lost response/replayed delivery | Stable operation ID; exactly one scoring effect and durable acknowledgement | 5 |
+| Wide/no-ball repetitions, mixed extras and illegal dismissal | Correct tested legal-ball/run/dismissal accounting for supported rules | 5 |
+| Undo after reload, ambiguous legacy extras, queued undo | Confirm exact reversal or block for reviewed correction; no guessed history | 5 |
+| Match-winning ball, innings limit, tie/super over/no result | Valid lifecycle; no extra accepted deliveries or fabricated winner | 5 |
+| Two devices/tabs, stale scorer after handover | Revision/fencing rejects stale writes; authorized queue recovery | 5 |
+| Session expires, offline reload/logout/league switch | Isolated retained queue; authenticated ordered replay only | 5 |
+| DB commit succeeds but Redis/Kafka/socket fails | No duplicate scoring; durable event retry and fresh snapshot recovery | 5/9 |
+| Out-of-order/duplicate broadcasts and reconnect gaps | Durable revisions converge to authoritative snapshot | 5 |
+| Team B bats first or unsupported multi-innings format | Scores attach to batting IDs; unsupported formats are gated | 5/6 |
+| Private/unpublished match joined anonymously | Deny room/state access before data is sent | 1/5/6 |
+| Publication revoked with open sockets/cached pages | Remove future access, invalidate controlled caches, document public-copy limits | 6/9 |
+| Public profile contains contact/minor/private data | Allowlist/consent prevents disclosure; guardian policy applied | 6 |
+| Corrected result changes standings, awards and notifications | Deterministic versioned recomputation and audit/provenance | 4/6 |
+| Fan vote floods, bots, offensive reactions | Validation/rate limits/moderation; fan votes never alter official awards | 7 |
+| Prize announced but unpaid, refund disputed | Clearly separate promise, approval, funds and verified settlement | 6/8 |
+| Billing restriction during live match | Documented safe-completion/grace policy; security suspension remains distinct | 8 |
+| Domain removed/reassigned or email sender fails verification | No stale tenant/session/brand leakage; actionable recovery | 8 |
+| Storage URL/export/search/job for another league | Enforce tenant scope and purpose at every boundary | 1/9 |
+| Support impersonation expires or attempts scoring | Time-limited audited access; restricted action cannot proceed | 1/9 |
+| Restore, migration rollback, duplicate event replay | Recover consistent schema/records without tenant mixing or duplicate effects | 0/9 |
+| Keyboard/RTL/screen-reader/reduced-motion/poor-network journey | Usable complete role flows, not merely attractive static screens | All |
+
+## 16. Phased Implementation Checklists: Built and Remaining
+
+**Six batches are delivered; no full phase below is declared production-complete.** Checked items describe inherited implementation, not work performed while writing this document. IDs are stable backlog references. Old batches remain historical evidence; future batches update this section and the evidence register.
+
+### Phase summary
+
+| Phase | Priority | Built scope | Remaining scope | Overall status |
+| --- | --- | --- | --- | --- |
+| 0. Evidence and release foundation | P0 | Plan/batch register and automated test foundations | Real schema/infrastructure/staging proof | PARTIAL |
+| 1. Isolation and authorization | P0 | Tournament/scoring/dashboard-scoped checks | Full CRUD/sockets/storage/jobs context, memberships, constraints | PARTIAL |
+| 2. Settings, memberships and OTP | P0/P1 | Basic invite/role/assignment foundations | League-only status/scoped grants and verified OTP journey | FOUNDATION; target controls remain |
+| 3. League/team/player registration | P1 | Existing CRUD and registration scaffolding | Full reviewed onboarding, team/captain/player eligibility flows | FOUNDATION; acceptance open |
+| 4. Competition operations | P1 | Wizard configuration save/reload/copy and locked updates | Fixtures, XI readiness, rules/standings/advancement | PARTIAL |
+| 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
+| 6. Public hub, records and awards | P1/P2 | Existing public pages and corrected dashboard summaries | Publication model, verified career linkage, awards/prizes | FOUNDATION; expanded product remains |
+| 7. Premium role UX and fan engagement | P2 | Role-aware dashboard and basic engagement foundations | Remaining role journeys, moderated voting/notifications and analytics | PARTIAL |
+| 8. White-label and commercial | P1/P2 | Branding/billing/domain scaffolding, tournament branding persistence | End-to-end brand/domain/verified payment/entitlement journeys | FOUNDATION; acceptance open |
+| 9. Reliability and launch | P0 release gate | Unit/SQL-construction/server-rendered tests | Browser/device/real-DB/load/recovery/security proof | UNVERIFIED / OPEN |
+
+### Phase 0 - Evidence and release foundation
+
+- [x] **BASE-01:** Preserve accepted hybrid ownership and a dated findings/batch tracker.
+- [x] **BASE-02:** Deliver six reviewed implementation batches with recorded remote commits.
+- [x] **BASE-03:** Record the 615-test Batch 6 baseline with mocked-boundary caveats.
+- [ ] **BASE-04:** Inventory deployed schema/roles/grants and reconcile migration history; prove a fresh local/staging database.
+- [ ] **BASE-05:** Establish two isolated test leagues, all representative roles, email/auth sandbox and reproducible browser/device fixtures.
+- [ ] **BASE-06:** Establish operational environments, secrets/networking, observability and rollback/restore evidence.
+
+Exit: repeatable baseline and a verified staging environment; old unit-test counts alone do not satisfy this gate.
+
+### Phase 1 - League isolation and authorization
+
+- [x] **ISO-01:** Use exact active tenant for tournament operations and configuration updates (Batches 1/4).
+- [x] **ISO-02:** Enforce web/canonical scoring tenant, actor and assignment checks (Batches 3/5).
+- [x] **ISO-03:** Authorize active-tenant dashboard/shell/trial reads without role-query-error fallback (Batch 6).
+- [ ] **ISO-04:** Consolidate remaining pages/actions/admin APIs/repositories, especially users/invites and dashboard destinations.
+- [ ] **ISO-05:** Add authoritative league membership status/expiry and resource-scoped grant design; separate platform roles.
+- [ ] **ISO-06:** Reconcile and safely retire legacy `users.role` / `tenantIds` authorization fallback.
+- [ ] **ISO-07:** Enforce tenant-consistent relationships, grants/RLS and service-role safeguards with real DB tests.
+- [ ] **ISO-08:** Scope uploads, exports, caches, search, notifications/jobs and sockets; define public/private publication boundaries.
+- [ ] **ISO-09:** Implement safe workspace switching, context indicators and isolated offline/client caches.
+
+Exit: A/B/C league scenario passes across every private data/mutation boundary, including direct crafted requests.
+
+### Phase 2 - Settings, member controls and OTP
+
+Existing invitation token storage/atomic claiming and match-scorer assignment are reusable foundations, not a checked complete OTP product.
+
+- [ ] **IAM-01:** Replace league UI operations that mutate global roles/status with authorized league-only membership commands.
+- [ ] **IAM-02:** Build Members and access list/detail UI with scoped role/status/expiry/assignment and save-confirmed toggles.
+- [ ] **IAM-03:** Implement provider-verified invited-email OTP/login and atomic recipient/expiry/revocation/scope redemption.
+- [ ] **IAM-04:** Add accurate queued email/delivery/bounce/retry states; eliminate secret-link logging and false delivery success.
+- [ ] **IAM-05:** Implement activate/suspend/reactivate/remove/revoke/resend with version checks, idempotency and audit history.
+- [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
+- [ ] **IAM-07:** Implement last-owner safeguards, delegated grants and two-party ownership transfer.
+- [ ] **IAM-08:** Enforce privileged MFA/step-up and recovery; no silent factor downgrade or client-only sensitive checks.
+- [ ] **IAM-09:** Verify OTP abuse/outage, concurrent invitation acceptance and A/B/C revocation in authenticated staging.
+
+Exit: invite `aliscorer@gmail.com` -> verify -> accept -> activate -> assign -> score -> suspend/revoke works without affecting another league.
+
+### Phase 3 - League, team, captain and player registration
+
+- [ ] **REG-01:** Complete platform league-application/review/activation flow and duplicate-provisioning safeguards.
+- [ ] **REG-02:** Audit/harden existing league-scoped team/player CRUD; archive/history policies and scoped manager/team-owner assignments.
+- [ ] **REG-03:** Implement complete tournament application, needs-information/waitlist/approval/withdrawal workflow.
+- [ ] **REG-04:** Separate registration approval, fee status and squad eligibility; verify related same-league resources.
+- [ ] **REG-05:** Add captain/coach/player invitations, availability, self-profile and correction-request journeys.
+- [ ] **REG-06:** Implement squad/transfer/participation rules, account-less players, minors/guardian consent and historical membership.
+- [ ] **REG-07:** Test manager scope, own-application approval denial, deadline/capacity races and duplicate submissions.
+
+Exit: super-admin/organizer -> league -> manager -> captain/player -> approved registration completes with role-specific limitations.
+
+### Phase 4 - Competition operations and readiness
+
+- [x] **COMP-01:** Persist/read/copy validated wizard match type, overs, location, seeds, fees, prizes and bounded branding (Batch 4).
+- [x] **COMP-02:** Apply row-locked partial configuration updates and preserve unspecified settings (Batch 4).
+- [ ] **COMP-03:** Add durable tournament draft/request-key creation recovery and authenticated reload/copy/upload acceptance.
+- [ ] **COMP-04:** Bind real approved registrations to seeds; generate fixtures with conflict/availability/rest checks.
+- [ ] **COMP-05:** Implement rule-versioned points/NRR/tie-breakers/groups/bracket advancement and reviewed result correction effects.
+- [ ] **COMP-06:** Implement eligible XI/official approval, toss decisions and real match-readiness dashboard.
+- [ ] **COMP-07:** Add rescheduling, forfeits/disputes, competition locks and scoped notices.
+
+Exit: approved squads produce valid fixtures and readiness; final results update the correct competition deterministically.
+
+### Phase 5 - Canonical match day, offline and live updates
+
+- [x] **SCORE-01:** Explicit batter/extras deltas, legal-ball aggregates and monotonic delivery sequences (Batch 2).
+- [x] **SCORE-02:** Stable required operation IDs, accepted replay deduplication and replay-after-undo rejection (Batch 2).
+- [x] **SCORE-03:** Exact validated event undo/projection reconciliation; block ambiguous legacy-extra reversal (Batch 2).
+- [x] **SCORE-04:** Retain failed/unconfirmed web/mobile queue items and server-confirmed web undo (Batch 2; mobile auth still incomplete).
+- [x] **SCORE-05:** Validated full snapshot initialization/reconnect and chase/super-over hydration (Batch 3).
+- [x] **SCORE-06:** Web actor UUID and transactional account/tenant-role/assignment checks on canonical mutations (Batch 5).
+- [x] **SCORE-07:** Basic team/player-side roster eligibility and delivery/undo actor metadata (Batch 5; not full XI/lifecycle audit).
+- [ ] **SCORE-08:** Implement approved mobile identity/BFF transport and shared normalized delivery contract.
+- [ ] **SCORE-09:** Add full membership expiry/suspension checks after Phase 1 and account/league/match-scoped queues.
+- [ ] **SCORE-10:** Implement full supported cricket rules, immutable XI/substitution eligibility and audited legacy corrections.
+- [ ] **SCORE-11:** Add durable revisions, conflict reconciliation, writer fencing/handover and multi-tab/device tests.
+- [ ] **SCORE-12:** Add transactional outbox, idempotent consumers and recovery across instances.
+- [ ] **SCORE-13:** Protect private HTTP/socket reads and publication lifecycle; expand rich Match Center/overlays.
+- [ ] **SCORE-14:** Verify real concurrent PostgreSQL writes, auth expiry, interrupted queues and deployed live fan-out.
+
+Exit: one accepted ball yields one durable scoring effect and convergent authorized clients despite retries, outages, revocation and reconnects.
+
+### Phase 6 - Public hub, records, awards and prizes
+
+- [x] **PUB-01:** Correct dashboard team/innings score attribution and page-load freshness/error disclosures (Batch 6).
+- [ ] **PUB-02:** Implement publication-approved cross-league hub/read models and protected private/unlisted behavior.
+- [ ] **PUB-03:** Expand verified player records, format-aware leaderboards, minimum qualifications and consented career linkage.
+- [ ] **PUB-04:** Implement official awards, fan-favorite separation, disputes and correction provenance.
+- [ ] **PUB-05:** Implement configurable prize categories/currency/sponsors, approval and truthful payout records.
+- [ ] **PUB-06:** Verify public field allowlists, minor consent, withdrawal/cache invalidation and unauthorized export/socket access.
+
+Exit: common users can browse published leagues and records without any private operational/contact/financial leakage.
+
+### Phase 7 - Role UX, engagement and analytics
+
+- [x] **UX-01:** Role-aware dashboard, organizer first-record setup/tasks and scorer assignment shortcuts (Batch 6).
+- [x] **UX-02:** Accessible loading/empty/unavailable server-rendered dashboard states, focus/touch/reduced-motion class contracts (Batch 6; browser certification open).
+- [ ] **UX-03:** Complete manager/captain/coach/player/official role journeys, localized/RTL/timezone preferences and durable forms.
+- [ ] **UX-04:** Verify keyboard, screen reader, contrast, outdoor/mobile layout and poor-network journeys on devices.
+- [ ] **FAN-01:** Harden reactions and add moderated polls/votes, report/block and anti-abuse tooling.
+- [ ] **FAN-02:** Add scoped follows/notifications, consent/quiet hours, deduplication and provider delivery tracking.
+- [ ] **FAN-03:** Add milestone/share cards, hall of fame, recap/highlight tools and approved analytic packages.
+- [ ] **FAN-04:** Gate/labeled AI summaries and any prediction features; never change official scores or present estimates as facts.
+
+Exit: complete role journeys and engagement are usable, accessible, consented and moderated; fan actions cannot change official decisions.
+
+### Phase 8 - White-label and commercial operations
+
+- [ ] **PREM-01:** Audit existing branding/domain/billing scaffolding and approve concrete tiers, limits/currency and grace policies.
+- [ ] **PREM-02:** Implement server-rendered Brand Studio draft/publish/rollback across app, public pages, emails, scorecards and overlays.
+- [ ] **PREM-03:** Complete verified domain/sender/HTTPS lifecycle, tenant-switch cleanup and login/socket-origin acceptance.
+- [ ] **PREM-04:** Implement sponsor/broadcast placements, scoped access and premium reporting/exports.
+- [ ] **PREM-05:** Verify payment webhooks/providers, reconciliation/refunds, plan enforcement and upgrade/downgrade/restriction recovery.
+- [ ] **PREM-06:** Add enterprise capabilities only after security/usage gates: scoped APIs/webhooks, SSO, multi-league organization controls and support/audit exports.
+
+Exit: brand/domain/entitlement/payment journeys are proven end to end; no placeholder gateway or security paywall.
+
+### Phase 9 - Reliability, compliance and launch acceptance
+
+- [ ] **REL-01:** Run full real two-league RLS/constraint/service-role isolation and concurrency suite.
+- [ ] **REL-02:** Run authenticated browser/mobile OTP/CRUD/registration/live-scoring journeys and interruption recovery.
+- [ ] **REL-03:** Verify socket fan-out/load, fairness quotas, live-latency targets, cache invalidation and outbox recovery.
+- [ ] **REL-04:** Verify storage/uploads/exports, incident/abuse procedures, data retention and applicable privacy/minor policies.
+- [ ] **REL-05:** Perform backup restore, migration rollback, secret rotation and lost-account/device recovery drills.
+- [ ] **REL-06:** Verify paid-provider/domain/email integrations in permitted test/staging modes.
+- [ ] **REL-07:** Complete release checklist, deployment/rollback runbooks, owner approvals and truthful feature documentation.
+
+Exit: measured staging evidence and an approved rollout. Unit success or a plan file cannot close this phase.
+
+## 17. Delivery Gates, Metrics and Next Batch
+
+### Batch definition of done
+
+1. Select stable task IDs; record actor/resource/state rules and acceptance scenarios before code.
+2. Sync with `main`; inspect existing schemas/source and preserve unrelated work.
+3. Implement a small complete vertical slice, not a disconnected UI or alternative scoring writer.
+4. Test affected shared/source logic and negative paths. Use real staging for concurrency/auth/provider claims.
+5. Review intended changes and migration/rollout/rollback implications; do not write remote databases without the separately authorized workflow.
+6. Update checklists with commit, scope, commands/results, remaining acceptance and blockers.
+7. Commit/push normally and verify remote delivery. Builds run only when requested; retain the user's test-only implementation-session workflow.
+
+### Proposed metrics (targets, not current measured guarantees)
+
+| Metric | Initial acceptance direction |
+| --- | --- |
+| Tenant isolation | Zero unauthorized cross-league reads/writes in required negative test matrix |
+| Score integrity | Exactly one durable scoring effect per accepted operation; deterministic tested replay/correction |
+| Revocation | Next authorized operation respects committed revocation; test in-flight ordering explicitly |
+| Live latency | Target p95 committed-score-to-viewer below 2 seconds under an agreed documented load |
+| Queue recovery | No unconfirmed command silently discarded; visible conflict/rejection/retry path |
+| Email/OTP | Accurate provider status, bounded abuse, no replay/secret logs, verified-recipient acceptance |
+| UX | Tested responsive role journeys and relevant WCAG 2.2 AA criteria; no blanket claim before audit |
+| Recovery | Agree RPO/RTO after infrastructure inventory and prove them through restore drills |
+| Commercial | No entitlement activation or settlement based on unverified client success/placeholder provider |
+
+### Next implementation batch
+
+**Focus: league membership status and safe user-control commands (`ISO-04/05/06`, `IAM-01/02`).**
+
+- Inspect current membership data/schema and all user-management readers/writers.
+- Define platform-account versus league-member authority and scoped audit requirements.
+- Design/backfill membership status safely; preserve existing identities and historical records.
+- Replace league role/status changes that currently mutate global user columns.
+- Add a confirmed-save Members and access UI using one active tenant; update every enforcing path, including canonical scoring, so a visual toggle is not a false security control.
+- Test Ali as active/assigned in A, suspended in B and outsider in C, including concurrent status changes and retained offline operations.
+- Keep the OTP invitation expansion as the following complete slice (`IAM-03/04/05/06`), after membership authority works. Do not ship a scorer activation UI that the backend ignores.
+
+### Required decisions before their respective slices
+
+Identity migration/linking; membership/grant schema and fallback retirement; MFA/recovery policy; invite/OTP defaults; league onboarding policy; official independent approvals; supported cricket laws/formats; currency/payment providers; visibility/minor consent; product limits/grace; feed/media rights; recovery/performance load targets. Record decisions rather than guessing business/legal rules in code.
+
+## 18. Sources, Evidence and Maintenance
+
+### Repository evidence
+
+- [Historical master plan and six batch trackers](../MASTER_PLAN_2026-10-10.md).
+- [Accepted backend ownership](architecture/BACKEND_UNIFICATION_DECISION.md) and [project guide](PROJECT_GUIDE.md).
+- [Current global user-management actions](../apps/web/src/app/actions/users.ts), [invitation actions](../apps/web/src/app/actions/users-invites.ts), [tenant role schema](../packages/database/src/schema/user-tenant-roles.ts).
+- [Scoring service](../services/scoring-service/src/scoring.service.ts), [write access](../services/scoring-service/src/scoring-write-access.ts), [gateway](../services/scoring-service/src/scoring.gateway.ts).
+- [Dashboard context](../apps/web/src/lib/dashboard-context.ts), [data](../apps/web/src/lib/dashboard-data.ts), [sections](../apps/web/src/components/dashboard/dashboard-sections.tsx).
+- [Tournament configuration](../packages/database/src/lib/tournament-configuration.ts) and [migration status](../supabase/MIGRATION_STATUS.md).
+
+### Current documentation consulted during the 12 October planning discussion
+
+- [Clerk session reverification](https://clerk.com/docs/guides/secure/reverification): custom server-side sensitive-action checks; factor caveats and action-bound verification.
+- [Clerk email/SMS OTP flows](https://clerk.com/docs/guides/development/custom-flows/authentication/email-sms-otp): provider-managed verification; check installed SDK compatibility before implementation.
+- [Supported Supabase Clerk third-party integration](https://supabase.com/docs/guides/auth/third-party/clerk): legacy shared-JWT-template integration is deprecated.
+- [Supabase 2026 explicit Data API grants change](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically): distinguish grants, RLS and direct connection access.
+
+### Maintenance protocol
+
+- This document owns future priority and stable phase task IDs. The original plan preserves historical findings, acceptance caveats and delivered batch detail; do not erase or retroactively relabel them.
+- On each batch, update last-reviewed date, baseline/commit evidence and exact checkbox scopes; add unresolved regression/operational cases to section 15.
+- Link new architecture/security/product decisions from this file. No inferred feature-wide completion percentages from raw checkbox counts.
+- Record automated tests separately from authenticated browser/device, real PostgreSQL, deployed event and provider evidence.
+- Never mark a feature production-ready because a plan describes it. Keep partial features and release gates visibly open until evidence exists.

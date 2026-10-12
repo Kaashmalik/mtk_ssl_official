@@ -1,10 +1,16 @@
 # Premium Cricket SaaS & White-Label Master Plan
 
 - **Created:** 2026-10-10
-- **Last updated:** 2026-10-10
+- **Last updated:** 2026-10-12
 - **Repository:** https://github.com/Kaashmalik/mtk_ssl_official
 - **Review baseline:** `main` at `87e5d6f`
 - **Status:** Implementation started; progress recorded in section 14.
+
+> **Roadmap update - 12 October 2026:** the current future delivery order and
+> built/remaining phase checklists are in
+> [Cricket SaaS Master Plan 2026-10-12](docs/SAAS_MASTER_PLAN_2026-10-12.md).
+> This file remains the historical findings and implementation-batch evidence
+> register; its recorded results and unverified acceptance requirements are preserved.
 
 ## 1. Product vision and review scope
 

@@ -166,7 +166,8 @@ pnpm run dev
 
 | Document | Purpose |
 |-----|---------|
-| 🗺️ [`MASTER_PLAN_2026-10-10.md`](./MASTER_PLAN_2026-10-10.md) | Premium SaaS, white-label, live cricket, UX, delivery phases, and implementation tracker |
+| 🗺️ [`docs/SAAS_MASTER_PLAN_2026-10-12.md`](./docs/SAAS_MASTER_PLAN_2026-10-12.md) | Current roadmap: league isolation, scoped user/OTP controls, complete role flows, premium live cricket, and built/remaining phase checklists |
+| 📋 [`MASTER_PLAN_2026-10-10.md`](./MASTER_PLAN_2026-10-10.md) | Historical findings, acceptance caveats, and evidence for the six delivered implementation batches |
 | 📖 [`docs/PROJECT_GUIDE.md`](./docs/PROJECT_GUIDE.md) | Product & architecture truth |
 | 🏛️ [`docs/architecture/BACKEND_UNIFICATION_DECISION.md`](./docs/architecture/BACKEND_UNIFICATION_DECISION.md) | Hybrid backend (Accepted) |
 | 📦 [`docs/adr/001-microservices-migration.md`](./docs/adr/001-microservices-migration.md) | Superseded by unification ADR |
