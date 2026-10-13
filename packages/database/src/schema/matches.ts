@@ -101,6 +101,8 @@ export const matches = pgTable("matches", {
 
   // Scorer assignment
   scorerId: uuid("scorer_id").references(() => users.id, { onDelete: "set null" }),
+  /** Backup scorer; may score when the primary is unavailable. Never the same user as scorerId. */
+  backupScorerId: uuid("backup_scorer_id").references(() => users.id, { onDelete: "set null" }),
 
   // Metadata
   createdBy: text("created_by"),

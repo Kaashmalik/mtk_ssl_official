@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
+import { canScoreMatch, requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { scorerMembership } from "@/lib/scorer-membership"
 
 const mocks = vi.hoisted(() => ({ permission: vi.fn(), role: vi.fn(), match: vi.fn(), user: vi.fn() }))
@@ -30,6 +30,24 @@ describe("Match-scoped scorer authorization", () => {
   it.each([null, "other-user", "clerk-user"])("rejects a scorer assigned as %s", async (scorerId) => {
     mocks.match.mockResolvedValue({ tenantId: "tenant", scorerId })
     await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("assigned scorer")
+  })
+
+  it("allows the assigned backup scorer to record for the match", async () => {
+    mocks.match.mockResolvedValue({ tenantId: "tenant", scorerId: "other-user", backupScorerId: "db-user" })
+    await requireMatchScoringAccess("clerk-user", "tenant", "match")
+    expect(mocks.user).toHaveBeenCalledOnce()
+  })
+
+  it("rejects a scorer who is neither primary nor backup", async () => {
+    mocks.match.mockResolvedValue({ tenantId: "tenant", scorerId: "a-user", backupScorerId: "b-user" })
+    await expect(requireMatchScoringAccess("clerk-user", "tenant", "match")).rejects.toThrow("assigned scorer")
+  })
+
+  it("grants scoring access for the primary or the backup slot only", async () => {
+    expect(await canScoreMatch("clerk-user", "tenant", { scorerId: "db-user", backupScorerId: null })).toBe(true)
+    expect(await canScoreMatch("clerk-user", "tenant", { scorerId: null, backupScorerId: "db-user" })).toBe(true)
+    expect(await canScoreMatch("clerk-user", "tenant", { scorerId: "a-user", backupScorerId: "b-user" })).toBe(false)
+    expect(await canScoreMatch("clerk-user", "tenant", { scorerId: null, backupScorerId: null })).toBe(false)
   })
 
   it.each(["league_owner"])("allows %s oversight only after exact-tenant permission", async (role) => {

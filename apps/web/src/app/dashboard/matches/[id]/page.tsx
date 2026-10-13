@@ -254,7 +254,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
         />
         <div className="mt-3 space-y-3">
           <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} />
-          <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} />
+          <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} currentBackupScorerId={match.backupScorerId} />
         </div>
       </MotionWrapper>
 

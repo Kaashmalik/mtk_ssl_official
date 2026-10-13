@@ -229,3 +229,18 @@ then release the matching web artifact. It changes no grants or RLS policies and
 does not alter existing rows. The dependency is purely additive — code that omits
 the new columns keeps working, so the migration can be applied ahead of the web
 deploy without breaking the previous binary.
+
+## Batch 10 migration — backup scorer (13 October 2026)
+
+`20261013120000_match_backup_scorer.sql` is a **local migration only**, not
+applied. It adds `matches.backup_scorer_id` (nullable `uuid` FK to `users`,
+`ON DELETE SET NULL`), a `matches_backup_scorer_distinct_check` constraint that
+forbids the same person in both scorer slots, and an index on the new column.
+
+Additive and idempotent (`ADD COLUMN IF NOT EXISTS`, `DROP CONSTRAINT IF EXISTS`
+before re-adding, `CREATE INDEX IF NOT EXISTS`), so a replay is a no-op. It changes
+no grants or RLS policies and does not alter existing rows. The check constraint
+only rejects rows where both slots are set to the same user; existing matches have
+`backup_scorer_id = NULL`, so the constraint validates immediately without a
+backfill. Apply ahead of the web deploy is safe — a binary that omits the column
+keeps working.

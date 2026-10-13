@@ -14,12 +14,13 @@ export async function requireScoringActorId(clerkId: string): Promise<string> {
   return user.id
 }
 
-export async function canScoreMatch(clerkId: string, tenantId: string, match: { scorerId: string | null }) {
+/** Either the primary or the backup assigned scorer may record for the match. */
+export async function canScoreMatch(clerkId: string, tenantId: string, match: { scorerId: string | null; backupScorerId?: string | null }) {
   const role = await getUserRoleForTenant(clerkId, tenantId)
   if (!["league_owner", "scorer"].includes(role ?? "")) return false
   const user = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
   if (!user || user.isActive !== true) return false
-  return role === "league_owner" || match.scorerId === user.id
+  return role === "league_owner" || match.scorerId === user.id || match.backupScorerId === user.id
 }
 
 /** Role checks and assignment checks must use the exact mutation tenant. */

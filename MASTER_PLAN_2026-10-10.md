@@ -959,10 +959,49 @@ PostgreSQL locking/rollback, provider delivery, or authenticated browser journey
 
 - [ ] Complete the membership rollout and real-DB acceptance; remaining
   `ISO-04/05/06`.
-- [ ] `IAM-06` scorer primary/backup assignment, `IAM-07` two-party ownership
-  transfer, `IAM-08` privileged MFA; provider-managed OTP login.
+- [ ] `IAM-07` two-party ownership transfer, `IAM-08` privileged MFA;
+  provider-managed OTP login; assigning a not-yet-accepted membership.
 - [ ] Durable email queue with bounce/webhook delivery tracking and retries.
+- [ ] Scorer handover/fencing between primary and backup (Phase 5 revisions).
 - [ ] Continue the remaining phases against their original acceptance criteria.
+
+### 2026-10-13 — Batch 10: primary/backup scorer assignment
+
+#### Completed implementation
+
+- [x] **Schema:** `matches.backup_scorer_id` (nullable FK to `users`, `ON DELETE
+  SET NULL`) with a distinct-slot check constraint and index, in additive,
+  idempotent `supabase/migrations/20261013120000_match_backup_scorer.sql` (local,
+  unapplied). `packages/database` rebuilt.
+- [x] **`assignScorer`** now takes a slot (`"primary" | "backup"`) and a nullable
+  scorer id: loads the tenant-scoped match, validates the target as an active
+  scorer-role member of the league, refuses the same person in both slots, and
+  updates only the chosen column (`null` clears it).
+- [x] **`canScoreMatch`** authorizes the primary **or** backup assigned scorer;
+  role and active-account checks unchanged.
+- [x] UI: the match scorer panel offers separate Primary and Backup selects with
+  an Unassigned option; the match page passes `currentBackupScorerId`.
+- [x] Regression coverage for slot selection, tenant scoping, same-person
+  rejection, unknown-slot rejection, clearing, and backup authorization.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web exec vitest run` | PASS — 33 files, **618 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 7 files, **123 tests** |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/web type-check` | **Pre-existing failures only** — same 11 error lines in 3 untouched files; none added by this batch |
+
+No build, lint run, migration execution, remote-database write or deployment.
+Tests exercise source/actions with mocked auth/database; they do not prove
+PostgreSQL constraint enforcement, concurrency or authenticated browser journeys.
+
+#### Deliberately open
+
+- Assigning a scorer whose membership is still pending acceptance.
+- Handover/fencing between the two scorers: without an epoch, both assigned
+  scorers can write concurrently (Phase 5 revisions/fencing).
 
 ### Definition of done for each batch
 

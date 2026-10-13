@@ -255,23 +255,42 @@ export const startStream = withAuth("match:update", async (matchId: string, sour
   })
 })
 
-export const assignScorer = withAuth("match:update", async (matchId: string, scorerId: string | null) => {
+const scorerSlot = z.enum(["primary", "backup"])
+
+/**
+ * Assign or clear a match's primary or backup scorer. Both slots are validated
+ * against the active scorer membership of the match's league, and one person
+ * cannot occupy both slots. `null` clears the slot.
+ */
+export const assignScorer = withAuth("match:update", async (matchId: string, slot: "primary" | "backup", scorerId: string | null) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   z.string().uuid().parse(matchId)
+  const targetSlot = scorerSlot.parse(slot)
   z.string().uuid().nullable().parse(scorerId)
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   await requirePermissionServer("match:update", tenantId)
   return withTenantContext({ userId, tenantId }, async () => {
+    const [existing] = await db.select({ id: matches.id, scorerId: matches.scorerId, backupScorerId: matches.backupScorerId })
+      .from(matches)
+      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
+      .limit(1)
+    if (!existing) throw new Error("Match not found")
     if (scorerId) {
       const [scorer] = await db.select({ id: users.id }).from(users)
         .where(and(eq(users.id, scorerId), scorerMembership(tenantId)))
         .limit(1)
       if (!scorer) throw new Error("Selected user is not a scorer in this tenant")
     }
+    // A single person cannot occupy both the primary and backup slot.
+    const otherSlot = targetSlot === "primary" ? existing.backupScorerId : existing.scorerId
+    if (scorerId && otherSlot === scorerId) throw new Error("Primary and backup scorer must be different people")
+    const patch = targetSlot === "primary"
+      ? { scorerId, updatedAt: new Date() }
+      : { backupScorerId: scorerId, updatedAt: new Date() }
     const [match] = await db.update(matches)
-      .set({ scorerId, updatedAt: new Date() })
+      .set(patch)
       .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
       .returning()
     if (!match) throw new Error("Match not found")

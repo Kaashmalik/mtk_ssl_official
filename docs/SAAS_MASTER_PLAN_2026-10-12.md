@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 9: league membership removal, invitation resend with token rotation/cooldown, and persisted invitation dispatch state; local schema/migration changes, no remote database writes or deployment |
+| Current implementation | Batch 10: primary/backup match scorer assignment; local schema/migration changes, no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -76,7 +76,8 @@ This is a professional living plan covering known requirements and failure cases
 | 6 | `3d7e3fd` | Role-aware responsive dashboard, authorized active-tenant dashboard/shell/trial reads, accurate summaries and honest error states |
 | 7 | `1ae95b2` | Versioned league-only member role/status commands, owner-only Members and access UI, explicit active membership guards, local migration and coordinated-release gate; deployment/real-DB proof open |
 | 8 | `a49ea77` | Provider-verified invited-email redemption via the Clerk session identity, transactional issuer/recipient/league/invitation/team rechecks, honest dispatch states; recorded after Batch 7 |
-| 9 | This batch; see Git history | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
+| 9 | Batch 9; see Git history | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
+| 10 | This batch; see Git history | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; local migration, no remote database writes or deployment |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
@@ -578,7 +579,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, member removal/resend, persisted dispatch state, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
 | 3. League/team/player registration | P1 | Existing CRUD and registration scaffolding | Full reviewed onboarding, team/captain/player eligibility flows | FOUNDATION; acceptance open |
 | 4. Competition operations | P1 | Wizard configuration save/reload/copy and locked updates | Fixtures, XI readiness, rules/standings/advancement | PARTIAL |
-| 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
+| 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, primary/backup scorer assignment, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
 | 6. Public hub, records and awards | P1/P2 | Existing public pages and corrected dashboard summaries | Publication model, verified career linkage, awards/prizes | FOUNDATION; expanded product remains |
 | 7. Premium role UX and fan engagement | P2 | Role-aware dashboard and basic engagement foundations | Remaining role journeys, moderated voting/notifications and analytics | PARTIAL |
 | 8. White-label and commercial | P1/P2 | Branding/billing/domain scaffolding, tournament branding persistence | End-to-end brand/domain/verified payment/entitlement journeys | FOUNDATION; acceptance open |
@@ -626,6 +627,7 @@ Existing invitation token storage/atomic claiming and match-scorer assignment ar
 - [ ] **IAM-05:** Implement activate/suspend/reactivate/remove/revoke/resend with version checks, idempotency and audit history.
   Batch 9 adds version-checked, audited membership removal (refused while team/scorer assignments exist) and invitation resend (rotated token, cooldown, audit). Full lifecycle idempotency across every command and staging proof remain open.
 - [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
+  Batch 10 adds primary/backup scorer slots on matches, tenant-scoped and validated against active scorer membership with a distinct-slot rule; either assigned scorer may record. Assigning a not-yet-accepted (pending) membership and handover/fencing remain open.
 - [ ] **IAM-07:** Implement last-owner safeguards, delegated grants and two-party ownership transfer.
 - [ ] **IAM-08:** Enforce privileged MFA/step-up and recovery; no silent factor downgrade or client-only sensitive checks.
 - [ ] **IAM-09:** Verify OTP abuse/outage, concurrent invitation acceptance and A/B/C revocation in authenticated staging.
@@ -750,7 +752,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 9:** the verified invitation slice is now largely source-complete (`IAM-03` provider-verified identity, `IAM-04` persisted dispatch state, `IAM-05` remove/resend). Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-06/07/08` (scorer primary/backup assignment, two-party ownership transfer, privileged MFA) and provider-managed OTP. `IAM-01` and the Batch 9 commands are implemented in source, not deployed-certified.
+**Updated after Batch 10:** the verified invitation slice (`IAM-03/04/05`) and primary/backup scorer assignment (`IAM-06`) are now source-complete. Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-07/08` (two-party ownership transfer, privileged MFA), assigning a not-yet-accepted membership, scorer handover/fencing and provider-managed OTP. The Batch 9/10 commands are implemented in source, not deployed-certified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -855,7 +857,37 @@ new dependency install was performed. Web type-check still reports three
 
 **Remaining acceptance:** real PostgreSQL locking/rollback, provider delivery and
 bounce webhooks, authenticated browser journeys (remove/resend/cooldown/conflict),
-and the still-open `IAM-06/07/08` and scoped grants/expiry remain staging work.
+and the still-open `IAM-07/08` and scoped grants/expiry remain staging work.
+
+### 2026-10-13 — Batch 10: primary/backup scorer assignment
+
+**Implementation:**
+
+- **Schema:** `matches.backup_scorer_id` (nullable FK to `users`, `ON DELETE SET
+  NULL`) plus a distinct-slot check constraint and an index, in additive,
+  idempotent `supabase/migrations/20261013120000_match_backup_scorer.sql` (local
+  only; not applied). `packages/database` rebuilt after the schema edit.
+- **Assignment (`assignScorer`):** now takes a slot (`"primary" | "backup"`) and a
+  nullable scorer id. It loads the exact tenant-scoped match, validates the target
+  as an active scorer-role member of that league (same `scorerMembership`
+  contract), refuses to place the same person in both slots, and updates only the
+  selected column. `null` clears a slot.
+- **Scoring access (`canScoreMatch`):** either the primary or the backup assigned
+  scorer may record for the match; role (`league_owner`/`scorer`) and active-account
+  checks are unchanged. The league owner retains oversight.
+- **UI:** the match page's scorer panel now offers separate Primary and Backup
+  selects (with an explicit Unassigned option) and passes `currentBackupScorerId`.
+
+**Evidence:** web **618 tests / 33 files** pass, database **123 / 7** pass, database
+build passes, eslint clean on changed files (see the historical master plan's
+Batch 10 entry for exact commands). Web type-check reports the same 11 **pre-existing**
+error lines in three untouched files; this batch added none.
+
+**Deliberately open:** assigning a scorer whose membership is still pending
+acceptance, and handover/fencing between the two scorers — without an epoch, both
+assigned scorers can write concurrently, which the Phase 5 revision/fencing work
+addresses. Real PostgreSQL constraint enforcement and authenticated browser
+journeys remain staging gates.
 
 ### Required decisions before their respective slices
 
