@@ -1003,6 +1003,46 @@ PostgreSQL constraint enforcement, concurrency or authenticated browser journeys
 - Handover/fencing between the two scorers: without an epoch, both assigned
   scorers can write concurrently (Phase 5 revisions/fencing).
 
+### 2026-10-13 — Batch 11: verified invitation delivery webhook
+
+#### Completed implementation
+
+- [x] **Webhook:** `POST /api/webhooks/resend` fails closed (503) when
+  `RESEND_WEBHOOK_SECRET` is unset, requires the Svix headers, verifies the
+  signature before parsing the body, and never logs the payload.
+- [x] **Correlation:** outgoing invitation emails carry an `invite_id` tag so an
+  event is matched to its invitation without trusting an email address.
+- [x] **Mapping/apply library** (`lib/invitation-delivery.ts`): `email.delivered`,
+  `email.bounced`, `email.complained` map to persisted states; all other events
+  are ignored; unmapped/missing/unknown cases return `applied: false` instead of
+  throwing (idempotent under provider retries).
+- [x] **Schema:** `InvitationEmailState` gains `delivered`/`bounced`/`complained`;
+  the check constraint is widened in additive, idempotent
+  `supabase/migrations/20261013150000_invitation_delivery_events.sql` (local,
+  unapplied); `packages/database` rebuilt.
+- [x] UI: the invite delivery column renders Delivered / Bounced / Marked-as-spam.
+- [x] `.env.example` documents `RESEND_WEBHOOK_SECRET`.
+- [x] Regression coverage: event mapping, tag extraction, apply/no-op paths, and
+  route fail-closed / bad-signature / happy / 500 paths.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web exec vitest run` | PASS — 35 files, **638 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 7 files, **123 tests** |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/web type-check` | **Pre-existing failures only** — same 11 error lines in 3 untouched files; none added |
+
+No build, lint run, migration execution, remote-database write or deployment.
+Tests mock auth/database/network; they do not prove real provider webhook
+delivery, signature interop or PostgreSQL constraint enforcement.
+
+#### Deliberately open
+
+- Durable send queue and automatic retries (a failed send still needs a manual
+  resend); real provider webhook delivery; real DB constraint enforcement.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

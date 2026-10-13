@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 10: primary/backup match scorer assignment; local schema/migration changes, no remote database writes or deployment |
+| Current implementation | Batch 11: signature-verified invitation delivery webhook with delivered/bounced/complained states; local schema/migration changes, no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -77,7 +77,8 @@ This is a professional living plan covering known requirements and failure cases
 | 7 | `1ae95b2` | Versioned league-only member role/status commands, owner-only Members and access UI, explicit active membership guards, local migration and coordinated-release gate; deployment/real-DB proof open |
 | 8 | `a49ea77` | Provider-verified invited-email redemption via the Clerk session identity, transactional issuer/recipient/league/invitation/team rechecks, honest dispatch states; recorded after Batch 7 |
 | 9 | Batch 9; see Git history | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
-| 10 | This batch; see Git history | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; local migration, no remote database writes or deployment |
+| 10 | Batch 10; see Git history | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; local migration, no remote database writes or deployment |
+| 11 | This batch; see Git history | Signature-verified invitation delivery webhook recording delivered/bounced/complained; local migration, no remote database writes or deployment |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
@@ -576,7 +577,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | --- | --- | --- | --- | --- |
 | 0. Evidence and release foundation | P0 | Plan/batch register and automated test foundations | Real schema/infrastructure/staging proof | PARTIAL |
 | 1. Isolation and authorization | P0 | Tournament/scoring/dashboard-scoped checks | Full CRUD/sockets/storage/jobs context, memberships, constraints | PARTIAL |
-| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, member removal/resend, persisted dispatch state, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
+| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, member removal/resend, persisted dispatch state and verified delivery events, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
 | 3. League/team/player registration | P1 | Existing CRUD and registration scaffolding | Full reviewed onboarding, team/captain/player eligibility flows | FOUNDATION; acceptance open |
 | 4. Competition operations | P1 | Wizard configuration save/reload/copy and locked updates | Fixtures, XI readiness, rules/standings/advancement | PARTIAL |
 | 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, primary/backup scorer assignment, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
@@ -623,7 +624,7 @@ Existing invitation token storage/atomic claiming and match-scorer assignment ar
 - [ ] **IAM-03:** Implement provider-verified invited-email OTP/login and atomic recipient/expiry/revocation/scope redemption.
   Batch 8 replaces application-email trust with provider-verified Clerk identity and transactional issuer/recipient/league/invitation/team rechecks. Provider-managed OTP/login and authenticated staging acceptance remain open.
 - [ ] **IAM-04:** Add accurate queued email/delivery/bounce/retry states; eliminate secret-link logging and false delivery success.
-  Batch 7 fixed logging/false delivery claims; Batch 9 persists the last dispatch outcome and attempt count and uses a distinct idempotency key per attempt. A durable queue, bounce/webhook tracking and automatic retries are not implemented.
+  Batch 7 fixed logging/false delivery claims; Batch 9 persists the last dispatch outcome and attempt count with a distinct idempotency key; Batch 11 adds a signature-verified provider webhook that records `delivered`/`bounced`/`complained` correlated by an `invite_id` tag. A durable send queue and automatic retries are not implemented.
 - [ ] **IAM-05:** Implement activate/suspend/reactivate/remove/revoke/resend with version checks, idempotency and audit history.
   Batch 9 adds version-checked, audited membership removal (refused while team/scorer assignments exist) and invitation resend (rotated token, cooldown, audit). Full lifecycle idempotency across every command and staging proof remain open.
 - [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
@@ -752,7 +753,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 10:** the verified invitation slice (`IAM-03/04/05`) and primary/backup scorer assignment (`IAM-06`) are now source-complete. Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-07/08` (two-party ownership transfer, privileged MFA), assigning a not-yet-accepted membership, scorer handover/fencing and provider-managed OTP. The Batch 9/10 commands are implemented in source, not deployed-certified.
+**Updated after Batch 11:** the verified invitation slice (`IAM-03/04/05`), primary/backup scorer assignment (`IAM-06`) and provider delivery events are now source-complete. Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-07/08` (two-party ownership transfer, privileged MFA), assigning a not-yet-accepted membership, a durable send queue with retries, scorer handover/fencing and provider-managed OTP. The Batch 9/10/11 commands are implemented in source, not deployed-certified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -888,6 +889,39 @@ acceptance, and handover/fencing between the two scorers — without an epoch, b
 assigned scorers can write concurrently, which the Phase 5 revision/fencing work
 addresses. Real PostgreSQL constraint enforcement and authenticated browser
 journeys remain staging gates.
+
+### 2026-10-13 — Batch 11: verified invitation delivery webhook
+
+**Implementation:**
+
+- **Webhook:** new `POST /api/webhooks/resend` (`apps/web/src/app/api/webhooks/
+  resend/route.ts`). It fails closed with **503** when `RESEND_WEBHOOK_SECRET` is
+  unset, requires the Svix headers, verifies the signature before parsing, and
+  never logs the payload (it contains the recipient address).
+- **Correlation:** outgoing invitation emails now carry an `invite_id` tag, so an
+  event is matched to its invitation without trusting an email address.
+- **Mapping/apply library** (`apps/web/src/lib/invitation-delivery.ts`):
+  `email.delivered → delivered`, `email.bounced → bounced`,
+  `email.complained → complained`; all other events are ignored. Unmapped events,
+  missing tags and unknown invitations return `applied: false` rather than
+  throwing, so a provider retry is an idempotent no-op.
+- **Schema/migration:** `InvitationEmailState` gains `delivered`/`bounced`/
+  `complained`; the `user_invites_email_state_check` constraint is widened in
+  additive, idempotent `supabase/migrations/20261013150000_invitation_delivery_events.sql`
+  (local only; not applied). `packages/database` rebuilt.
+- **UI:** the invite manager's delivery column now renders Delivered / Bounced /
+  Marked-as-spam.
+- **Env:** documented `RESEND_WEBHOOK_SECRET` in `.env.example`.
+
+**Evidence:** web **638 tests / 35 files** pass (14 delivery-mapping + 6 webhook
+route tests new), database **123 / 7** pass, database build passes, eslint clean on
+changed files (see the historical master plan's Batch 11 entry). Web type-check
+reports the same 11 **pre-existing** error lines in three untouched files; this
+batch added none.
+
+**Deliberately open:** a durable send queue and automatic retries (a failed send
+still requires a manual resend); real provider webhook delivery; real PostgreSQL
+constraint enforcement.
 
 ### Required decisions before their respective slices
 

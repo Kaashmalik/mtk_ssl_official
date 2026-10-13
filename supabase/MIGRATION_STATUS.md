@@ -244,3 +244,17 @@ only rejects rows where both slots are set to the same user; existing matches ha
 `backup_scorer_id = NULL`, so the constraint validates immediately without a
 backfill. Apply ahead of the web deploy is safe — a binary that omits the column
 keeps working.
+
+## Batch 11 migration — invitation delivery events (13 October 2026)
+
+`20261013150000_invitation_delivery_events.sql` is a **local migration only**, not
+applied. It widens `user_invites_email_state_check` to also permit `delivered`,
+`bounced` and `complained`, which are written only from the signature-verified
+Resend webhook.
+
+Idempotent (`DROP CONSTRAINT IF EXISTS` before re-adding) and additive: it does
+not touch rows, grants or policies, and it only **relaxes** the constraint, so
+existing values still validate and a binary that never writes the new states keeps
+working. Apply ahead of the web deploy is safe. Operational note: the webhook
+route fails closed (503) until `RESEND_WEBHOOK_SECRET` is configured, so an
+unconfigured deployment simply records no delivery events.

@@ -3,7 +3,7 @@
 import { createHash, randomBytes, randomUUID } from "crypto"
 import { auth, currentUser } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, userInvites, userTenantRoles, users, teams, tenants, notifications, auditLogs } from "@mtk/database"
+import { db, userInvites, userTenantRoles, users, teams, tenants, notifications, auditLogs, type InvitationEmailState } from "@mtk/database"
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getDashboardContext } from "@/lib/dashboard-context"
@@ -59,9 +59,9 @@ async function auditInvite(tx: Transaction, tenantId: string, actorId: string, a
     method: action, path: "/dashboard/settings/members", statusCode: "200", payload })
 }
 
-export type InvitationEmailState = "unconfigured" | "provider_accepted" | "failed" | "unknown"
+export type { InvitationEmailState }
 /** Synchronous attempt, not a durable queue or delivery confirmation. No secret logs. */
-async function sendInviteEmail(idempotencyKey: string, to: string, inviterName: string, leagueName: string, role: string, link: string): Promise<InvitationEmailState> {
+async function sendInviteEmail(inviteId: string, idempotencyKey: string, to: string, inviterName: string, leagueName: string, role: string, link: string): Promise<InvitationEmailState> {
   if (!process.env.RESEND_API_KEY) return "unconfigured"
   try {
     const response = await fetch("https://api.resend.com/emails", {
@@ -70,6 +70,8 @@ async function sendInviteEmail(idempotencyKey: string, to: string, inviterName: 
       body: JSON.stringify({ from: process.env.RESEND_FROM_EMAIL || "SSL <onboarding@ssl.mtkcodex.site>", to,
         subject: `You have been invited to join ${leagueName} on SSL`,
         text: `${inviterName} invited you to join "${leagueName}" as ${role.replaceAll("_", " ")}.\n\nAccept: ${link}\n\nExpires in 7 days. Verify the invited email through your sign-in provider before accepting.`,
+        // Lets the delivery webhook correlate an event back to the invitation.
+        tags: [{ name: "invite_id", value: inviteId }],
       }),
     })
     if (response.ok) return "provider_accepted"
@@ -126,7 +128,7 @@ export async function createInvite(input: CreateInviteInput) {
     return { invite, ...authority }
   })
   const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
-  const emailState = await sendInviteEmail(`league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link)
+  const emailState = await sendInviteEmail(result.invite.id, `league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link)
   await recordEmailAttempt(result.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")
   return { success: true as const, invite: { id: result.invite.id, email, role: validated.role }, link, emailState }
@@ -194,7 +196,7 @@ export async function resendInvite(input: { tenantId: string; inviteId: string }
   const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
   // Distinct idempotency key per attempt so the provider does not dedupe a resend.
   const attempt = (prepared.invite.emailAttemptCount ?? 0) + 1
-  const emailState = await sendInviteEmail(`league-invite/${prepared.invite.id}/r${attempt}`,
+  const emailState = await sendInviteEmail(prepared.invite.id, `league-invite/${prepared.invite.id}/r${attempt}`,
     prepared.invite.email, prepared.issuer.displayName || "A league owner", prepared.league.name, prepared.invite.role, link)
   await recordEmailAttempt(prepared.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")

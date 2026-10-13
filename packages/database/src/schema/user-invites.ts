@@ -3,8 +3,21 @@ import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { users, userRoleEnum } from "./users";
 
-/** Last recorded dispatch outcome. Provider acceptance is never delivery. */
-export type InvitationEmailState = "unconfigured" | "provider_accepted" | "failed" | "unknown";
+/**
+ * Last recorded dispatch outcome.
+ *
+ * `provider_accepted` means the provider accepted the send request — it is never
+ * proof of delivery. `delivered`/`bounced`/`complained` are recorded only from a
+ * signature-verified provider webhook.
+ */
+export type InvitationEmailState =
+  | "unconfigured"
+  | "provider_accepted"
+  | "delivered"
+  | "bounced"
+  | "complained"
+  | "failed"
+  | "unknown";
 
 /**
  * Team-scoped role invitations.

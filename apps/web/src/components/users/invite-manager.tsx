@@ -38,10 +38,13 @@ const STATUS_BADGE: Record<string, string> = {
   expired: "bg-red-600 text-white",
 }
 
-/** Provider state, never a delivery guarantee. */
+/** Provider state, never a delivery guarantee except the webhook-reported events. */
 const DELIVERY_LABEL: Record<string, string> = {
   unconfigured: "Email not configured",
   provider_accepted: "Provider accepted (delivery unconfirmed)",
+  delivered: "Delivered",
+  bounced: "Bounced — not delivered",
+  complained: "Marked as spam",
   failed: "Provider rejected",
   unknown: "Outcome unknown",
 }
