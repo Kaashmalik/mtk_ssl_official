@@ -207,8 +207,10 @@ change or deployment was performed for this batch.
   backup/restore procedure, not an automatic down migration.
 
 **Still open:** all real-database/deployed acceptance, complete provider-verified
-OTP and delivery lifecycle, expiry/scoped multiple grants, ownership transfer,
-unknown/removed host handling and complete private CRUD/socket/export coverage.
+OTP and delivery lifecycle, expiry/scoped multiple grants, delegated
+resource-scoped grants and privileged MFA (ownership transfer itself is now
+source-complete in Batch 12, pending real-DB proof), unknown/removed host
+handling and complete private CRUD/socket/export coverage.
 
 ## Batch 9 migration — invitation dispatch state (13 October 2026)
 
@@ -258,3 +260,29 @@ existing values still validate and a binary that never writes the new states kee
 working. Apply ahead of the web deploy is safe. Operational note: the webhook
 route fails closed (503) until `RESEND_WEBHOOK_SECRET` is configured, so an
 unconfigured deployment simply records no delivery events.
+
+## Batch 12 migration — two-party ownership transfer (13 October 2026)
+
+`20261013180000_ownership_transfers.sql` is a **local migration only**, not
+applied. It creates the `ownership_transfers` table (one row per ownership
+handover) with its status/`from_user_id <> to_user_id`/version/`demoted_role`
+check constraints, a partial unique index
+(`WHERE status = 'pending'`) that allows at most one open request per league, a
+recipient lookup index, and RLS.
+
+Additive and idempotent (`CREATE TABLE IF NOT EXISTS`,
+`DROP CONSTRAINT IF EXISTS` before re-adding, `CREATE INDEX IF NOT EXISTS`), so a
+replay is a no-op. It creates a new table and does not alter `tenants`,
+`user_tenant_roles` or any existing row, so it is safe to apply ahead of the web
+deploy — a binary that never writes this table keeps working. Access control
+follows the `user_invites` precedent: RLS is enabled and forced, all access is
+revoked from `anon`/`authenticated`, and only `service_role` (and the `ssl`
+role where present) is granted. Application writes go through server actions
+that run as the service role.
+
+Operational note: nothing enforces the handover invariant except the Batch 12
+application transaction plus this table's constraints. The `tenants.owner_id`
+re-point, the recipient promotion and the outgoing-owner demotion all occur in
+one transaction, so the migration must be applied together with (or before) the
+web code that depends on it.
+

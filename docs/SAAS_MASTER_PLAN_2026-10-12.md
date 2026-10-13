@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 11: signature-verified invitation delivery webhook with delivered/bounced/complained states; local schema/migration changes, no remote database writes or deployment |
+| Current implementation | Batch 12: two-party league ownership transfer (recorded-owner initiation, recipient-only acceptance) with last-owner safeguards; local schema/migration changes, no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -78,7 +78,8 @@ This is a professional living plan covering known requirements and failure cases
 | 8 | `a49ea77` | Provider-verified invited-email redemption via the Clerk session identity, transactional issuer/recipient/league/invitation/team rechecks, honest dispatch states; recorded after Batch 7 |
 | 9 | Batch 9; see Git history | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
 | 10 | Batch 10; see Git history | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; local migration, no remote database writes or deployment |
-| 11 | This batch; see Git history | Signature-verified invitation delivery webhook recording delivered/bounced/complained; local migration, no remote database writes or deployment |
+| 11 | Batch 11; see Git history | Signature-verified invitation delivery webhook recording delivered/bounced/complained; local migration, no remote database writes or deployment |
+| 12 | This batch; see Git history | Two-party league ownership transfer: recorded-owner initiation, recipient-only acceptance, either-party cancellation, 7-day expiry and an atomic promote/demote/owner-id change; local migration, no remote database writes or deployment |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
@@ -577,7 +578,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | --- | --- | --- | --- | --- |
 | 0. Evidence and release foundation | P0 | Plan/batch register and automated test foundations | Real schema/infrastructure/staging proof | PARTIAL |
 | 1. Isolation and authorization | P0 | Tournament/scoring/dashboard-scoped checks | Full CRUD/sockets/storage/jobs context, memberships, constraints | PARTIAL |
-| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, member removal/resend, persisted dispatch state and verified delivery events, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
+| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, member removal/resend, persisted dispatch state and verified delivery events, two-party ownership transfer with last-owner safeguards, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
 | 3. League/team/player registration | P1 | Existing CRUD and registration scaffolding | Full reviewed onboarding, team/captain/player eligibility flows | FOUNDATION; acceptance open |
 | 4. Competition operations | P1 | Wizard configuration save/reload/copy and locked updates | Fixtures, XI readiness, rules/standings/advancement | PARTIAL |
 | 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, primary/backup scorer assignment, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
@@ -630,6 +631,7 @@ Existing invitation token storage/atomic claiming and match-scorer assignment ar
 - [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
   Batch 10 adds primary/backup scorer slots on matches, tenant-scoped and validated against active scorer membership with a distinct-slot rule; either assigned scorer may record. Assigning a not-yet-accepted (pending) membership and handover/fencing remain open.
 - [ ] **IAM-07:** Implement last-owner safeguards, delegated grants and two-party ownership transfer.
+  Batch 12 adds a two-party handover: only the recorded owner (`tenants.owner_id`) may initiate, only the named recipient may accept, and acceptance atomically promotes the recipient, demotes the outgoing owner to a chosen non-owner role and re-points `owner_id`, so the league is never left ownerless. Ordinary member CRUD already refuses every owner/platform/self edit. Delegated (resource-scoped) grants and real-PostgreSQL proof of the handover remain open.
 - [ ] **IAM-08:** Enforce privileged MFA/step-up and recovery; no silent factor downgrade or client-only sensitive checks.
 - [ ] **IAM-09:** Verify OTP abuse/outage, concurrent invitation acceptance and A/B/C revocation in authenticated staging.
 
@@ -753,7 +755,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 11:** the verified invitation slice (`IAM-03/04/05`), primary/backup scorer assignment (`IAM-06`) and provider delivery events are now source-complete. Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-07/08` (two-party ownership transfer, privileged MFA), assigning a not-yet-accepted membership, a durable send queue with retries, scorer handover/fencing and provider-managed OTP. The Batch 9/10/11 commands are implemented in source, not deployed-certified.
+**Updated after Batch 12:** the verified invitation slice (`IAM-03/04/05`), primary/backup scorer assignment (`IAM-06`), provider delivery events and two-party ownership transfer (`IAM-07`) are now source-complete. Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-07/08` remainder (delegated resource-scoped grants, privileged MFA/step-up), assigning a not-yet-accepted membership, a durable send queue with retries, scorer handover/fencing and provider-managed OTP. The Batch 9/10/11/12 commands are implemented in source, not deployed-certified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -923,7 +925,63 @@ batch added none.
 still requires a manual resend); real provider webhook delivery; real PostgreSQL
 constraint enforcement.
 
-### Required decisions before their respective slices
+### 2026-10-13 — Batch 12: two-party league ownership transfer (IAM-07)
+
+**Implementation:**
+
+- **Schema:** new `ownership_transfers` table
+  (`packages/database/src/schema/ownership-transfers.ts`) with `tenant_id`,
+  `from_user_id`, `to_user_id`, the outgoing owner's `demoted_role`, `status`
+  (`pending`/`accepted`/`cancelled`/`expired`), a concurrency `version`,
+  `expires_at`, `resolved_at`/`resolved_by` and audit timestamps. Declared checks
+  cover the status set, `from_user_id <> to_user_id`, `version >= 0` and
+  `demoted_role NOT IN ('league_owner','super_admin')`; a partial unique index
+  (`WHERE status = 'pending'`) permits at most one open request per league.
+- **Migration:** additive, idempotent
+  `supabase/migrations/20261013180000_ownership_transfers.sql` (local only; not
+  applied). It enables and forces RLS and revokes all access from `anon`/
+  `authenticated`, granting only `service_role`. `packages/database` rebuilt.
+- **Actions** (`apps/web/src/app/actions/ownership.ts`):
+  `initiateOwnershipTransfer`, `acceptOwnershipTransfer`,
+  `cancelOwnershipTransfer` and `getOwnershipTransfer`.
+  - Initiation requires an active owner context **and** that the caller is the
+    recorded `tenants.owner_id` (an owner-role junction row alone is not enough).
+    It refuses self, suspended, owner-role and platform recipients, and refuses
+    while a live request exists (a lapsed one is swept to `expired` first).
+  - Acceptance is restricted to the named recipient; it re-verifies under lock
+    that the initiator is still the recorded owner with active owner access, that
+    the recipient membership is active, and that the request is pending,
+    unexpired and at the expected version.
+  - The handover is one transaction: promote the recipient to `league_owner`,
+    demote the outgoing owner to `demoted_role`, re-point `tenants.owner_id` (only
+    while it still names the outgoing owner) and record an `accepted` row, with a
+    before/after `OWNERSHIP_TRANSFER_ACCEPT` audit row. Every write is conditional
+    on the version read under lock, so a concurrent change rolls the whole
+    handover back rather than half-applying it.
+  - Locks follow the established order — users `FOR UPDATE`, then the league
+    (`FOR SHARE` on initiate/cancel, `FOR UPDATE` on accept because it rewrites
+    `owner_id`), then memberships, then the transfer row.
+  - Either party may cancel; a third party cannot. Every state change is audited
+    (`OWNERSHIP_TRANSFER_INITIATE`/`ACCEPT`/`CANCEL`).
+- **UI:** `OwnershipTransferPanel` on the Members page (recorded owner offers
+  ownership, chooses their own post-transfer role, and can cancel) and
+  `OwnershipTransferRequest` on the dashboard (the recipient accepts or declines
+  from their own session). The offer is inert until the recipient accepts.
+
+**Evidence:** web **673 tests / 36 files** pass (34 new action tests), database
+**128 / 8** pass (5 new schema/migration contract tests), database build passes,
+eslint clean on changed files. Web type-check reports the same 11 **pre-existing**
+error lines in three untouched files; this batch added none. `git diff --check`
+reports one warning — a trailing-whitespace false positive on the single added
+line of `packages/database/src/index.ts`, whose committed blob is legacy CRLF
+(most repo files are LF-normalized); the line was staged with `core.autocrlf=false`
+so the diff is exactly one line and no unrelated lines were rewritten.
+
+**Deliberately open:** real-PostgreSQL proof of the partial unique index, the
+version trigger and the atomic handover; delegated resource-scoped grants
+(the other half of IAM-07); and privileged MFA/step-up (IAM-08).
+
+
 
 Identity migration/linking; membership/grant schema and fallback retirement; MFA/recovery policy; invite/OTP defaults; league onboarding policy; official independent approvals; supported cricket laws/formats; currency/payment providers; visibility/minor consent; product limits/grace; feed/media rights; recovery/performance load targets. Record decisions rather than guessing business/legal rules in code.
 
@@ -933,7 +991,7 @@ Identity migration/linking; membership/grant schema and fallback retirement; MFA
 
 - [Historical master plan and six batch trackers](../MASTER_PLAN_2026-10-10.md).
 - [Accepted backend ownership](architecture/BACKEND_UNIFICATION_DECISION.md) and [project guide](PROJECT_GUIDE.md).
-- [Current global user-management actions](../apps/web/src/app/actions/users.ts), [invitation actions](../apps/web/src/app/actions/users-invites.ts), [tenant role schema](../packages/database/src/schema/user-tenant-roles.ts).
+- [Current global user-management actions](../apps/web/src/app/actions/users.ts), [invitation actions](../apps/web/src/app/actions/users-invites.ts), [ownership transfer actions](../apps/web/src/app/actions/ownership.ts), [tenant role schema](../packages/database/src/schema/user-tenant-roles.ts), [ownership transfer schema](../packages/database/src/schema/ownership-transfers.ts).
 - [Scoring service](../services/scoring-service/src/scoring.service.ts), [write access](../services/scoring-service/src/scoring-write-access.ts), [gateway](../services/scoring-service/src/scoring.gateway.ts).
 - [Dashboard context](../apps/web/src/lib/dashboard-context.ts), [data](../apps/web/src/lib/dashboard-data.ts), [sections](../apps/web/src/components/dashboard/dashboard-sections.tsx).
 - [Tournament configuration](../packages/database/src/lib/tournament-configuration.ts) and [migration status](../supabase/MIGRATION_STATUS.md).

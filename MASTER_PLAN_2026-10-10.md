@@ -1043,6 +1043,64 @@ delivery, signature interop or PostgreSQL constraint enforcement.
 - Durable send queue and automatic retries (a failed send still needs a manual
   resend); real provider webhook delivery; real DB constraint enforcement.
 
+### 2026-10-13 — Batch 12: two-party league ownership transfer (IAM-07)
+
+#### Completed implementation
+
+- [x] **Schema:** new `ownership_transfers` table with `tenant_id`,
+  `from_user_id`, `to_user_id`, `demoted_role`, `status`
+  (`pending`/`accepted`/`cancelled`/`expired`), a concurrency `version`,
+  `expires_at`, `resolved_at`/`resolved_by` and audit timestamps; declared checks
+  for the status set, `from_user_id <> to_user_id`, `version >= 0` and
+  `demoted_role NOT IN ('league_owner','super_admin')`.
+- [x] **Migration:** additive, idempotent
+  `supabase/migrations/20261013180000_ownership_transfers.sql` (local, unapplied)
+  with a partial unique index (`WHERE status = 'pending'`) capping open requests
+  at one per league, a recipient lookup index, forced RLS and `service_role`-only
+  grants; `packages/database` rebuilt.
+- [x] **Actions** (`app/actions/ownership.ts`): `initiateOwnershipTransfer`
+  (recorded `tenants.owner_id` only, refuses self/suspended/owner/platform
+  recipients and live duplicates), `acceptOwnershipTransfer` (named recipient
+  only; re-verifies the initiator is still the recorded owner, the recipient is
+  still active, and the request is pending/unexpired/at version),
+  `cancelOwnershipTransfer` (either party) and `getOwnershipTransfer` (visible
+  only to the two parties).
+- [x] **Atomic handover:** promotion of the recipient, demotion of the outgoing
+  owner, the conditional `tenants.owner_id` re-point and the `accepted` row occur
+  in one transaction, each write conditional on the version read under lock, with
+  a before/after `OWNERSHIP_TRANSFER_ACCEPT` audit row. Locks follow the
+  established order (users `FOR UPDATE` -> league -> memberships -> transfer).
+- [x] **UI:** owner-facing `OwnershipTransferPanel` on the Members page and
+  recipient-facing `OwnershipTransferRequest` on the dashboard; the offer is inert
+  until the recipient accepts.
+- [x] Regression coverage: 34 action tests (authorization, two-party consent,
+  self/owner/platform/suspended recipients, duplicate and lapsed requests, stale
+  version, expiry, lost conditional writes, lock order, cancellation by either
+  party) and 5 schema/migration contract tests.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web exec vitest run` | PASS — 36 files, **673 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/web type-check` | **Pre-existing failures only** — same 11 error lines in 3 untouched files; none added |
+
+No lint run across the whole app, migration execution, remote-database write or
+deployment. Tests mock auth/database; they do not prove PostgreSQL constraint,
+partial-unique-index or transaction/rollback behaviour. `git diff --check`
+reports one warning: a trailing-whitespace false positive on the single added
+line of `packages/database/src/index.ts`, a legacy CRLF blob (most files are
+LF-normalized); it was staged with `core.autocrlf=false` so no unrelated lines
+were rewritten.
+
+#### Deliberately open
+
+- Real-PostgreSQL proof of the partial unique index, the version trigger and the
+  atomic handover; delegated resource-scoped grants (the other half of IAM-07);
+  privileged MFA/step-up (IAM-08).
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
