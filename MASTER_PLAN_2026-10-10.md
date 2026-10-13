@@ -903,6 +903,67 @@ official Drizzle transaction docs and the Supabase changelog were read directly.
   locked revocation ordering for member commands and canonical scoring, not every
   existing transaction or dashboard read. Real concurrency proof remains open.
 
+### 2026-10-12 — Batch 8: provider-verified invitation redemption
+
+Delivered as `a49ea77` (recorded retroactively here). Invitation acceptance now
+requires a Clerk session whose verified email matches the invited address, and
+rechecks issuer authority, league, recipient account, the exact invitation row and
+the team resource under ordered locks in one transaction. Acceptance cannot
+promote/demote/reactivate memberships or touch global `users`/legacy arrays.
+Issuance/revocation moved to tenant-asserted owner commands with atomic audit rows;
+delivery states are honest (`unconfigured`/`provider_accepted`/`failed`/`unknown`).
+Not verified: real provider delivery/webhooks, provider OTP code journeys,
+PostgreSQL locking/rollback and browser interaction.
+
+### 2026-10-13 — Batch 9: membership removal, invitation resend, persisted dispatch state
+
+#### Completed implementation
+
+- [x] **IAM-05 removal:** `removeMember` removes one league membership only, using
+  the same user → league → membership lock order, a version check, an atomic
+  before/after audit row and the existing owner/self/platform protection. Removal is
+  refused while the member still manages a team or is an assigned scorer, so a team
+  or live match cannot be silently orphaned. The global account and historical
+  match/statistics records are untouched.
+- [x] **IAM-05 resend:** `resendInvite` re-dispatches a pending invitation with a
+  rotated token (invalidating the old link), rechecking owner authority, tenant,
+  status and expiry under lock, enforcing a 60-second cooldown and auditing the
+  action. The original expiry is preserved.
+- [x] **IAM-04 persistence:** added `user_invites.email_state`,
+  `email_attempted_at` and `email_attempt_count`; the last dispatch outcome is
+  persisted after the invitation commits (best-effort, never rolls back a saved
+  invite) and each attempt uses a distinct provider idempotency key so a resend is
+  not deduplicated.
+- [x] UI: the members table gains a confirmed Remove action; the invite manager
+  gains a Resend action and a truthful delivery-state column.
+- [x] Additive idempotent local migration
+  `supabase/migrations/20261013090000_invitation_delivery_state.sql`; `packages/database`
+  rebuilt after the schema edit.
+- [x] Regression coverage for removal authorization/version/assignment-guard/lost-delete
+  paths and for resend cooldown/rotation/authority/persistence/idempotency-key.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web exec vitest run` | PASS — 33 files, **610 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 7 files, **123 tests** |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/web type-check` | **Pre-existing failures only** — 3 untouched files (`__tests__/dashboard-data.test.ts`, `__tests__/member-view.test.tsx`, `app/matches/[matchId]/scoring/page.tsx`); they reproduce at the batch baseline |
+
+No build, lint, migration execution, remote-database write or deployment ran. The
+tests exercise source/actions with mocked auth/database/network; they do not prove
+PostgreSQL locking/rollback, provider delivery, or authenticated browser journeys.
+
+#### Next work
+
+- [ ] Complete the membership rollout and real-DB acceptance; remaining
+  `ISO-04/05/06`.
+- [ ] `IAM-06` scorer primary/backup assignment, `IAM-07` two-party ownership
+  transfer, `IAM-08` privileged MFA; provider-managed OTP login.
+- [ ] Durable email queue with bounce/webhook delivery tracking and retries.
+- [ ] Continue the remaining phases against their original acceptance criteria.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

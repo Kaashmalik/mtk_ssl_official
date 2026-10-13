@@ -11,6 +11,8 @@ import { assertSupportedInvitationScope, hasVerifiedInvitedEmail, invitationBase
   invitationRecipientHint, invitationRole, invitationToken, normalizeInvitationEmail } from "@/lib/invitation-policy"
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+/** Minimum delay between dispatch attempts for one invitation. */
+const RESEND_COOLDOWN_MS = 60 * 1000
 const createInviteSchema = z.object({
   tenantId: z.string().uuid(), email: z.string().trim().email("Enter a valid email address"),
   role: invitationRole, teamId: z.string().uuid().optional().nullable(),
@@ -59,12 +61,12 @@ async function auditInvite(tx: Transaction, tenantId: string, actorId: string, a
 
 export type InvitationEmailState = "unconfigured" | "provider_accepted" | "failed" | "unknown"
 /** Synchronous attempt, not a durable queue or delivery confirmation. No secret logs. */
-async function sendInviteEmail(inviteId: string, to: string, inviterName: string, leagueName: string, role: string, link: string): Promise<InvitationEmailState> {
+async function sendInviteEmail(idempotencyKey: string, to: string, inviterName: string, leagueName: string, role: string, link: string): Promise<InvitationEmailState> {
   if (!process.env.RESEND_API_KEY) return "unconfigured"
   try {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST", signal: AbortSignal.timeout(10_000),
-      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": `league-invite/${inviteId}` },
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify({ from: process.env.RESEND_FROM_EMAIL || "SSL <onboarding@ssl.mtkcodex.site>", to,
         subject: `You have been invited to join ${leagueName} on SSL`,
         text: `${inviterName} invited you to join "${leagueName}" as ${role.replaceAll("_", " ")}.\n\nAccept: ${link}\n\nExpires in 7 days. Verify the invited email through your sign-in provider before accepting.`,
@@ -77,6 +79,20 @@ async function sendInviteEmail(inviteId: string, to: string, inviterName: string
     // An interrupted response is ambiguous: the provider may have accepted it.
     return "unknown"
   }
+}
+
+/**
+ * Best-effort persistence of the last dispatch outcome (IAM-04). This runs after
+ * the invitation is committed, so a bookkeeping failure must not roll the invite
+ * back or report a false send failure. It never stores the token or link.
+ */
+async function recordEmailAttempt(inviteId: string, tenantId: string, state: InvitationEmailState) {
+  try {
+    await db.update(userInvites).set({
+      emailState: state, emailAttemptedAt: new Date(),
+      emailAttemptCount: sql`${userInvites.emailAttemptCount} + 1`,
+    }).where(and(eq(userInvites.id, inviteId), eq(userInvites.tenantId, tenantId)))
+  } catch { /* invitation is already saved; the outcome stays unknown until the next attempt */ }
 }
 
 export async function createInvite(input: CreateInviteInput) {
@@ -110,7 +126,8 @@ export async function createInvite(input: CreateInviteInput) {
     return { invite, ...authority }
   })
   const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
-  const emailState = await sendInviteEmail(result.invite.id, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link)
+  const emailState = await sendInviteEmail(`league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link)
+  await recordEmailAttempt(result.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")
   return { success: true as const, invite: { id: result.invite.id, email, role: validated.role }, link, emailState }
 }
@@ -120,6 +137,7 @@ export async function getInvites(expectedTenantId: string) {
   return db.select({ id: userInvites.id, email: userInvites.email, role: userInvites.role,
     status: sql<string>`CASE WHEN ${userInvites.status} = 'pending' AND ${userInvites.expiresAt} <= clock_timestamp() THEN 'expired' ELSE ${userInvites.status} END`,
     teamId: userInvites.teamId, expiresAt: userInvites.expiresAt, acceptedAt: userInvites.acceptedAt, createdAt: userInvites.createdAt,
+    emailState: userInvites.emailState, emailAttemptedAt: userInvites.emailAttemptedAt,
   }).from(userInvites).where(eq(userInvites.tenantId, context.tenantId)).orderBy(desc(userInvites.createdAt)).limit(100)
 }
 
@@ -136,6 +154,51 @@ export async function revokeInvite(input: { tenantId: string; inviteId: string }
   })
   revalidatePath("/dashboard", "layout")
   return { success: true as const }
+}
+
+/**
+ * Re-dispatch a pending invitation with a freshly rotated token. Rotating the
+ * hash invalidates the previous link (the plaintext was never stored), so a
+ * resend is effectively a safe replacement rather than a duplicate. The
+ * cooldown and expiry are rechecked under lock; the original expiry is kept so
+ * a resend cannot extend an invitation indefinitely.
+ */
+export async function resendInvite(input: { tenantId: string; inviteId: string }) {
+  const validated = z.object({ tenantId: z.string().uuid(), inviteId: z.string().uuid() }).strict().parse(input)
+  const context = await requireManager(validated.tenantId)
+  const baseUrl = invitationBaseUrl() // Reject bad configuration before rotating the token.
+  const token = randomBytes(32).toString("base64url")
+  const prepared = await db.transaction(async tx => {
+    const authority = await lockInvitationAuthority(tx, context.tenantId, context.actorId, undefined, false, context.clerkId)
+    await tx.execute(sql`SELECT ${userInvites.id} FROM ${userInvites}
+      WHERE ${and(eq(userInvites.id, validated.inviteId), eq(userInvites.tenantId, context.tenantId))} FOR UPDATE`)
+    const invite = await tx.query.userInvites.findFirst({ where: and(
+      eq(userInvites.id, validated.inviteId), eq(userInvites.tenantId, context.tenantId),
+    ) })
+    if (!invite || invite.id !== validated.inviteId || invite.tenantId !== context.tenantId) {
+      throw new Error("Invitation not found in this league")
+    }
+    if (invite.status !== "pending") throw new Error("Only pending invitations can be resent")
+    if (invite.expiresAt.getTime() <= Date.now()) throw new Error("Invitation expired. Revoke it and create a replacement.")
+    if (invite.emailAttemptedAt && Date.now() - invite.emailAttemptedAt.getTime() < RESEND_COOLDOWN_MS) {
+      throw new Error("Please wait a moment before resending this invitation.")
+    }
+    assertSupportedInvitationScope(invite.role, invite.teamId)
+    const [updated] = await tx.update(userInvites).set({ tokenHash: hashToken(token) }).where(and(
+      eq(userInvites.id, invite.id), eq(userInvites.tenantId, context.tenantId), eq(userInvites.status, "pending"),
+    )).returning({ id: userInvites.id })
+    if (!updated) throw new Error("Invitation changed. Reload before resending.")
+    await auditInvite(tx, context.tenantId, context.actorId, "INVITE_RESEND", { inviteId: invite.id, role: invite.role, teamId: invite.teamId })
+    return { invite, ...authority }
+  })
+  const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
+  // Distinct idempotency key per attempt so the provider does not dedupe a resend.
+  const attempt = (prepared.invite.emailAttemptCount ?? 0) + 1
+  const emailState = await sendInviteEmail(`league-invite/${prepared.invite.id}/r${attempt}`,
+    prepared.invite.email, prepared.issuer.displayName || "A league owner", prepared.league.name, prepared.invite.role, link)
+  await recordEmailAttempt(prepared.invite.id, context.tenantId, emailState)
+  revalidatePath("/dashboard", "layout")
+  return { success: true as const, invite: { id: prepared.invite.id, email: prepared.invite.email, role: prepared.invite.role }, link, emailState }
 }
 
 /** Bearer-link preview, never a grant; full email is shown only on its provider account. */

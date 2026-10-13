@@ -4,11 +4,11 @@
 
 | Field | Value |
 | --- | --- |
-| Created / last reviewed | **12 October 2026 (2026-10-12)** |
+| Created / last reviewed | **13 October 2026 (2026-10-13)** |
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 7: league-only membership controls and enforcement; local schema/migration changes, no remote database writes or deployment |
+| Current implementation | Batch 9: league membership removal, invitation resend with token rotation/cooldown, and persisted invitation dispatch state; local schema/migration changes, no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -74,11 +74,13 @@ This is a professional living plan covering known requirements and failure cases
 | 4 | `0080b88` | Wizard configuration persistence/reading/copying, validated dates/money/branding/seeds, locked partial updates |
 | 5 | `e9f4951` | Verified web actor propagation, transactional active-account/tenant-role/assignment checks, basic roster eligibility, delivery/undo actor metadata |
 | 6 | `3d7e3fd` | Role-aware responsive dashboard, authorized active-tenant dashboard/shell/trial reads, accurate summaries and honest error states |
-| 7 | Current batch; see Git history | Versioned league-only member role/status commands, owner-only Members and access UI, explicit active membership guards, local migration and coordinated-release gate; deployment/real-DB proof open |
+| 7 | `1ae95b2` | Versioned league-only member role/status commands, owner-only Members and access UI, explicit active membership guards, local migration and coordinated-release gate; deployment/real-DB proof open |
+| 8 | `a49ea77` | Provider-verified invited-email redemption via the Clerk session identity, transactional issuer/recipient/league/invitation/team rechecks, honest dispatch states; recorded after Batch 7 |
+| 9 | This batch; see Git history | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
-Batch 7 verification and rollout boundaries are recorded in section 17. The
+Batch 9 verification and rollout boundaries are recorded in section 17. The
 615-test result remains historical evidence, not the current suite count.
 
 ### 3.2 Existing foundations are not complete new features
@@ -573,7 +575,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | --- | --- | --- | --- | --- |
 | 0. Evidence and release foundation | P0 | Plan/batch register and automated test foundations | Real schema/infrastructure/staging proof | PARTIAL |
 | 1. Isolation and authorization | P0 | Tournament/scoring/dashboard-scoped checks | Full CRUD/sockets/storage/jobs context, memberships, constraints | PARTIAL |
-| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
+| 2. Settings, memberships and OTP | P0/P1 | League-only role/status commands, member removal/resend, persisted dispatch state, basic Members UI and invitation foundations | Migration acceptance, scoped grants/expiry and verified OTP journey | PARTIAL; target journey remains |
 | 3. League/team/player registration | P1 | Existing CRUD and registration scaffolding | Full reviewed onboarding, team/captain/player eligibility flows | FOUNDATION; acceptance open |
 | 4. Competition operations | P1 | Wizard configuration save/reload/copy and locked updates | Fixtures, XI readiness, rules/standings/advancement | PARTIAL |
 | 5. Reliable match day and live delivery | P0/P1 | Accounting, actor/assignment transactions, snapshots, retained web queues | Mobile auth, complete rules, handover/revisions/outbox, private reads | PARTIAL |
@@ -618,9 +620,11 @@ Existing invitation token storage/atomic claiming and match-scorer assignment ar
 - [ ] **IAM-02:** Build Members and access list/detail UI with scoped role/status/expiry/assignment and save-confirmed toggles.
   Batch 7 provides the owner-only list, confirmed role changes, suspension/reactivation confirmation, protected access, workspace/version assertions and an honest 100-row search boundary. Detail/scoped grants, expiry, assignment integration and pagination remain open.
 - [ ] **IAM-03:** Implement provider-verified invited-email OTP/login and atomic recipient/expiry/revocation/scope redemption.
+  Batch 8 replaces application-email trust with provider-verified Clerk identity and transactional issuer/recipient/league/invitation/team rechecks. Provider-managed OTP/login and authenticated staging acceptance remain open.
 - [ ] **IAM-04:** Add accurate queued email/delivery/bounce/retry states; eliminate secret-link logging and false delivery success.
-  Batch 7 fixes logging/false delivery claims; persisted queued/provider/delivery tracking and retries are not implemented.
+  Batch 7 fixed logging/false delivery claims; Batch 9 persists the last dispatch outcome and attempt count and uses a distinct idempotency key per attempt. A durable queue, bounce/webhook tracking and automatic retries are not implemented.
 - [ ] **IAM-05:** Implement activate/suspend/reactivate/remove/revoke/resend with version checks, idempotency and audit history.
+  Batch 9 adds version-checked, audited membership removal (refused while team/scorer assignments exist) and invitation resend (rotated token, cooldown, audit). Full lifecycle idempotency across every command and staging proof remain open.
 - [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
 - [ ] **IAM-07:** Implement last-owner safeguards, delegated grants and two-party ownership transfer.
 - [ ] **IAM-08:** Enforce privileged MFA/step-up and recovery; no silent factor downgrade or client-only sensitive checks.
@@ -746,7 +750,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 7:** complete the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then implement the verified invitation slice (`IAM-03/04/05/06`). `IAM-01` source is now implemented, not deployed-certified.
+**Updated after Batch 9:** the verified invitation slice is now largely source-complete (`IAM-03` provider-verified identity, `IAM-04` persisted dispatch state, `IAM-05` remove/resend). Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-06/07/08` (scorer primary/backup assignment, two-party ownership transfer, privileged MFA) and provider-managed OTP. `IAM-01` and the Batch 9 commands are implemented in source, not deployed-certified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -791,6 +795,67 @@ changelog were read directly instead.
 before deployment. Deploy workspace database/UI artifacts, web and scoring
 service together after schema/identity/grant review. Do not roll back to binaries
 that ignore suspension while preserving an expectation of revoked access.
+
+### 2026-10-12 — Batch 8: provider-verified invitation redemption
+
+Recorded retroactively; the code was committed as `a49ea77` before this plan was
+updated, so this entry documents existing source rather than new work.
+
+**Implementation:**
+
+- Invitation acceptance no longer trusts an application-email match. The recipient
+  must present a Clerk session whose verified email equals the invited address;
+  acceptance rechecks the issuer's active league-owner authority, the league, the
+  recipient account, the exact invitation row and the team resource under ordered
+  locks in one transaction.
+- Acceptance cannot promote, demote or reactivate a suspended membership, cannot
+  mutate global `users`/legacy tenant arrays, and refuses team-scoped coach/scorer
+  grants the one-role schema cannot represent.
+- Issuance/revocation moved to tenant-asserted owner commands with atomic audit
+  rows and bounded, idempotent provider dispatch. Delivery states are honest
+  (`unconfigured`/`provider_accepted`/`failed`/`unknown`); provider acceptance is
+  never reported as delivery. Preview masks the invited email for bearer links and
+  signed-out visitors.
+
+**Boundary:** real provider delivery/webhooks, provider-managed OTP code journeys,
+PostgreSQL locking/rollback and browser interaction remain staging gates.
+
+### 2026-10-13 — Batch 9: membership removal, invitation resend and persisted dispatch state
+
+**Implementation:**
+
+- **IAM-05 removal:** `removeMember` deletes one league membership only, with the
+  same user → league → membership lock order as member edits, a version check, an
+  atomic before/after audit row and the same owner/self/platform protection.
+  Removal is refused while the member still manages a team or is an assigned
+  scorer, so a live match or team cannot be silently orphaned. The global account
+  and historical match/statistics records are untouched.
+- **IAM-05 resend:** `resendInvite` re-dispatches a pending invitation with a
+  freshly rotated token (the old link is invalidated), rechecks owner authority,
+  tenant, status and expiry under lock, enforces a 60-second cooldown from the last
+  attempt and audits the action. The original expiry is kept, so a resend cannot
+  extend an invitation indefinitely.
+- **IAM-04 persistence:** `user_invites` gains `email_state`, `email_attempted_at`
+  and `email_attempt_count`. The last dispatch outcome is persisted after the
+  invitation is committed (best-effort; a bookkeeping failure cannot roll back a
+  saved invitation) and each attempt uses a distinct provider idempotency key so a
+  resend is not deduplicated. The Members UI shows a truthful delivery state and a
+  Resend control; the members table gains a confirmed Remove action.
+- **Schema/migration:** additive, idempotent
+  `supabase/migrations/20261013090000_invitation_delivery_state.sql` (local only;
+  not applied). `packages/database` was rebuilt after the schema edit.
+
+**Evidence:** web **610 tests / 33 files** pass, database **123 / 7** pass (see the
+historical master plan's Batch 9 entry for exact commands). No build, lint,
+standalone type-check, migration execution, remote database write, deployment or
+new dependency install was performed. Web type-check still reports three
+**pre-existing** errors in files this batch did not touch
+(`__tests__/dashboard-data.test.ts`, `__tests__/member-view.test.tsx`,
+`app/matches/[matchId]/scoring/page.tsx`); they reproduce at the batch baseline.
+
+**Remaining acceptance:** real PostgreSQL locking/rollback, provider delivery and
+bounce webhooks, authenticated browser journeys (remove/resend/cooldown/conflict),
+and the still-open `IAM-06/07/08` and scoped grants/expiry remain staging work.
 
 ### Required decisions before their respective slices
 

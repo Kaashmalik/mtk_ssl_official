@@ -10,7 +10,7 @@ import { Label } from "@mtk/ui/components/ui/label"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@mtk/ui/components/ui/select"
 import { Copy, UserPlus } from "lucide-react"
-import { createInvite, getInvites, revokeInvite } from "@/app/actions/users-invites"
+import { createInvite, getInvites, resendInvite, revokeInvite } from "@/app/actions/users-invites"
 import { getTeams } from "@/app/actions/teams"
 
 interface InviteRow {
@@ -21,6 +21,8 @@ interface InviteRow {
   teamId: string | null
   expiresAt: Date | string
   createdAt: Date | string
+  emailState: string | null
+  emailAttemptedAt: Date | string | null
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -34,6 +36,20 @@ const STATUS_BADGE: Record<string, string> = {
   accepted: "bg-green-600 text-white",
   revoked: "bg-muted text-muted-foreground",
   expired: "bg-red-600 text-white",
+}
+
+/** Provider state, never a delivery guarantee. */
+const DELIVERY_LABEL: Record<string, string> = {
+  unconfigured: "Email not configured",
+  provider_accepted: "Provider accepted (delivery unconfirmed)",
+  failed: "Provider rejected",
+  unknown: "Outcome unknown",
+}
+
+function deliveryToast(state: string): string {
+  if (state === "provider_accepted") return "Email provider accepted it; delivery is not confirmed"
+  if (state === "unknown") return "Email outcome is unknown. Use the link; do not assume delivery."
+  return "Email is unconfigured or rejected. Copy the link below."
 }
 
 export function InviteManager({ tenantId }: { tenantId: string }) {
@@ -98,6 +114,19 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
       }
     })
 
+  const resend = (invite: InviteRow) =>
+    startTransition(async () => {
+      try {
+        const res = await resendInvite({ tenantId, inviteId: invite.id })
+        if (currentIdentity.current !== identityKey) return
+        setLastLink(res.link)
+        toast.success(`Invitation resent — ${deliveryToast(res.emailState)}`)
+        await refresh()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to resend invitation")
+      }
+    })
+
   return (
     <Card>
       <CardHeader>
@@ -105,7 +134,7 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
           <UserPlus className="h-5 w-5" /> Invite Team Staff
         </CardTitle>
         <CardDescription>
-          Invite a team manager, coach, or scorer. Verify the invited email through the sign-in provider before acceptance. Links expire in 7 days; email delivery is not tracked yet.
+          Invite a team manager, coach, or scorer. Verify the invited email through the sign-in provider before acceptance. Links expire in 7 days. The delivery column shows the last provider outcome — acceptance is not proof of delivery.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -180,6 +209,7 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
                   <th className="py-2 text-left font-medium">Email</th>
                   <th className="py-2 text-left font-medium">Role</th>
                   <th className="py-2 text-left font-medium">Status</th>
+                  <th className="py-2 text-left font-medium">Delivery</th>
                   <th className="py-2 text-left font-medium">Expires</th>
                   <th className="py-2 text-right font-medium">Action</th>
                 </tr>
@@ -193,29 +223,42 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
                       <Badge className={STATUS_BADGE[r.status] ?? "bg-muted"}>{r.status}</Badge>
                     </td>
                     <td className="py-2 text-xs text-muted-foreground">
+                      {r.emailState ? DELIVERY_LABEL[r.emailState] ?? r.emailState : "Not attempted"}
+                    </td>
+                    <td className="py-2 text-xs text-muted-foreground">
                       {new Date(r.expiresAt).toLocaleDateString()}
                     </td>
                     <td className="py-2 text-right">
                       {r.status === "pending" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isPending}
-                          onClick={() =>
-                            startTransition(async () => {
-                              try {
-                                await revokeInvite({ tenantId, inviteId: r.id })
-                                setLastLink(null)
-                                toast.success("Invitation revoked")
-                                await refresh()
-                              } catch (e) {
-                                toast.error(e instanceof Error ? e.message : "Failed to revoke")
-                              }
-                            })
-                          }
-                        >
-                          Revoke
-                        </Button>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isPending}
+                            onClick={() => resend(r)}
+                          >
+                            Resend
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isPending}
+                            onClick={() =>
+                              startTransition(async () => {
+                                try {
+                                  await revokeInvite({ tenantId, inviteId: r.id })
+                                  setLastLink(null)
+                                  toast.success("Invitation revoked")
+                                  await refresh()
+                                } catch (e) {
+                                  toast.error(e instanceof Error ? e.message : "Failed to revoke")
+                                }
+                              })
+                            }
+                          >
+                            Revoke
+                          </Button>
+                        </div>
                       )}
                     </td>
                   </tr>

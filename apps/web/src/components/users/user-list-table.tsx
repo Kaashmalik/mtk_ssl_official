@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@mtk/ui/components/ui/dialog"
 import { Search, Loader2 } from "lucide-react"
 import { toast } from "sonner"
-import { updateUserRole, toggleUserStatus, type MemberRoleChange } from "@/app/actions/users"
+import { updateUserRole, toggleUserStatus, removeMember, type MemberRoleChange } from "@/app/actions/users"
 
 interface Member {
   id: string
@@ -42,6 +42,7 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
   const [search, setSearch] = useState("")
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [confirmation, setConfirmation] = useState<Member | null>(null)
+  const [removal, setRemoval] = useState<Member | null>(null)
   const [notice, setNotice] = useState("")
   useEffect(() => { setMembers(initialUsers) }, [initialUsers])
 
@@ -63,6 +64,26 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
       setNotice(message)
       toast.error(message)
       // No local success, role change or status toggle on rejection/conflict.
+      router.refresh()
+    } finally { setUpdatingId(null) }
+  }
+  const remove = async (member: Member) => {
+    if (updatingId) return
+    setUpdatingId(member.membershipId)
+    setNotice("Removing league membership…")
+    try {
+      await removeMember({ tenantId, membershipId: member.membershipId, expectedVersion: member.version })
+      // Only drop the row after the server confirms the removal.
+      setMembers(previous => previous.filter(row => row.membershipId !== member.membershipId))
+      setRemoval(null)
+      setNotice(`Membership removed from ${tenantName}.`)
+      toast.success(`Membership removed from ${tenantName}`)
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not remove membership. Reload and try again."
+      setNotice(message)
+      toast.error(message)
+      // No local removal on rejection/conflict (e.g. an outstanding assignment).
       router.refresh()
     } finally { setUpdatingId(null) }
   }
@@ -95,10 +116,15 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
                 <TableCell><Badge variant="outline">{member.status === "active" ? "Active in league" : "Suspended in league"}</Badge>
                   {!member.accountActive && <span className="block text-xs text-destructive">Platform account blocked</span>}
                 </TableCell>
-                <TableCell className="text-right">{!protectedMember && <Button variant="outline" size="sm" className="min-h-11" disabled={updatingId !== null} onClick={() => setConfirmation(member)}>
-                  {updatingId === member.membershipId && <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-                  {member.status === "active" ? "Suspend in league" : "Reactivate in league"}
-                </Button>}</TableCell>
+                <TableCell className="text-right">{!protectedMember && <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" size="sm" className="min-h-11" disabled={updatingId !== null} onClick={() => setConfirmation(member)}>
+                    {updatingId === member.membershipId && <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+                    {member.status === "active" ? "Suspend in league" : "Reactivate in league"}
+                  </Button>
+                  <Button variant="outline" size="sm" className="min-h-11 text-destructive" disabled={updatingId !== null} onClick={() => setRemoval(member)}>
+                    Remove
+                  </Button>
+                </div>}</TableCell>
               </TableRow>
             })}
             {filtered.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center">No league members match this search.</TableCell></TableRow>}
@@ -119,6 +145,21 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
           <DialogFooter>
             <Button variant="outline" disabled={updatingId !== null} onClick={() => setConfirmation(null)}>Cancel</Button>
             <Button disabled={updatingId !== null} onClick={() => { if (confirmation) void save(confirmation, { status: confirmation.status === "active" ? "suspended" : "active" }) }}>{updatingId ? "Saving…" : "Confirm league change"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={removal !== null} onOpenChange={open => { if (!open && !updatingId) setRemoval(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove league membership?</DialogTitle>
+            <DialogDescription>
+              This removes {removal?.displayName || removal?.email} from {tenantName} only. Their global account and any other league are unchanged, and historical match/statistics records are kept.
+              {" "}Removal is refused while the member still manages a team or is assigned to a match — unassign those first.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={updatingId !== null} onClick={() => setRemoval(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={updatingId !== null} onClick={() => { if (removal) void remove(removal) }}>{updatingId ? "Removing…" : "Remove from league"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

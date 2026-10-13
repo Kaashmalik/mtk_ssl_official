@@ -3,7 +3,7 @@
 import { randomUUID } from "crypto"
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, users, tenants, userTenantRoles, auditLogs } from "@mtk/database"
+import { db, users, tenants, userTenantRoles, teams, matches, auditLogs } from "@mtk/database"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getDashboardContext } from "@/lib/dashboard-context"
@@ -17,8 +17,10 @@ const memberKey = z.object({
 })
 const roleChange = memberKey.extend({ role: z.enum(editableRoles) }).strict()
 const statusChange = memberKey.extend({ status: z.enum(["active", "suspended"]) }).strict()
+const memberRemoval = memberKey.strict()
 export type MemberRoleChange = z.infer<typeof roleChange>
 export type MemberStatusChange = z.infer<typeof statusChange>
+export type MemberRemoval = z.infer<typeof memberRemoval>
 
 async function requireMemberManager() {
   const { userId } = await auth()
@@ -118,4 +120,76 @@ export async function updateUserRole(input: MemberRoleChange) {
 /** Historical name retained; this changes league membership, never the account. */
 export async function toggleUserStatus(input: MemberStatusChange) {
   return changeMember(statusChange.parse(input))
+}
+
+/**
+ * Remove a member from this league only. Historical players/statistics are not
+ * deleted, and the global account is untouched. Removal is refused while the
+ * member still holds an operational assignment (team manager or assigned
+ * scorer) so a live match or team cannot be silently orphaned — the owner must
+ * unassign first. Owner, self and platform memberships are protected.
+ */
+export async function removeMember(input: MemberRemoval) {
+  const parsed = memberRemoval.parse(input)
+  const context = await requireMemberManager()
+  if (parsed.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before saving.")
+  await db.transaction(async (tx) => {
+    const key = and(eq(userTenantRoles.id, parsed.membershipId), eq(userTenantRoles.tenantId, context.tenantId))
+    const initial = await tx.query.userTenantRoles.findFirst({ where: key })
+    if (!initial || initial.tenantId !== context.tenantId || initial.id !== parsed.membershipId) {
+      throw new Error("Member not found in this league")
+    }
+    // Same lock order as membership edits: users, league, memberships.
+    const ids = [...new Set([context.actorId, initial.userId])].sort()
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${inArray(users.id, ids)} ORDER BY ${users.id} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${context.tenantId} FOR SHARE`)
+    await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
+      WHERE ${and(eq(userTenantRoles.tenantId, context.tenantId), inArray(userTenantRoles.userId, ids))}
+      ORDER BY ${userTenantRoles.id} FOR UPDATE`)
+
+    const actor = await tx.query.users.findFirst({ where: eq(users.id, context.actorId) })
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, context.tenantId) })
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
+    ) })
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true
+      || !league || league.id !== context.tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
+      || actorMember.status !== "active" || actorMember.role !== "league_owner") {
+      throw new Error("Forbidden: your member-management access changed")
+    }
+    const target = await tx.query.userTenantRoles.findFirst({ where: key })
+    const account = await tx.query.users.findFirst({ where: eq(users.id, initial.userId) })
+    if (!target || target.id !== parsed.membershipId || target.tenantId !== context.tenantId
+      || target.userId !== initial.userId || !account || account.id !== target.userId) {
+      throw new Error("Member not found in this league")
+    }
+    if (target.userId === context.actorId || target.userId === league.ownerId
+      || target.role === "league_owner" || target.role === "super_admin" || account.role === "super_admin") {
+      throw new Error("Owner, platform and self access cannot be removed here")
+    }
+    if (target.version !== parsed.expectedVersion) throw new Error("Member changed. Reload before saving.")
+    // Refuse while operational assignments still reference this member.
+    const managedTeam = await tx.query.teams.findFirst({ where: and(
+      eq(teams.tenantId, context.tenantId), eq(teams.managerId, target.userId),
+    ) })
+    if (managedTeam) throw new Error("This member manages a team in this league. Unassign the team first.")
+    const assignedMatch = await tx.query.matches.findFirst({ where: and(
+      eq(matches.tenantId, context.tenantId), eq(matches.scorerId, target.userId),
+    ) })
+    if (assignedMatch) throw new Error("This member is an assigned scorer. Unassign their matches first.")
+    const [deleted] = await tx.delete(userTenantRoles)
+      .where(and(key, eq(userTenantRoles.version, parsed.expectedVersion)))
+      .returning({ membershipId: userTenantRoles.id, role: userTenantRoles.role,
+        status: userTenantRoles.status, version: userTenantRoles.version })
+    if (!deleted) throw new Error("Member changed. Reload before saving.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId: context.tenantId, actorId: context.actorId,
+      actorRole: actorMember.role, method: "MEMBERSHIP_REMOVE", path: "/dashboard/settings/members", statusCode: "200",
+      payload: { membershipId: target.id, targetUserId: target.userId,
+        before: { role: target.role, status: target.status, version: target.version }, after: null },
+    })
+  })
+  revalidatePath("/dashboard", "layout")
+  return { success: true as const, membershipId: parsed.membershipId }
 }

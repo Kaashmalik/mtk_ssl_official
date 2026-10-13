@@ -7,7 +7,7 @@ import { InviteManager } from "@/components/users/invite-manager"
 
 const mocks = vi.hoisted(() => ({ user: vi.fn() }))
 vi.mock("@clerk/nextjs", () => ({ useUser: mocks.user }))
-vi.mock("@/app/actions/users-invites", () => ({ createInvite: vi.fn(), getInvites: vi.fn(), revokeInvite: vi.fn() }))
+vi.mock("@/app/actions/users-invites", () => ({ createInvite: vi.fn(), getInvites: vi.fn(), revokeInvite: vi.fn(), resendInvite: vi.fn() }))
 vi.mock("@/app/actions/teams", () => ({ getTeams: vi.fn() }))
 vi.mock("@mtk/ui/components/ui/select", () => ({
   Select: ({ children }: any) => <div>{children}</div>, SelectTrigger: ({ children, ...props }: any) => <button {...props}>{children}</button>,
@@ -47,7 +47,7 @@ describe("Invitation verification/UI contracts (SSR and source, not browser/OTP 
     expect(html).toContain("Choose a team")
     expect(html).not.toContain("Whole league")
     expect(html).toContain("Team-scoped coach/scorer grants are not available")
-    expect(html).toContain("email delivery is not tracked yet")
+    expect(html).toContain("acceptance is not proof of delivery")
     expect(html).toContain('aria-label="Team for invited manager"')
   })
   it("clear failure/conflict handling replaces silently retained private invitation data", () => {

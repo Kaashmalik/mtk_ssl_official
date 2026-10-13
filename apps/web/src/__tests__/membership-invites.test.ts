@@ -2,12 +2,13 @@ import { createHash } from "node:crypto"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { auditLogs, notifications, teams, userInvites, userTenantRoles, users } from "@mtk/database"
-import { acceptInvite, createInvite, getInvites, getInvitePreview, revokeInvite } from "@/app/actions/users-invites"
+import { acceptInvite, createInvite, getInvites, getInvitePreview, resendInvite, revokeInvite } from "@/app/actions/users-invites"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), provider: vi.fn(), context: vi.fn(), actor: vi.fn(), initial: vi.fn(),
   publicLeague: vi.fn(), publicTeam: vi.fn(), issuer: vi.fn(), recipient: vi.fn(), league: vi.fn(), member: vi.fn(),
   lockedInvite: vi.fn(), team: vi.fn(), execute: vi.fn(), transaction: vi.fn(),
   update: vi.fn(), set: vi.fn(), where: vi.fn(), returning: vi.fn(), insert: vi.fn(), values: vi.fn(), insertReturn: vi.fn(),
+  dbUpdate: vi.fn(), dbSet: vi.fn(), dbWhere: vi.fn(),
   select: vi.fn(), listWhere: vi.fn(), order: vi.fn(), limit: vi.fn(), revalidate: vi.fn(), fetch: vi.fn(),
 }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth, currentUser: mocks.provider }))
@@ -15,7 +16,7 @@ vi.mock("@/lib/dashboard-context", () => ({ getDashboardContext: mocks.context }
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
 vi.mock("@mtk/database", async original => ({ ...await original<typeof import("@mtk/database")>(), db: {
   query: { users: { findFirst: mocks.actor }, userInvites: { findFirst: mocks.initial }, tenants: { findFirst: mocks.publicLeague }, teams: { findFirst: mocks.publicTeam } },
-  transaction: mocks.transaction, select: mocks.select,
+  transaction: mocks.transaction, select: mocks.select, update: mocks.dbUpdate,
 } }))
 const A = "00000000-0000-4000-8000-000000000001"
 const ALI = "00000000-0000-4000-8000-000000000002"
@@ -63,6 +64,7 @@ beforeEach(() => {
   }))
   mocks.select.mockReturnValue({ from: () => ({ where: mocks.listWhere }) })
   mocks.listWhere.mockReturnValue({ orderBy: mocks.order }); mocks.order.mockReturnValue({ limit: mocks.limit }); mocks.limit.mockResolvedValue([])
+  mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet }); mocks.dbSet.mockReturnValue({ where: mocks.dbWhere }); mocks.dbWhere.mockResolvedValue(undefined)
 })
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 function issuing() { mocks.lockedInvite.mockResolvedValue(null); mocks.auth.mockResolvedValue({ userId: "clerk-owner" }) }
@@ -354,5 +356,78 @@ describe("Preview privacy and stale/invalid link behavior", () => {
     mocks.initial.mockResolvedValue({ ...invite, role: "team_manager", teamId: TEAM })
     mocks.publicTeam.mockResolvedValue({ id: TEAM, tenantId: B, isActive: true })
     expect(await getInvitePreview(TOKEN)).toBeNull()
+  })
+})
+
+describe("Owner invitation resend with persisted dispatch state", () => {
+  const resend = () => resendInvite({ tenantId: A, inviteId: INVITE })
+  beforeEach(() => { mocks.auth.mockResolvedValue({ userId: "clerk-owner" }) })
+  it("rotates the token, audits the resend and returns a fresh link without leaking the token", async () => {
+    const result = await resend()
+    expect(result.success).toBe(true)
+    const plain = new URL(result.link).searchParams.get("token")!
+    const rotated = createHash("sha256").update(plain).digest("hex")
+    expect(rotated).not.toBe(HASH)
+    expect(mocks.set).toHaveBeenCalledWith({ tokenHash: rotated })
+    const audit = mocks.values.mock.calls.find(([value]) => value.method === "INVITE_RESEND")![0]
+    expect(audit).toMatchObject({ tenantId: A, actorId: OWNER, payload: { inviteId: INVITE, role: "scorer", teamId: null } })
+    expect(JSON.stringify(audit)).not.toContain(plain)
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
+  })
+  it("locks the exact invite and only rotates a still-pending row", async () => {
+    await resend()
+    const lock = query(mocks.execute.mock.calls[3][0])
+    expect(lock.params).toEqual([INVITE, A]); expect(lock.sql).toContain("FOR UPDATE")
+    expect(query(mocks.where.mock.calls[0][0]).params).toEqual([INVITE, A, "pending"])
+  })
+  it("persists the last dispatch outcome and increments the attempt count", async () => {
+    vi.stubEnv("RESEND_API_KEY", "test-only"); mocks.fetch.mockResolvedValue({ ok: true })
+    await resend()
+    expect(mocks.dbUpdate).toHaveBeenCalledWith(userInvites)
+    expect(mocks.dbSet).toHaveBeenCalledWith(expect.objectContaining({ emailState: "provider_accepted", emailAttemptedAt: expect.any(Date) }))
+  })
+  it("uses a distinct idempotency key per attempt so the provider does not dedupe a resend", async () => {
+    vi.stubEnv("RESEND_API_KEY", "test-only"); mocks.fetch.mockResolvedValue({ ok: true })
+    mocks.lockedInvite.mockResolvedValue({ ...invite, emailAttemptCount: 3 })
+    await resend()
+    expect(mocks.fetch.mock.calls[0][1].headers["Idempotency-Key"]).toBe(`league-invite/${INVITE}/r4`)
+  })
+  it("enforces the resend cooldown from the last attempt", async () => {
+    mocks.lockedInvite.mockResolvedValue({ ...invite, emailAttemptedAt: new Date() })
+    await expect(resend()).rejects.toThrow("wait a moment")
+    expect(mocks.set).not.toHaveBeenCalled(); expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+  it.each(["accepted", "revoked", "expired"])("refuses to resend a %s invitation", async status => {
+    mocks.lockedInvite.mockResolvedValue({ ...invite, status })
+    await expect(resend()).rejects.toThrow("Only pending")
+    expect(mocks.set).not.toHaveBeenCalled()
+  })
+  it("refuses to resend an expired pending invitation", async () => {
+    mocks.lockedInvite.mockResolvedValue({ ...invite, expiresAt: new Date(0) })
+    await expect(resend()).rejects.toThrow("expired")
+    expect(mocks.set).not.toHaveBeenCalled()
+  })
+  it.each([null, { ...invite, tenantId: B }, { ...invite, id: B }])("rejects a foreign/missing invitation %s", async row => {
+    mocks.lockedInvite.mockResolvedValue(row)
+    await expect(resend()).rejects.toThrow("not found")
+    expect(mocks.set).not.toHaveBeenCalled()
+  })
+  it("rechecks owner authority under lock before rotating the token", async () => {
+    mocks.member.mockReset().mockResolvedValue({ ...ownerMember, status: "suspended" })
+    await expect(resend()).rejects.toThrow("authority changed")
+    expect(mocks.set).not.toHaveBeenCalled(); expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+  it("rejects a stale workspace assertion before any transaction", async () => {
+    await expect(resendInvite({ tenantId: B, inviteId: INVITE })).rejects.toThrow("Workspace changed")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+  it("a lost conditional token rotation has no audit or link", async () => {
+    mocks.returning.mockResolvedValue([])
+    await expect(resend()).rejects.toThrow("changed")
+    expect(mocks.insert).not.toHaveBeenCalled(); expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+  it("rejects invalid resend input before any query", async () => {
+    await expect(resendInvite({ tenantId: A, inviteId: "not-a-uuid" })).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })

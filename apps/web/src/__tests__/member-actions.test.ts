@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { userTenantRoles, auditLogs } from "@mtk/database"
-import { getUsers, toggleUserStatus, updateUserRole } from "@/app/actions/users"
+import { getUsers, toggleUserStatus, updateUserRole, removeMember } from "@/app/actions/users"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), transaction: vi.fn(),
   member: vi.fn(), user: vi.fn(), league: vi.fn(), execute: vi.fn(),
   update: vi.fn(), set: vi.fn(), where: vi.fn(), returning: vi.fn(), insert: vi.fn(), values: vi.fn(),
   select: vi.fn(), from: vi.fn(), join: vi.fn(), listWhere: vi.fn(), order: vi.fn(), limit: vi.fn(), revalidate: vi.fn(),
+  team: vi.fn(), match: vi.fn(), del: vi.fn(), delWhere: vi.fn(), delReturn: vi.fn(),
 }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("@/lib/dashboard-context", () => ({ getDashboardContext: mocks.context }))
@@ -35,9 +36,13 @@ beforeEach(() => {
   mocks.where.mockReturnValue({ returning: mocks.returning })
   mocks.returning.mockResolvedValue([{ membershipId: MEMBER, role: "scorer", status: "suspended", version: 3 }])
   mocks.insert.mockReturnValue({ values: mocks.values }); mocks.values.mockResolvedValue(undefined)
+  mocks.team.mockResolvedValue(null); mocks.match.mockResolvedValue(null)
+  mocks.del.mockReturnValue({ where: mocks.delWhere }); mocks.delWhere.mockReturnValue({ returning: mocks.delReturn })
+  mocks.delReturn.mockResolvedValue([{ membershipId: MEMBER, role: "scorer", status: "active", version: 2 }])
   mocks.transaction.mockImplementation(async fn => fn({ execute: mocks.execute,
-    query: { userTenantRoles: { findFirst: mocks.member }, users: { findFirst: mocks.user }, tenants: { findFirst: mocks.league } },
-    update: mocks.update, insert: mocks.insert,
+    query: { userTenantRoles: { findFirst: mocks.member }, users: { findFirst: mocks.user }, tenants: { findFirst: mocks.league },
+      teams: { findFirst: mocks.team }, matches: { findFirst: mocks.match } },
+    update: mocks.update, insert: mocks.insert, delete: mocks.del,
   }))
   mocks.select.mockReturnValue({ from: mocks.from }); mocks.from.mockReturnValue({ innerJoin: mocks.join })
   mocks.join.mockReturnValue({ where: mocks.listWhere }); mocks.listWhere.mockReturnValue({ orderBy: mocks.order })
@@ -179,5 +184,80 @@ describe("League-only member administration", () => {
   it("rejects a stale league assertion on the list rather than returning another league", async () => {
     await expect(getUsers(B)).rejects.toThrow("Workspace changed")
     expect(mocks.select).not.toHaveBeenCalled()
+  })
+})
+
+describe("League membership removal", () => {
+  const removeKey = { tenantId: A, membershipId: MEMBER, expectedVersion: 2 }
+  it("removes only the exact league membership with an atomic before/after audit; never deletes the account", async () => {
+    expect(await removeMember(removeKey)).toEqual({ success: true, membershipId: MEMBER })
+    expect(mocks.del).toHaveBeenCalledExactlyOnceWith(userTenantRoles)
+    expect(dialect.sqlToQuery(mocks.delWhere.mock.calls[0][0]).params).toEqual([MEMBER, A, 2])
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ method: "MEMBERSHIP_REMOVE", actorId: OWNER, tenantId: A,
+      payload: expect.objectContaining({ targetUserId: ALI, before: { role: "scorer", status: "active", version: 2 }, after: null }) }))
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
+  })
+  it("scopes team and scorer assignment checks to the active league", async () => {
+    await removeMember(removeKey)
+    expect(dialect.sqlToQuery(mocks.team.mock.calls[0][0].where).params).toEqual([A, ALI])
+    expect(dialect.sqlToQuery(mocks.match.mock.calls[0][0].where).params).toEqual([A, ALI])
+  })
+  it("refuses removal while the member manages a team in this league", async () => {
+    mocks.team.mockResolvedValue({ id: B, tenantId: A, managerId: ALI })
+    await expect(removeMember(removeKey)).rejects.toThrow("manages a team")
+    expect(mocks.del).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+  it("refuses removal while the member is an assigned scorer", async () => {
+    mocks.match.mockResolvedValue({ id: B, tenantId: A, scorerId: ALI })
+    await expect(removeMember(removeKey)).rejects.toThrow("assigned scorer")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it.each([{ userId: OWNER }, { role: "league_owner" }, { role: "super_admin" }])("protects owner/self/platform membership from removal %s", async changes => {
+    const protectedMember = { ...target, ...changes }
+    mocks.member.mockReset().mockResolvedValueOnce(protectedMember).mockResolvedValueOnce(actorMember).mockResolvedValueOnce(protectedMember)
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: protectedMember.userId, role: "player" })
+    await expect(removeMember(removeKey)).rejects.toThrow("cannot be removed")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it("protects a platform administrator whose league role is ordinary", async () => {
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: ALI, role: "super_admin" })
+    await expect(removeMember(removeKey)).rejects.toThrow("cannot be removed")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it("rechecks actor owner membership after acquiring locks", async () => {
+    mocks.member.mockReset().mockResolvedValueOnce(target).mockResolvedValueOnce({ ...actorMember, status: "suspended" })
+    await expect(removeMember(removeKey)).rejects.toThrow("access changed")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it.each([undefined, { ...target, tenantId: B }, { ...target, id: B }])("rejects foreign/missing membership %s", async member => {
+    mocks.member.mockReset().mockResolvedValue(member)
+    await expect(removeMember(removeKey)).rejects.toThrow("Member not found")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it("rejects a stale version instead of deleting the later membership", async () => {
+    await expect(removeMember({ ...removeKey, expectedVersion: 1 })).rejects.toThrow("Member changed")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it("rejects a lost conditional delete without audit or success", async () => {
+    mocks.delReturn.mockResolvedValue([])
+    await expect(removeMember(removeKey)).rejects.toThrow("Member changed")
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+  it("rejects a stale workspace before opening a transaction", async () => {
+    await expect(removeMember({ ...removeKey, tenantId: B })).rejects.toThrow("Workspace changed")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+  it.each(["scorer", "team_manager", "fan", "super_admin"])("denies removal to context role %s", async role => {
+    mocks.context.mockResolvedValue({ status: "ready", context: { role, tenantId: A, actorId: OWNER } })
+    await expect(removeMember(removeKey)).rejects.toThrow("Forbidden")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+  it.each([{ membershipId: "not-a-uuid" }, { expectedVersion: -1 }, { expectedVersion: 1.5 }])("rejects invalid removal input %s", async change => {
+    await expect(removeMember({ ...removeKey, ...change } as never)).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })

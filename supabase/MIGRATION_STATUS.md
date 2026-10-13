@@ -209,3 +209,23 @@ change or deployment was performed for this batch.
 **Still open:** all real-database/deployed acceptance, complete provider-verified
 OTP and delivery lifecycle, expiry/scoped multiple grants, ownership transfer,
 unknown/removed host handling and complete private CRUD/socket/export coverage.
+
+## Batch 9 migration — invitation dispatch state (13 October 2026)
+
+`20261013090000_invitation_delivery_state.sql` is a **local migration only**, not
+applied. It adds three additive columns to `user_invites`:
+
+| Column | Purpose |
+|---|---|
+| `email_state` | Last recorded dispatch outcome (`unconfigured`/`provider_accepted`/`failed`/`unknown`); provider acceptance is not delivery |
+| `email_attempted_at` | Instant of the last attempt; drives the resend cooldown |
+| `email_attempt_count` | Attempt counter (create + resends) |
+
+Unlike the Batch 7 migration this one **is** idempotent
+(`ADD COLUMN IF NOT EXISTS`, `DROP CONSTRAINT IF EXISTS` before re-adding the
+check), so a replay is a no-op. It is nevertheless subject to the same rollout
+rules: reconcile history, back up, apply on a disposable staging database first,
+then release the matching web artifact. It changes no grants or RLS policies and
+does not alter existing rows. The dependency is purely additive — code that omits
+the new columns keeps working, so the migration can be applied ahead of the web
+deploy without breaking the previous binary.

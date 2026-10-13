@@ -1,7 +1,10 @@
-import { pgTable, uuid, text, timestamp, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, index, integer } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { users, userRoleEnum } from "./users";
+
+/** Last recorded dispatch outcome. Provider acceptance is never delivery. */
+export type InvitationEmailState = "unconfigured" | "provider_accepted" | "failed" | "unknown";
 
 /**
  * Team-scoped role invitations.
@@ -30,6 +33,12 @@ export const userInvites = pgTable(
     invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    /** Last recorded dispatch outcome; tracks attempts without claiming delivery. */
+    emailState: text("email_state").$type<InvitationEmailState>(),
+    /** Instant of the last dispatch attempt; drives the resend cooldown. */
+    emailAttemptedAt: timestamp("email_attempted_at", { withTimezone: true }),
+    /** Number of dispatch attempts for this invitation (create + resends). */
+    emailAttemptCount: integer("email_attempt_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
