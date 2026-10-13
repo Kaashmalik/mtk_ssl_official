@@ -25,6 +25,7 @@ export * from "./schema/tenant-branding";
 export * from "./schema/users";
 export * from "./schema/user-tenant-roles";
 export * from "./schema/user-invites";
+export * from "./schema/ownership-transfers";
 export * from "./schema/profiles";
 export * from "./schema/tournaments";
 export * from "./schema/teams";

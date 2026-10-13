@@ -3,8 +3,10 @@ import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { getUsers } from "@/app/actions/users"
+import { getOwnershipTransfer } from "@/app/actions/ownership"
 import { UserListTable } from "@/components/users/user-list-table"
 import { InviteManager } from "@/components/users/invite-manager"
+import { OwnershipTransferPanel } from "@/components/settings/ownership-transfer-panel"
 import { getDashboardContext } from "@/lib/dashboard-context"
 import { unstable_noStore as noStore } from "next/cache"
 
@@ -18,6 +20,7 @@ export default async function UserManagementPage() {
   if (access.status !== "ready" || access.context.role !== "league_owner") redirect("/dashboard")
   const { actorId: currentUserId, tenantId, tenantName } = access.context
   const initialUsers = await getUsers(tenantId)
+  const transfer = await getOwnershipTransfer(tenantId)
 
   return (
     <div className="space-y-6">
@@ -32,6 +35,12 @@ export default async function UserManagementPage() {
       {/* Invitations are shown only to the authorized league owner. */}
       <MotionWrapper variant="fadeInUp" delay={0.05}>
         <InviteManager key={`${tenantId}/${currentUserId}`} tenantId={tenantId} />
+      </MotionWrapper>
+
+      {/* Two-party ownership handover; the offer stays inert until the recipient accepts. */}
+      <MotionWrapper variant="fadeInUp" delay={0.08}>
+        <OwnershipTransferPanel key={`${tenantId}/ownership`} tenantId={tenantId} currentUserId={currentUserId}
+          members={initialUsers} initialTransfer={transfer} />
       </MotionWrapper>
 
       {/* Table Section */}

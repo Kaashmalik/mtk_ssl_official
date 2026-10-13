@@ -3,9 +3,11 @@ import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { getDashboardContext } from "@/lib/dashboard-context"
+import { getOwnershipTransfer } from "@/app/actions/ownership"
 import { hasPermission } from "@/lib/rbac"
 import { DashboardHeader, DashboardQuickActions, DashboardUnavailable, DashboardLoading, DashboardPanel } from "@/components/dashboard/dashboard-view"
 import { DashboardOverview, DashboardMatches, DashboardTasks } from "@/components/dashboard/dashboard-sections"
+import { OwnershipTransferRequest } from "@/components/dashboard/ownership-transfer-request"
 
 export const dynamic = "force-dynamic"
 
@@ -21,8 +23,14 @@ export default async function DashboardPage() {
   </DashboardPanel>
   const { context } = access
   const organizer = hasPermission(context.role, "match:update") && hasPermission(context.role, "registration:manage")
+  // Only the named recipient ever sees this; anyone else gets null. A transient
+  // lookup failure must not take down the dashboard.
+  const transfer = await getOwnershipTransfer(context.tenantId).catch(() => null)
   return <div className="space-y-6">
     <DashboardHeader context={context} />
+    {transfer?.viewer === "recipient" && <OwnershipTransferRequest tenantId={context.tenantId} transferId={transfer.id}
+      expectedVersion={transfer.version} expiresAt={transfer.expiresAt}
+      ownerLabel={transfer.fromDisplayName || transfer.fromEmail} />}
     <Suspense fallback={<DashboardLoading title="League overview" />}><DashboardOverview context={context} /></Suspense>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-6">
