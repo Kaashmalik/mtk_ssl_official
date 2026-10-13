@@ -47,7 +47,7 @@ function createTransaction() {
       totalBalls: 0, extras: 0, byes: 0, legByes: 0, wides: 0, noBalls: 0,
       updatedAt: new Date('2026-10-12T12:00:00.000Z'),
     },
-    match: { id: MATCH, tenantId: TENANT, scorerId: ACTOR as string | null, teamAId: TENANT, teamBId: TEAM_B,
+    match: { id: MATCH, tenantId: TENANT, scorerId: ACTOR as string | null, backupScorerId: null as string | null, teamAId: TENANT, teamBId: TEAM_B,
       winnerId: null as string | null, result: null as string | null,
       status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
@@ -324,6 +324,38 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.delete).not.toHaveBeenCalled();
     expect(publisher.publishBallEvent).not.toHaveBeenCalled();
     expect(publisher.publishMatchEvent).not.toHaveBeenCalled();
+  });
+  it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])('rejects revoked backup inside the %s transaction', async (operation) => {
+    mockTx.state.match.scorerId = TEAM_B;
+    mockTx.state.match.backupScorerId = null;
+    await expect(mutation(operation)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mockTx.insert).not.toHaveBeenCalled();
+    expect(mockTx.update).not.toHaveBeenCalled();
+    expect(mockTx.delete).not.toHaveBeenCalled();
+    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
+    expect(publisher.publishMatchEvent).not.toHaveBeenCalled();
+  });
+  it('records, replays and undoes as active backup without changing either assignment', async () => {
+    mockTx.state.match.scorerId = TEAM_B;
+    mockTx.state.match.backupScorerId = ACTOR;
+    const input = ball({ runs: 4 });
+    const accepted = await service.recordBall(TENANT, ACTOR, input);
+    expect(mockTx.state.innings.totalRuns).toBe(4);
+    expect((await service.recordBall(TENANT, ACTOR, input)).replayed).toBe(true);
+    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId);
+    expect(mockTx.state.innings.totalRuns).toBe(0);
+    expect(mockTx.state.match.scorerId).toBe(TEAM_B);
+    expect(mockTx.state.match.backupScorerId).toBe(ACTOR);
+  });
+  it('does not acknowledge an accepted backup delivery after backup revocation', async () => {
+    mockTx.state.match.scorerId = TEAM_B;
+    mockTx.state.match.backupScorerId = ACTOR;
+    const input = ball({ runs: 1 });
+    await service.recordBall(TENANT, ACTOR, input);
+    mockTx.state.match.backupScorerId = null;
+    await expect(service.recordBall(TENANT, ACTOR, input)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mockTx.state.balls).toHaveLength(1);
+    expect(mockTx.state.events).toHaveLength(1);
   });
 
   it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])('rejects deactivated accounts on %s', async (operation) => {

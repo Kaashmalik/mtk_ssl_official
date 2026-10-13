@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 12: two-party league ownership transfer (recorded-owner initiation, recipient-only acceptance) with last-owner safeguards; local schema/migration changes, no remote database writes or deployment |
+| Current implementation | Batch 13: backup-scorer canonical enforcement, dashboard integration and removal protection; Batches 7–12 source status reconciled; no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -76,14 +76,15 @@ This is a professional living plan covering known requirements and failure cases
 | 6 | `3d7e3fd` | Role-aware responsive dashboard, authorized active-tenant dashboard/shell/trial reads, accurate summaries and honest error states |
 | 7 | `1ae95b2` | Versioned league-only member role/status commands, owner-only Members and access UI, explicit active membership guards, local migration and coordinated-release gate; deployment/real-DB proof open |
 | 8 | `a49ea77` | Provider-verified invited-email redemption via the Clerk session identity, transactional issuer/recipient/league/invitation/team rechecks, honest dispatch states; recorded after Batch 7 |
-| 9 | Batch 9; see Git history | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
-| 10 | Batch 10; see Git history | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; local migration, no remote database writes or deployment |
-| 11 | Batch 11; see Git history | Signature-verified invitation delivery webhook recording delivered/bounced/complained; local migration, no remote database writes or deployment |
-| 12 | This batch; see Git history | Two-party league ownership transfer: recorded-owner initiation, recipient-only acceptance, either-party cancellation, 7-day expiry and an atomic promote/demote/owner-id change; local migration, no remote database writes or deployment |
+| 9 | `29a98f4` | League membership removal, invitation resend with token rotation/cooldown, persisted invitation dispatch state; local migration, no remote database writes or deployment |
+| 10 | `daff4f9` | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; canonical backup enforcement/dashboard/removal gaps repaired in Batch 13 |
+| 11 | `f4861ae` | Signature-verified invitation delivery webhook recording delivered/bounced/complained; local migration, no remote database writes or deployment |
+| 12 | `85d95b0`, migration timestamp `190d710`, evidence `3e55bde` | Two-party league ownership transfer: recorded-owner initiation, recipient-only acceptance, either-party cancellation, 7-day expiry and an atomic promote/demote/owner-id change; local migration, no remote database writes or deployment |
+| 13 | Current batch; see Git history | Canonical backup write authorization, backup dashboard summaries/shortcuts and backup member-removal guard; no new migration or remote database writes |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
-Batch 9 verification and rollout boundaries are recorded in section 17. The
+Batch 13 verification and rollout boundaries are recorded in section 17. The
 615-test result remains historical evidence, not the current suite count.
 
 ### 3.2 Existing foundations are not complete new features
@@ -100,8 +101,8 @@ Batch 9 verification and rollout boundaries are recorded in section 17. The
 | GAP-01 | Batch 7 replaces global user-management writes with league-only membership commands | Verify migration/rollout and browser behavior; platform role-grant redesign remains open |
 | GAP-02 | Some pages/actions still use primary membership or legacy global roles | One verified active league across page, action, repository, and notification paths |
 | GAP-03 | Batch 7 removes fallback in web/scoring/shared membership helpers and proposes matching RLS helper changes; legacy columns remain | Verify safe backfill, existing elevated grants, real RLS and other consumers before declaring retirement complete |
-| GAP-04 | Batch 7 removes plaintext link logging and distinguishes provider acceptance from delivery; dispatch is still best effort | Queued delivery, persisted accepted/delivered/bounced/failed states, safe resend/recovery |
-| GAP-05 | Batch 7 rechecks atomic expiry and prevents suspension bypass; recipient identity still relies on application email | Provider-verified email/OTP, current inviter authority, resource validity and scoped grants at claim time |
+| GAP-04 | Batches 7–11 remove plaintext logging/false delivery claims, persist dispatch outcomes and support token-rotating resend plus signed delivery events; dispatch is still synchronous | Durable queue, retries/recovery and live provider acceptance proof |
+| GAP-05 | Batch 8 checks provider-verified invited email and current issuer/resource authority during transactional redemption | Authenticated OTP/login/provider-outage acceptance, scoped multiple grants and real concurrency proof |
 | GAP-06 | Mobile Supabase sessions and web Clerk identity are not a completed scoring transport contract | Approved identity strategy and explicit account mapping; no client internal tokens |
 | GAP-07 | Scoring sockets/state reads are currently anonymous public interfaces | Publication gates and protected private-match room/read access before offering private matches |
 | GAP-08 | Migration history, real locking, private networking, and deployed event delivery are not reverified | Local/staging schema proof, concurrency tests, infrastructure acceptance |
@@ -570,7 +571,23 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 
 ## 16. Phased Implementation Checklists: Built and Remaining
 
-**Batches 1–6 are delivered; Batch 7 adds the current tested source implementation. No full phase below is production-complete.** Checkboxes represent their narrowly stated implementation, never deployment certification. IDs are stable backlog references. Historical results and release gates remain preserved.
+**Batches 1–13 have recorded source implementations. No full phase below is production-complete.** Top-level checkboxes represent their complete stated scope, not just one implemented slice. The source-completion register below identifies completed portions of open tasks; unfinished functionality and release acceptance remain explicitly separate. IDs and historical evidence are preserved.
+
+### Source-completion register — reviewed from Batch 7 (13 October 2026)
+
+| Task | Implemented source slice | Still open before the whole task is complete |
+| --- | --- | --- |
+| IAM-01 | Batch 7: league-only role/status commands, version checks and atomic audit | Deployment acceptance remains a release gate; this narrowly stated source task is checked |
+| IAM-02 | Batch 7: owner-only list, confirmed-save controls and suspension confirmation; Batch 9: removal UI | Member detail, pagination, expiry, scoped grants and assignment integration |
+| IAM-03 | Batch 8: Clerk-verified invited-email redemption, provider email-code UI and transactional issuer/recipient/resource checks | Live provider/login/OTP journeys, abuse/outage and real concurrent redemption proof |
+| IAM-04 | Batches 8/9/11: honest persisted dispatch outcomes, signed delivery/bounce/complaint events and manual resend | Durable queued sends, automatic retries, operational provider proof |
+| IAM-05 | Batches 7/9: role/status changes, versioned removal, revoke/resend/token rotation, audit | Full command idempotency and complete lifecycle/staging acceptance |
+| IAM-06 | Batches 10/13: primary/backup slots, web and canonical write checks, dashboard and removal integration | Pending-membership assignment and writer handover/fencing |
+| IAM-07 | Batches 7/12: ordinary owner-edit protection and two-party handover source | Delegated resource grants, fresh privilege/account checks on every resolution and real DB acceptance |
+
+**Counts:** 79 stable task IDs, 19 checked, 60 open. Open composite tasks above
+are partially implemented, not untouched. Source completion is not production
+certification. No broad IAM checkbox is checked solely because one slice landed.
 
 ### Phase summary
 
@@ -629,7 +646,7 @@ Existing invitation token storage/atomic claiming and match-scorer assignment ar
 - [ ] **IAM-05:** Implement activate/suspend/reactivate/remove/revoke/resend with version checks, idempotency and audit history.
   Batch 9 adds version-checked, audited membership removal (refused while team/scorer assignments exist) and invitation resend (rotated token, cooldown, audit). Full lifecycle idempotency across every command and staging proof remain open.
 - [ ] **IAM-06:** Support primary/backup scorer assignment through settings and pending membership acceptance.
-  Batch 10 adds primary/backup scorer slots on matches, tenant-scoped and validated against active scorer membership with a distinct-slot rule; either assigned scorer may record. Assigning a not-yet-accepted (pending) membership and handover/fencing remain open.
+  Batches 10/13 add primary/backup scorer slots, exact-tenant candidates, canonical backup-write enforcement, dashboard shortcuts and member-removal checks for either slot. Assigning a not-yet-accepted (pending) membership, transactional assignment/revocation concurrency and handover/fencing remain open.
 - [ ] **IAM-07:** Implement last-owner safeguards, delegated grants and two-party ownership transfer.
   Batch 12 adds a two-party handover: only the recorded owner (`tenants.owner_id`) may initiate, only the named recipient may accept, and acceptance atomically promotes the recipient, demotes the outgoing owner to a chosen non-owner role and re-points `owner_id`, so the league is never left ownerless. Ordinary member CRUD already refuses every owner/platform/self edit. Delegated (resource-scoped) grants and real-PostgreSQL proof of the handover remain open.
 - [ ] **IAM-08:** Enforce privileged MFA/step-up and recovery; no silent factor downgrade or client-only sensitive checks.
@@ -755,7 +772,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 12:** the verified invitation slice (`IAM-03/04/05`), primary/backup scorer assignment (`IAM-06`), provider delivery events and two-party ownership transfer (`IAM-07`) are now source-complete. Next, finish the membership rollout/real-DB acceptance and remaining `ISO-04/05/06`, then the still-open `IAM-07/08` remainder (delegated resource-scoped grants, privileged MFA/step-up), assigning a not-yet-accepted membership, a durable send queue with retries, scorer handover/fencing and provider-managed OTP. The Batch 9/10/11/12 commands are implemented in source, not deployed-certified.
+**Updated after Batch 13:** implemented slices are listed above; complete `IAM-03/04/05/06/07` tasks are not all source-complete. The Batch 10 web/canonical mismatch is repaired. Next prioritize transaction-safe assignment/removal concurrency and ownership-resolution authorization before adding delegated grants/MFA or calling these release-ready. Then finish `BASE-04/05/06` and membership rollout/real-DB acceptance, remaining `ISO-04/05/06`, pending-membership assignments, durable email queue/retries and writer fencing. Provider email-code UI exists, but real OTP journeys remain unverified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -982,6 +999,51 @@ version trigger and the atomic handover; delegated resource-scoped grants
 (the other half of IAM-07); and privileged MFA/step-up (IAM-08).
 
 
+
+### 2026-10-13 — Batch 13: close backup-scorer enforcement gaps
+
+Reviewed the recorded implementation from Batch 7 through Batch 12 against
+current source and Git history. Commit IDs and the source-completion register
+above replace stale status text; earlier evidence remains historical.
+
+**Implemented:**
+
+- Repaired a Batch 10 integration bug: the web allowed backups to score but the
+  canonical scoring service still required the primary `scorerId`. The shared
+  transactional write guard now accepts either slot **after** current account,
+  league and exact-membership checks. All five canonical mutation callers pass
+  the locked match row through that guard; no client field grants authority.
+- Added backup assignments to tenant-scoped scorer dashboard selection and
+  summaries, with scoring shortcuts only for an eligible scorer or league owner.
+  Global platform role alone no longer offers a scoring shortcut.
+- Member removal now refuses both primary and backup match assignments, so the
+  owner must unassign either slot first. This does not claim assignment/removal
+  races are transactionally solved: the current assignment action still uses
+  pre-write eligibility reads without a shared ordered-lock protocol.
+- Added regressions for backup record/replay/undo, rejected replay after backup
+  revocation, all five mutation rejections, membership/role denial despite backup
+  assignment, exact-tenant removal guards and backup dashboard links.
+
+**Fresh automated evidence:** web **682 / 36 files**, database **128 / 8 files**,
+scoring service **184 / 8 suites**, **994 passing tests** (+27 over the reviewed
+Batch 12 baseline). Commands and boundaries appear in the historical master
+plan's Batch 13 entry. Tests are mocked/SQL-construction/SSR checks, not real
+PostgreSQL, multi-device writer-handover or deployed provider certification.
+
+No new migration, remote database change, deployment, build, lint or standalone
+type-check ran in this batch. Prior unapplied migrations and the default-off
+deployment gate remain release blockers. Matching database workspace artifacts,
+web and scoring service must deploy together after staging validation.
+
+**Next:** transactional assignment/removal authorization/concurrency; ownership
+resolution must recheck both active global accounts/current privileges and
+session mapping under lock, plus fresh expiry at the final conditional write.
+The current ownership cancel path acquires locks but does not reread the actor's
+account/membership under those locks. These remain review findings, not fixes
+silently implied by the successful unit suites. Resource-scoped grants,
+privileged step-up, durable sends, pending assignments and writer fencing follow.
+
+### Decisions still requiring explicit review
 
 Identity migration/linking; membership/grant schema and fallback retirement; MFA/recovery policy; invite/OTP defaults; league onboarding policy; official independent approvals; supported cricket laws/formats; currency/payment providers; visibility/minor consent; product limits/grace; feed/media rights; recovery/performance load targets. Record decisions rather than guessing business/legal rules in code.
 

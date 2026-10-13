@@ -202,7 +202,7 @@ describe("League membership removal", () => {
   it("scopes team and scorer assignment checks to the active league", async () => {
     await removeMember(removeKey)
     expect(dialect.sqlToQuery(mocks.team.mock.calls[0][0].where).params).toEqual([A, ALI])
-    expect(dialect.sqlToQuery(mocks.match.mock.calls[0][0].where).params).toEqual([A, ALI])
+    expect(dialect.sqlToQuery(mocks.match.mock.calls[0][0].where).params).toEqual([A, ALI, ALI])
   })
   it("refuses removal while the member manages a team in this league", async () => {
     mocks.team.mockResolvedValue({ id: B, tenantId: A, managerId: ALI })
@@ -213,6 +213,13 @@ describe("League membership removal", () => {
   it("refuses removal while the member is an assigned scorer", async () => {
     mocks.match.mockResolvedValue({ id: B, tenantId: A, scorerId: ALI })
     await expect(removeMember(removeKey)).rejects.toThrow("assigned scorer")
+    expect(mocks.del).not.toHaveBeenCalled()
+  })
+  it("refuses removal while the member is a backup scorer and checks both slots in the exact league", async () => {
+    mocks.match.mockResolvedValue({ id: B, tenantId: A, scorerId: null, backupScorerId: ALI })
+    await expect(removeMember(removeKey)).rejects.toThrow("assigned scorer")
+    expect(dialect.sqlToQuery(mocks.match.mock.calls[0][0].where).params).toEqual([A, ALI, ALI])
+    expect(dialect.sqlToQuery(mocks.match.mock.calls[0][0].where).sql).toContain('"backup_scorer_id"')
     expect(mocks.del).not.toHaveBeenCalled()
   })
   it.each([{ userId: OWNER }, { role: "league_owner" }, { role: "super_admin" }])("protects owner/self/platform membership from removal %s", async changes => {

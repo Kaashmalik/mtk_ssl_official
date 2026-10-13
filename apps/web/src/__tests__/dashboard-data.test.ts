@@ -49,7 +49,7 @@ describe("Scoped bounded dashboard reads", () => {
     const matchQuery = predicates()[0]
     expect(matchQuery.limit).toBe(5)
     expect(matchQuery.order.map((o) => dialect.sqlToQuery(o).sql).join(" ")).toContain('"matches"."id" asc')
-    if (group === "assigned") expect(matchQuery.params).toEqual(["tenant", "actor", "scheduled", "toss", "live", "innings_break"])
+    if (group === "assigned") expect(matchQuery.params).toEqual(["tenant", "actor", "actor", "scheduled", "toss", "live", "innings_break"])
     if (group === "live") expect(matchQuery.params).toEqual(["tenant", "live", "innings_break", "toss"])
     if (group === "upcoming") expect(matchQuery.params).toEqual(["tenant", "scheduled"])
     if (group === "recent") expect(matchQuery.params).toEqual(["tenant", "completed"])
@@ -59,6 +59,14 @@ describe("Scoped bounded dashboard reads", () => {
   it("does not query assignments for non-scorer roles", async () => {
     expect(await getDashboardMatches(context, "assigned")).toEqual([])
     expect(mocks.select).not.toHaveBeenCalled()
+  })
+  it("includes backup assignments in the exact-league predicate and retains the slot in summaries", async () => {
+    mocks.rows.matches = [{ ...match, scorerId: "primary", backupScorerId: "actor" }]
+    const result = await getDashboardMatches({ ...context, role: "scorer" }, "assigned")
+    expect(predicates()[0].sql).toContain('"backup_scorer_id"')
+    expect(predicates()[0].sql).toContain(" or ")
+    expect(result[0].backupScorerId).toBe("actor")
+    expect(mocks.queries[0].fields).toHaveProperty("backupScorerId")
   })
   it("returns empty successful results without empty IN queries", async () => {
     mocks.rows.matches = []

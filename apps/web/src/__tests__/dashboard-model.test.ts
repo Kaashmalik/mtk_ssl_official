@@ -61,6 +61,17 @@ describe("Accurate match summaries", () => {
   it("labels the latest innings when a super over exists", () => {
     expect(toDashboardMatch(match, names, [innings("a", 1, 100), innings("a", 3, 12)], "tenant").scoreA).toBe("12/2 (1.0) · Super over")
   })
+  it.each(["scheduled", "toss", "live", "innings_break"])("links the assigned backup to scoring for %s", status => {
+    expect(matchDashboardHref({ ...match, status, scorerId: "primary", backupScorerId: "actor" }, "scorer", "actor")).toBe("/matches/match/scoring")
+  })
+  it.each(["completed", "cancelled"])("does not offer backup scoring for ended status %s", status => {
+    expect(matchDashboardHref({ ...match, status, backupScorerId: "actor" }, "scorer", "actor")).toBe("/matches/match")
+  })
+  it("a backup slot is not a role grant or platform scoring override", () => {
+    for (const role of ["coach", "fan", "super_admin"] as const) {
+      expect(matchDashboardHref({ ...match, scorerId: null, backupScorerId: "actor" }, role, "actor")).toBe("/matches/match")
+    }
+  })
   it("ignores foreign-tenant, other-match, or third-team innings", () => {
     expect(toDashboardMatch(match, names, [{ ...innings("a", 1, 999), tenantId: "foreign" },
       { ...innings("b", 2, 999), matchId: "other" }, innings("third", 1, 999)], "tenant").scoreA).toBe("Yet to bat")

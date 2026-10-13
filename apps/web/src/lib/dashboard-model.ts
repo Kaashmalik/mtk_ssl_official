@@ -29,7 +29,7 @@ export function getSetupSteps(stats: DashboardStats) {
 }
 
 type MatchSummary = { id: string; tenantId: string; teamAId: string; teamBId: string; status: string;
-  scorerId: string | null; scheduledDate: Date | null; updatedAt: Date; result: string | null }
+  scorerId: string | null; backupScorerId?: string | null; scheduledDate: Date | null; updatedAt: Date; result: string | null }
 type InningsSummary = { matchId: string; tenantId: string; teamId: string; inningsNumber: number;
   totalRuns: number; totalWickets: number; totalBalls: number }
 export function toDashboardMatch(match: MatchSummary, names: Map<string, string>, innings: InningsSummary[], tenantId: string) {
@@ -43,14 +43,14 @@ export function toDashboardMatch(match: MatchSummary, names: Map<string, string>
   }
   return { id: match.id, teamA: names.get(match.teamAId) ?? "Team unavailable",
     teamB: names.get(match.teamBId) ?? "Team unavailable", scoreA: score(match.teamAId), scoreB: score(match.teamBId),
-    status: match.status, scorerId: match.scorerId, scheduledDate: match.scheduledDate,
+    status: match.status, scorerId: match.scorerId, backupScorerId: match.backupScorerId ?? null, scheduledDate: match.scheduledDate,
     updatedAt: match.updatedAt, result: match.result }
 }
 export type DashboardMatch = ReturnType<typeof toDashboardMatch>
 
-export function matchDashboardHref(match: Pick<DashboardMatch, "id" | "scorerId" | "status">, role: UserRole, actorId: string) {
+export function matchDashboardHref(match: Pick<DashboardMatch, "id" | "scorerId" | "status"> & { backupScorerId?: string | null }, role: UserRole, actorId: string) {
   const editable = ["scheduled", "toss", "live", "innings_break"].includes(match.status)
-  const assigned = role === "league_owner" || role === "super_admin" || (role === "scorer" && match.scorerId === actorId)
+  const assigned = role === "league_owner" || (role === "scorer" && (match.scorerId === actorId || match.backupScorerId === actorId))
   return editable && assigned && hasPermission(role, "match:score")
     ? `/matches/${match.id}/scoring` : `/matches/${match.id}`
 }

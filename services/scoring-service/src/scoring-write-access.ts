@@ -5,11 +5,11 @@ import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
 
 export type ScoringTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type ScoringMatch = { tenantId: string; scorerId: string | null; teamAId: string; teamBId: string };
+export type ScoringMatch = { tenantId: string; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string };
 
 /** Call AFTER the tenant-filtered match lock, BEFORE replay or any write. */
 export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId: string,
-  actorId: string, match: Pick<ScoringMatch, 'tenantId' | 'scorerId'>) {
+  actorId: string, match: Pick<ScoringMatch, 'tenantId' | 'scorerId' | 'backupScorerId'>) {
   if (!z.string().uuid().safeParse(actorId).success || match.tenantId !== tenantId) {
     throw new ForbiddenException('Invalid scoring actor context');
   }
@@ -36,7 +36,7 @@ export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId
   }
   const role = membership.role;
   if (role === 'league_owner') return;
-  if (role !== 'scorer' || match.scorerId !== actorId) {
+  if (role !== 'scorer' || (match.scorerId !== actorId && match.backupScorerId !== actorId)) {
     throw new ForbiddenException('You are not authorized to score this match');
   }
 }

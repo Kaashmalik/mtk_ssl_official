@@ -71,6 +71,24 @@ describe('Transactional actor membership and assignment', () => {
     const { tx } = adapter();
     await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, scorerId })).rejects.toBeInstanceOf(ForbiddenException);
   });
+  it.each([null, 'other-actor'])('permits the current active backup with primary %s', async (scorerId) => {
+    const { tx } = adapter();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, scorerId, backupScorerId: ACTOR })).resolves.toBeUndefined();
+  });
+  it.each([null, undefined, 'other-actor'])('rejects a removed/foreign backup %s', async (backupScorerId) => {
+    const { tx } = adapter();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, scorerId: null, backupScorerId })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it.each(['suspended', 'pending'])('backup assignment cannot override membership status %s', async (status) => {
+    const { mock, tx } = adapter();
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'scorer', status });
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, scorerId: null, backupScorerId: ACTOR })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it.each(['fan', 'coach', 'team_manager', 'super_admin'])('backup assignment cannot override role %s', async (role) => {
+    const { mock, tx } = adapter();
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role, status: 'active' });
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, scorerId: null, backupScorerId: ACTOR })).rejects.toBeInstanceOf(ForbiddenException);
+  });
   it.each(['fan', 'player', 'coach', 'team_manager', null])('junction role %s overrides legacy league-owner privilege', async (role) => {
     const { mock, tx } = adapter();
     mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role, status: 'active' });

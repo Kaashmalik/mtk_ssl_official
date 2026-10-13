@@ -1101,6 +1101,52 @@ were rewritten.
   atomic handover; delegated resource-scoped grants (the other half of IAM-07);
   privileged MFA/step-up (IAM-08).
 
+### 2026-10-13 — Batch 13: backup scoring enforcement and plan reconciliation
+
+#### Implemented
+
+- Reviewed Batches 7–12 source against their recorded scopes; the SaaS roadmap
+  now identifies actual commit IDs, completed slices of broad IAM tasks and
+  explicit unfinished functionality. Whole-task counts remain **19 checked /
+  60 open / 79 IDs**; open tasks are often partial, not untouched.
+- Repaired Batch 10's web/canonical authorization mismatch: the canonical guard
+  now accepts active exact-league scorers assigned to either primary or backup,
+  while still rejecting missing/suspended members, non-scorer roles and revoked
+  assignments. The guard is used after match locking by all five mutations.
+- Included backup assignments in dashboard selection/summaries/scoring links.
+  Removed the global-platform-role scoring shortcut, consistent with operational
+  league authorization. Member removal refuses primary **or backup** assignment.
+- Added 27 regressions across dashboard/member tests and canonical service/access
+  tests, including backup record/replay/undo and replay rejection after revocation.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 36 files, **682 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **184 tests** |
+| Combined | **994 passing tests** (+27 over the current Batch 12 baseline) |
+
+No build, lint, standalone type-check, schema change, migration execution or
+deployment performed. Tests exercise source/mocked boundaries and do not certify
+real PostgreSQL locking/rollback, live provider journeys or writer fencing.
+
+#### Release blockers and next batch
+
+- Prior five local migrations remain unapplied; the repository deploy gate stays
+  default-off. Release matching database artifacts/web/scoring service together
+  only after staging proof and migration/grant reconciliation.
+- Assignment currently checks eligibility before writing without a common
+  transactional lock protocol; the removal guard cannot eliminate assignment
+  races by itself. Prioritize this before calling assignment/removal reliable.
+- Ownership acceptance needs fresh global-account/recipient-privilege/session
+  checks and final conditional expiry; cancellation needs under-lock account and
+  membership reauthorization. These are recorded follow-up findings, not fixed
+  by Batch 13 or guaranteed by prior mocked tests.
+- Broader IAM-03/04/05/06/07 tasks retain scoped-grant/lifecycle/provider/concurrency
+  gates; source slices alone must not be labeled full task completion.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

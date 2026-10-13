@@ -286,3 +286,16 @@ re-point, the recipient promotion and the outgoing-owner demotion all occur in
 one transaction, so the migration must be applied together with (or before) the
 web code that depends on it.
 
+## Batch 13 integration review (13 October 2026)
+
+No new migration was created or applied. The canonical scoring writer now
+recognizes `matches.backup_scorer_id` after current membership/account/league
+authorization; web dashboard shortcuts and member-removal checks also include
+the backup slot. The Batch 10 schema migration is a prerequisite for the release.
+
+All five previous local migrations remain unapplied here. Do not enable the VPS
+release gate based only on passing mocked tests. Deploy matching database
+workspace artifacts, web and scoring service together after actual schema/grant
+and staging verification. Assignment/removal races, real writer handover/fencing
+and ownership-resolution authorization findings recorded in the Batch 13 roadmap
+entry remain open; no remote state was inspected or certified by this batch.

@@ -4,7 +4,7 @@ import { randomUUID } from "crypto"
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db, users, tenants, userTenantRoles, teams, matches, auditLogs } from "@mtk/database"
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getDashboardContext } from "@/lib/dashboard-context"
 import { hasPermission } from "@/lib/rbac"
@@ -175,7 +175,7 @@ export async function removeMember(input: MemberRemoval) {
     ) })
     if (managedTeam) throw new Error("This member manages a team in this league. Unassign the team first.")
     const assignedMatch = await tx.query.matches.findFirst({ where: and(
-      eq(matches.tenantId, context.tenantId), eq(matches.scorerId, target.userId),
+      eq(matches.tenantId, context.tenantId), or(eq(matches.scorerId, target.userId), eq(matches.backupScorerId, target.userId)),
     ) })
     if (assignedMatch) throw new Error("This member is an assigned scorer. Unassign their matches first.")
     const [deleted] = await tx.delete(userTenantRoles)

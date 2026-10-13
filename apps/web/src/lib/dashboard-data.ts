@@ -1,5 +1,5 @@
 import { db, teams, players, tournaments, matches, matchInnings, leagueRegistrations } from "@mtk/database"
-import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import type { DashboardContext } from "./dashboard-context"
 import { hasPermission } from "./rbac"
 import { toDashboardMatch, type DashboardStats } from "./dashboard-model"
@@ -29,9 +29,9 @@ export async function getDashboardMatches(context: DashboardContext, group: Dash
   if (group === "assigned" && role !== "scorer") return []
   const status = group === "recent" ? eq(matches.status, "completed") : group === "upcoming"
     ? eq(matches.status, "scheduled") : group === "live" ? inArray(matches.status, ["live", "innings_break", "toss"])
-      : and(eq(matches.scorerId, actorId), inArray(matches.status, ["scheduled", "toss", "live", "innings_break"]))
+      : and(or(eq(matches.scorerId, actorId), eq(matches.backupScorerId, actorId)), inArray(matches.status, ["scheduled", "toss", "live", "innings_break"]))
   const rows = await db.select({ id: matches.id, tenantId: matches.tenantId, teamAId: matches.teamAId,
-    teamBId: matches.teamBId, status: matches.status, scorerId: matches.scorerId,
+    teamBId: matches.teamBId, status: matches.status, scorerId: matches.scorerId, backupScorerId: matches.backupScorerId,
     scheduledDate: matches.scheduledDate, updatedAt: matches.updatedAt, result: matches.result })
     .from(matches).where(and(eq(matches.tenantId, tenantId), status))
     .orderBy(group === "recent" ? desc(matches.updatedAt) : group === "upcoming" ? sql`${matches.scheduledDate} ASC NULLS LAST`
