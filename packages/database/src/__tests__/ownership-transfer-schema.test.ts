@@ -3,7 +3,7 @@ import { getTableConfig } from "drizzle-orm/pg-core"
 import { readFileSync } from "node:fs"
 import { ownershipTransfers } from "../schema/ownership-transfers"
 
-const migration = readFileSync(new URL("../../../../supabase/migrations/20261014090000_ownership_transfers.sql", import.meta.url), "utf8")
+const migration = readFileSync(new URL("../../../../supabase/migrations/20261013180000_ownership_transfers.sql", import.meta.url), "utf8")
 
 describe("Two-party ownership transfer schema and migration contracts (not real SQL execution)", () => {
   it("models a pending request with an explicit lifecycle and version", () => {
