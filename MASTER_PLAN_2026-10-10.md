@@ -1585,6 +1585,50 @@ refunds, slot release, waitlist and archival remain separate workflows. No full
 ISO-04 or authenticated browser claim; whole-task roadmap counts remain
 **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 22: safe tournament archival replaces hard delete
+
+#### Implemented
+
+- Synced clean `main` with remote `bcbdca6`. Scope is the destructive tournament
+  delete path; tournament list/detail lifecycle writers, venue/admin writers and
+  public visibility stay open.
+- `deleteTournament` no longer hard-deletes. It resolves the exact active league,
+  checks `tournament:delete` and runs a locked, audited archival that cancels the
+  tournament and closes registration. The FK cascades that deleted registrations
+  and nulled match/team links no longer run.
+- Archival locks account → league → membership → tournament under READ COMMITTED,
+  re-checks current owner/active membership/active league after the wait, takes no
+  match locks, refuses `live` and already-archived tournaments, and writes one
+  minimal audit (`TOURNAMENT_ARCHIVE`). The detail page labels the control as
+  archival rather than permanent deletion.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 48 files, **1,870 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,191 passing tests** (+8 over Batch 21) |
+
+Added ten tournament-archival cases: owner-lock ordering, audit content/ordering,
+no hard-delete, live/already-archived refusal, foreign/missing tournament,
+non-owner and locked-actor/league rechecks, audit-failure propagation and id
+validation. Call-order/SQL-construction mocks and in-memory callbacks are not
+PostgreSQL locking, cascade or RLS proof.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five prior migrations remain
+unapplied and the release gate stays default-off. Cancelling is not a purge,
+refund, slot-release or restore workflow and does not unlink teams or
+registrations. Real lock ordering, cascade absence, audit rollback, grants,
+indexes, RLS and two-session races remain release acceptance work.
+
+Next source work: the remaining tournament lifecycle/list/detail writers and
+venue/admin writers, then follow/publication and notification paths. No full
+ISO-04 or authenticated browser claim; whole-task roadmap counts remain
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

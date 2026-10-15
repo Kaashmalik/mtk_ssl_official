@@ -245,6 +245,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                   redirectHref="/dashboard/tournaments"
                   entityLabel="tournament"
                   entityName={tournament.name}
+                  operation="archive"
                 />
               </div>
             </div>

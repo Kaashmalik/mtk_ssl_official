@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { PgDialect } from "drizzle-orm/pg-core"
 import { getTenantContext } from "@mtk/database"
 import {
   closeRegistration,
@@ -23,6 +24,18 @@ const mocks = vi.hoisted(() => ({
   find: vi.fn(),
   list: vi.fn(),
   revalidate: vi.fn(),
+  transaction: vi.fn(),
+  execute: vi.fn(),
+  txUser: vi.fn(),
+  txLeague: vi.fn(),
+  txMember: vi.fn(),
+  txTournament: vi.fn(),
+  txUpdate: vi.fn(),
+  txSet: vi.fn(),
+  txWhere: vi.fn(),
+  txReturning: vi.fn(),
+  txInsert: vi.fn(),
+  txValues: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
@@ -35,7 +48,7 @@ vi.mock("@mtk/database", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@mtk/database")>()
   return {
     ...actual,
-    db: { query: { users: { findFirst: mocks.findUser } } },
+    db: { query: { users: { findFirst: mocks.findUser } }, transaction: mocks.transaction },
     tournamentRepo: {
       insert: mocks.insert,
       updateById: mocks.update,
@@ -52,6 +65,7 @@ const USER_ID = "7daa50a3-aace-4bd7-aa82-e5a0c248c656"
 const ACTIVE_TENANT = "a53bc9d0-e872-440b-b0af-db4a8918a25f"
 const TOURNAMENT_ID = "61d9249f-8389-4627-9cac-7e2ff4c48174"
 const input = { name: "Premium League", format: "league" as const }
+const dialect = new PgDialect()
 
 describe("Tournament action tenant and author boundaries", () => {
   beforeEach(() => {
@@ -72,6 +86,22 @@ describe("Tournament action tenant and author boundaries", () => {
     mocks.remove.mockResolvedValue(true)
     mocks.find.mockResolvedValue({ id: TOURNAMENT_ID })
     mocks.list.mockResolvedValue({ data: [], total: 0 })
+    mocks.execute.mockResolvedValue([])
+    mocks.txUser.mockResolvedValue({ id: USER_ID, clerkId: CLERK_ID, isActive: true })
+    mocks.txLeague.mockResolvedValue({ id: ACTIVE_TENANT, isActive: true })
+    mocks.txMember.mockResolvedValue({ userId: USER_ID, tenantId: ACTIVE_TENANT, role: "league_owner", status: "active" })
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status: "draft" })
+    mocks.txUpdate.mockReturnValue({ set: mocks.txSet })
+    mocks.txSet.mockReturnValue({ where: mocks.txWhere })
+    mocks.txWhere.mockReturnValue({ returning: mocks.txReturning })
+    mocks.txReturning.mockResolvedValue([{ id: TOURNAMENT_ID, status: "cancelled" }])
+    mocks.txInsert.mockReturnValue({ values: mocks.txValues })
+    mocks.txValues.mockResolvedValue(undefined)
+    mocks.transaction.mockImplementation(async (fn: any) => fn({
+      execute: mocks.execute, update: mocks.txUpdate, insert: mocks.txInsert,
+      query: { users: { findFirst: mocks.txUser }, tenants: { findFirst: mocks.txLeague },
+        userTenantRoles: { findFirst: mocks.txMember }, tournaments: { findFirst: mocks.txTournament } },
+    }))
   })
 
   it("creates in the authorized active tenant using the database author UUID", async () => {
@@ -124,7 +154,6 @@ describe("Tournament action tenant and author boundaries", () => {
 
   const operations = [
     { name: "update", permission: "tournament:update", repo: mocks.updateLocked, run: () => updateTournament(TOURNAMENT_ID, { name: "Updated League" }) },
-    { name: "delete", permission: "tournament:delete", repo: mocks.remove, run: () => deleteTournament(TOURNAMENT_ID) },
     { name: "read", permission: "tournament:read", repo: mocks.find, run: () => getTournament(TOURNAMENT_ID) },
     { name: "list", permission: "tournament:read", repo: mocks.list, run: () => getTournaments({ page: 1, pageSize: 20, sortBy: "createdAt", sortOrder: "desc" }) },
     { name: "open registration", permission: "tournament:manage_registrations", repo: mocks.update, run: () => openRegistration(TOURNAMENT_ID) },
@@ -225,5 +254,113 @@ describe("Tournament action tenant and author boundaries", () => {
     mocks.authorize.mockRejectedValue(new Error("Forbidden"))
     await expect(getTournamentCopyOptions()).rejects.toThrow("Forbidden")
     expect(mocks.list).not.toHaveBeenCalled()
+  })
+})
+
+describe("Tournament archival replaces destructive delete", () => {
+  const actor = { id: USER_ID, clerkId: CLERK_ID, isActive: true }
+  const member = { userId: USER_ID, tenantId: ACTIVE_TENANT, role: "league_owner", status: "active" }
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.auth.mockResolvedValue({ userId: CLERK_ID })
+    mocks.resolveTenant.mockResolvedValue(ACTIVE_TENANT)
+    mocks.authorize.mockResolvedValue(undefined)
+    mocks.execute.mockResolvedValue([])
+    mocks.txUser.mockResolvedValue(actor)
+    mocks.txLeague.mockResolvedValue({ id: ACTIVE_TENANT, isActive: true })
+    mocks.txMember.mockResolvedValue(member)
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status: "draft" })
+    mocks.txUpdate.mockReturnValue({ set: mocks.txSet })
+    mocks.txSet.mockReturnValue({ where: mocks.txWhere })
+    mocks.txWhere.mockReturnValue({ returning: mocks.txReturning })
+    mocks.txReturning.mockResolvedValue([{ id: TOURNAMENT_ID, status: "cancelled" }])
+    mocks.txInsert.mockReturnValue({ values: mocks.txValues })
+    mocks.txValues.mockResolvedValue(undefined)
+    mocks.transaction.mockImplementation(async (fn: any) => fn({
+      execute: mocks.execute, update: mocks.txUpdate, insert: mocks.txInsert,
+      query: { users: { findFirst: mocks.txUser }, tenants: { findFirst: mocks.txLeague },
+        userTenantRoles: { findFirst: mocks.txMember }, tournaments: { findFirst: mocks.txTournament } },
+    }))
+  })
+
+  it("cancels under the owner lock, audits, and never hard-deletes", async () => {
+    await expect(deleteTournament(TOURNAMENT_ID)).resolves.toEqual({ success: true })
+    expect(mocks.authorize).toHaveBeenCalledWith("tournament:delete", ACTIVE_TENANT)
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
+    expect(mocks.remove).not.toHaveBeenCalled()
+    expect(mocks.txSet).toHaveBeenCalledWith(expect.objectContaining({ status: "cancelled", registrationOpen: false }))
+    const locks = mocks.execute.mock.calls.map(([query]) => dialect.sqlToQuery(query))
+    expect(locks.slice(0, 3).map(query => query.params)).toEqual([[USER_ID], [ACTIVE_TENANT], [USER_ID, ACTIVE_TENANT]])
+    expect(locks[0].sql).toContain("FOR UPDATE")
+    expect(locks[3].sql).toContain('FROM "tournaments"')
+    expect(locks[3].sql).toContain("FOR UPDATE")
+    expect(locks.every(query => !query.sql.includes('FROM "matches"'))).toBe(true)
+    expect(mocks.txValues.mock.calls[0][0]).toMatchObject({ tenantId: ACTIVE_TENANT, actorId: USER_ID,
+      actorRole: "league_owner", method: "TOURNAMENT_ARCHIVE" })
+    expect(mocks.revalidate).toHaveBeenCalled()
+    expect(mocks.revalidate.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.txValues.mock.invocationCallOrder[0])
+  })
+
+  it("rejects anonymous callers before resolving a tenant", async () => {
+    mocks.auth.mockResolvedValue({ userId: null })
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("Unauthorized")
+    expect(mocks.resolveTenant).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when there is no active tenant", async () => {
+    mocks.resolveTenant.mockResolvedValue(null)
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("Tenant not found")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("denies a non-owner membership under the lock", async () => {
+    mocks.txMember.mockResolvedValue({ ...member, role: "team_manager" })
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("access changed")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+    expect(mocks.txInsert).not.toHaveBeenCalled()
+  })
+
+  it("rechecks the locked account and league", async () => {
+    mocks.txUser.mockReset().mockResolvedValueOnce(actor).mockResolvedValueOnce(null)
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("access changed")
+    mocks.txUser.mockResolvedValue(actor)
+    mocks.txLeague.mockResolvedValue({ id: ACTIVE_TENANT, isActive: false })
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("access changed")
+  })
+
+  it("refuses a live tournament and an already-archived tournament", async () => {
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status: "live" })
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("live matches")
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status: "cancelled" })
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("already archived")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+  })
+
+  it("rejects a foreign or missing tournament before any write", async () => {
+    mocks.txTournament.mockResolvedValue(null)
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("Tournament not found")
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: "foreign", status: "draft" })
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("Tournament not found")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+  })
+
+  it("propagates an audit failure without revalidating", async () => {
+    mocks.txValues.mockRejectedValue(new Error("Audit unavailable"))
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("Audit unavailable")
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+
+  it("rejects a permission denial before opening a transaction", async () => {
+    mocks.authorize.mockRejectedValue(new Error("Forbidden"))
+    await expect(deleteTournament(TOURNAMENT_ID)).rejects.toThrow("Forbidden")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(mocks.remove).not.toHaveBeenCalled()
+  })
+
+  it("validates the id shape before any transaction", async () => {
+    await expect(deleteTournament("not-a-uuid")).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })

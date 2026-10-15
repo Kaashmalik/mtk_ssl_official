@@ -9,6 +9,7 @@ import { z } from "zod"
 import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-server"
 import type { Permission } from "@/lib/rbac"
 import { calendarDateSchema, decimalMoney, moneySchema, readTournamentConfiguration, resizeSeedOrder, tournamentConfigurationSchema } from "@mtk/database/lib/tournament-configuration"
+import { archiveTournament } from "@/lib/tournament-lifecycle"
 
 const createTournamentSchema = z.object({
   name: z.string().min(2).max(200),
@@ -157,13 +158,14 @@ export async function updateTournament(id: string, input: UpdateTournamentInput)
  */
 export async function deleteTournament(id: string) {
   const { userId, tenantId } = await requireTournamentContext("tournament:delete")
+  z.string().uuid().parse(id)
 
-  const deleted = await withTenantContext({ userId, tenantId }, () =>
-    tournamentRepo.deleteById(id)
-  )
+  // Compatibility action name. Never hard-delete: cancelling the tournament
+  // preserves its registrations, team links and match links.
+  await archiveTournament(userId, tenantId, id)
 
-  if (!deleted) throw new Error("Tournament not found")
   revalidatePath("/dashboard/tournaments")
+  revalidatePath(`/dashboard/tournaments/${id}`)
   revalidatePath("/dashboard")
   return { success: true }
 }

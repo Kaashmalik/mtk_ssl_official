@@ -439,8 +439,9 @@ Before rollout, verify real RLS/grants, scoped query plans/indexes, picker/list
 performance and concurrent read/write behavior. Inspect actual constraints and
 RLS; mocked SQL/projection/call-order tests do not prove these properties. Team
 analytics, player ID-card list/detail and follow/publication paths were scoped in
-the Batch 20 follow-up; tournament/venue/admin writers and delete paths remain the
-next source slice.
+the Batch 20 follow-up; the tournament delete path is now an archival (Batch 22);
+remaining tournament lifecycle/list/detail writers, venue/admin writers and
+follow/publication paths remain the next source slice.
 
 Registration review writers (create/approve/reject/withdraw/confirm-fee) now use
 exact-active-league READ COMMITTED transactions with current account/Clerk/
@@ -456,7 +457,17 @@ release, waitlist, restore or quota release is added. Review reads use explicit
 projections (no payment reference or registered-by/approved-by UUIDs) and bounded
 pages.
 
+Tournament removal is now a locked, audited cancel/archival instead of a hard
+delete. `deleteTournament` resolves the exact active league, checks
+`tournament:delete` and, under READ COMMITTED, locks account -> league ->
+membership -> tournament, re-checks the owner after the wait, refuses `live` and
+already-archived tournaments and sets status `cancelled` with registration closed.
+It never cascades: registrations, team links and match links are preserved (the
+prior FK `DELETE`/`SET NULL` behaviour no longer runs) and it takes no match locks.
+This is not a purge, refund, slot-release or restore workflow.
+
 This is still not a database-wide constraint. Verify real two-session
-create/approve capacity races, tournament/registration deadlock ordering, fee/
-status CAS and audit-failure rollback, plus actual grants, query plans and RLS;
-mocked call-order tests do not prove these properties.
+create/approve capacity races, tournament/registration and tournament/archive
+lock ordering, cascade absence, fee/status CAS and audit-failure rollback, plus
+actual grants, query plans and RLS; mocked call-order tests do not prove these
+properties.
