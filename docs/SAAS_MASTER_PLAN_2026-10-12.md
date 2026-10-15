@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 18: retired unused direct scorecard writer, hierarchy-scoped scorecard reads and audited team/player archival instead of hard deletion; no remote database writes or deployment |
+| Current implementation | Batch 19: exact-active-league transactional team/player create/update and roster commands, locked current authority, shared capacity checks and serialized create quotas; read/dashboard isolation remains open; no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -85,11 +85,12 @@ This is a professional living plan covering known requirements and failure cases
 | 15 | `1ee28e4` | Transactional scorer assignment/removal serialization, current authorization and atomic before/after audit; generic match edits cannot bypass assignment; no new migration or remote database writes |
 | 16 | `7220a97` | Exact-active-league toss/start with locked assignment checks; end-match proxies canonical completion/award validation/audit; member commands reject remapped sessions; no new migration or remote database writes |
 | 17 | `ccd0199` | Locked match metadata/cancel/stream commands; exact-active-league reads/dashboard/pickers, merged references and bounded dates; safe fixture cancellation instead of hard deletion; no new migration or remote database writes |
-| 18 | Current batch; see Git history | Disabled unused manual scorecard write action, scoped match/innings read hierarchy and locked owner-only team/player archival with unfinished-fixture guards; no new migration or remote database writes |
+| 18 | `9f9a508` | Disabled unused manual scorecard write action, scoped match/innings read hierarchy and locked owner-only team/player archival with unfinished-fixture guards; no new migration or remote database writes |
+| 19 | Current batch; see Git history | Locked active-league team/player create/update and roster commands, current owner/assigned-manager authority, shared capacity/eligibility checks and serialized create quotas; reads/dashboard and real-DB acceptance remain open |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
-Batch 18 verification and rollout boundaries are recorded in section 17. The
+Batch 19 verification and rollout boundaries are recorded in section 17. The
 615-test result remains historical evidence, not the current suite count.
 
 ### 3.2 Existing foundations are not complete new features
@@ -549,6 +550,9 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | Duplicate registration/payment callback | One business effect; payment and application states remain independent | 3/8 |
 | Waitlist slot opens, deadline passes, squad amended | Explicit policy and consistent audited promotion/eligibility | 3/4 |
 | Player transfers/suspends after earlier participation | Historical team/statistics stable; new eligibility correctly evaluated | 3/5/6 |
+| Concurrent team/player creates or roster join/capacity reduction | Current league plan/count after quota lock; same sorted-team lock protocol before capacity checks; test real two-session limits and rollback | 1/3/9 |
+| Player team/status changes while toss/start/scoring waits | Current post-lock eligibility or explicit rejection; never lock matches after accounts/resources; prove real interleavings without deadlocks | 1/3/5/9 |
+| Archived roster rows or retry after unlink/join | Preserve identities/history, no implicit restore or quota release; reauthorize idempotent roster retries; review archived-team unlink/restore separately | 1/3/9 |
 | Same player joins two teams in one competition | Enforce configured participation policy at approval and match readiness | 3/4 |
 | Fixture overlaps, timezone/DST change, unavailable venue | Detect conflicts; preserve UTC instants and send scoped reschedule notices | 4 |
 | Rule/fee/prize changed after publication | Version/approval policy; no undisclosed retrospective effects | 4/6/8 |
@@ -576,7 +580,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 
 ## 16. Phased Implementation Checklists: Built and Remaining
 
-**Batches 1–18 have recorded source implementations. No full phase below is production-complete.** Top-level checkboxes represent their complete stated scope, not just one implemented slice. The source-completion register below identifies completed portions of open tasks; unfinished functionality and release acceptance remain explicitly separate. IDs and historical evidence are preserved.
+**Batches 1–19 have recorded source implementations. No full phase below is production-complete.** Top-level checkboxes represent their complete stated scope, not just one implemented slice. The source-completion register below identifies completed portions of open tasks; unfinished functionality and release acceptance remain explicitly separate. IDs and historical evidence are preserved.
 
 ### Source-completion register — reviewed from Batch 7 (updated 15 October 2026)
 
@@ -630,6 +634,7 @@ Exit: repeatable baseline and a verified staging environment; old unit-test coun
   Batch 16 adds under-lock session mapping checks for member role/status/removal commands and fixes exact-active-league toss/start/completion authority. Match metadata CRUD/read/stream actions and dashboard pages still require separate active-league and transactional authorization review; this whole task stays open.
   Batch 17 implements that match-actions/dashboard slice, including exact-league form pickers and full-scorecard detail reads, under-lock owner reauthorization, merged fixture validation and cancellation without hard deletes. Other scorecard actions, team/player/tournament/venue writers and their cascading-delete/lock interactions, remaining pages/admin APIs, public visibility, private sockets and exports are not certified; ISO-04 remains open.
   Batch 18 disables the unused `saveScorecard` alternate writer, scopes both scorecard read actions through the current league/match/innings hierarchy, and replaces only `deleteTeam`/`deletePlayer` with audited archival. Other team/player CRUD, roster writes and dashboard read paths still use legacy ownership/context assumptions and need review; no database-wide cascade prevention or full ISO-04 completion is claimed.
+  Batch 19 replaces the six team/player create/update/add/remove writers with exact-active-league transactions, locked owner/assigned-manager checks, atomic minimal audits, shared roster capacity/eligibility checks and serialized create quotas. Team/player read actions, dashboard destinations and other/admin writers still require review. This does not implement immutable playing XI, scoped multiple grants, stale-operator CAS, database-wide quota constraints or full ISO-04 acceptance.
 - [ ] **ISO-05:** Add authoritative league membership status/expiry and resource-scoped grant design; separate platform roles.
   Local active/suspended status and version are implemented; expiry, scoped multiple grants and platform-grant redesign remain open.
 - [ ] **ISO-06:** Reconcile and safely retire legacy `users.role` / `tenantIds` authorization fallback.
@@ -780,7 +785,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 18:** the unused manual scorecard writer is disabled, both scorecard read actions enforce the parent hierarchy, and team/player deletion actions now archive with current owner checks. Full `ISO-04` and `IAM-03/04/05/06/07` remain incomplete. `BASE-04/05/06` schema/grant reconciliation and real PostgreSQL two-session acceptance remain the release priority. Next source work: team/player create/update/read/roster commands and their dashboard destinations, using exact active league, strict payloads, current locked authority, eligibility/resource checks and serialized quotas. Archive is not a quota-release or restore workflow. Audit remaining tournament/venue/admin delete paths and their lock/cascade interactions separately. Historical import/correction needs an explicit canonical audited design, not re-enabling direct inserts. Public visibility/private sockets/exports, scoped grants/step-up, pending assignments, stale-operator CAS, durable email retries, lifecycle fan-out and writer fencing stay open.
+**Updated after Batch 19:** team/player create/update and add/remove roster writers now use exact-active-league transactions, locked authority, shared capacity/eligibility checks and serialized create quotas. Full `ISO-04` and `IAM-03/04/05/06/07` remain incomplete. `BASE-04/05/06` schema/grant reconciliation and real PostgreSQL two-session acceptance remain the release priority. Next source work: team/player read actions and dashboard list/detail/edit/new/roster destinations, removing owned/default-league assumptions, explicitly scoping joins/pickers and aligning controls with current authority. Review private contact-field exposure and archived-row behavior rather than treating a scoped writer as proof of safe reads. Archive is not a quota-release or restore workflow. Audit remaining tournament/venue/admin writers/delete paths and their lock/cascade interactions separately. Historical import/correction needs an explicit canonical audited design, not re-enabling direct inserts. Public visibility/private sockets/exports, scoped grants/step-up, pending assignments, stale-operator CAS, durable email retries, lifecycle fan-out and writer fencing stay open.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -1345,6 +1350,78 @@ roster mutations and dashboard reads still need active-league/authorization
 repair; direct admin/other cascade paths are not closed by these two wrappers.
 No alternate scoring writer may be revived without an explicit canonical
 import/correction design. Whole-task counts stay **19 checked / 60 open / 79 IDs**.
+
+### 2026-10-15 — Batch 19: transactional team/player and roster writers
+
+Synced clean `main` with remote `9f9a508`. This is a bounded `ISO-04` writer
+slice; team/player read actions and dashboard destinations are not repaired here.
+
+**Implemented:**
+
+- `createTeam`, `updateTeam`, `createPlayer`, `updatePlayer`, `addPlayerToTeam`
+  and `removePlayerFromTeam` resolve the exact active league and explicitly check
+  its permission. No mutation uses the owned/default-league fallback or legacy
+  repository writes. Strict payloads reject identity/ownership/activity overposts
+  and forged create tenant IDs. UUIDs, bounded fields, real nonfuture DOBs,
+  credential-free HTTPS image URLs and bounded team slugs are validated. Omitted
+  patch fields stay omitted; nullable clears are preserved. Non-Latin display
+  names receive a nonempty fallback slug, not a renamed display value.
+- Every command uses READ COMMITTED account -> league -> exact membership ->
+  sorted teams -> player locking as applicable. After lock waits, recheck the
+  current Clerk mapping, active account/league, exact active membership, team
+  binding and resource scope. Owners may create/edit; active `team_manager`
+  members may edit/manage a team only when its current manager/captain binding
+  matches their account. A global/platform role or stale binding is not authority.
+  Managers cannot create players/teams, edit player profiles or change tournament
+  linkage. New/changed non-null tournament references require the same league
+  and draft/registration/live state; only owners may change that linkage.
+- Both creates serialize current plan/count checks on the exclusive league row,
+  then insert and audit in that transaction. Authors use the persisted account
+  UUID. All league records, including archived ones, consume existing quotas;
+  structured plan-limit errors propagate unchanged. This covers participating
+  helpers, not database-wide limits or unaudited admin/import writers.
+- Create/edit team links and explicit roster adds share the same locked capacity
+  checks. A squad-size reduction cannot go below the full linked roster count,
+  including inactive/archived rows. No direct cross-team move: explicitly unlink
+  first. Player team discovery is rechecked after team -> player locks; drift
+  rejects without chasing a new reverse-order team lock. New joins require an
+  active player and team; generic edits do not restore archived players. Locked
+  inactive teams reject edits/roster commands; archived-team unlink/restore needs
+  a separately reviewed workflow.
+- Roster team/status eligibility changes use a current non-locking match read
+  after resource locks and refuse when a team has toss/live/innings-break play.
+  Scheduled fixtures are not blocked by this roster rule (archival still blocks
+  them). Contact-only edits may proceed during play. No match locks are acquired
+  after accounts/resources, preserving canonical scoring/lifecycle ordering.
+  This is current team-level eligibility, not immutable XI/substitution policy.
+- Changed rows and bounded before/after audit share one transaction. Audit carries
+  linkage/status/capacity and changed field names, not profile/contact/DOB values.
+  Already-authorized same-team add/already-unassigned remove retries do not
+  rewrite/audit; audit failures cannot report cache success. Dashboard layout
+  invalidation follows successful commits. No identities or score/history rows
+  are deleted, and no competing scoring writer was introduced.
+
+**Fresh verification:** web **1,490 / 44 files**, database **128 / 8 files**,
+scoring service **193 / 8 suites**; **1,811 passing tests**, +234 over Batch 18.
+The new **234-case** suite covers current authority, exact league/resource
+predicates, delegated bindings, strict payloads, quotas/count ordering, capacity
+checks, post-lock team/eligibility drift, playing-state guards, nullable versus
+omitted fields, retries and asynchronous audit-failure propagation. The older
+player action fixture now exercises the transactional path rather than the
+retired repository insert. Current Drizzle transaction/count docs were consulted.
+These mocked SQL/call-order tests are not PostgreSQL concurrency/rollback proof.
+
+**Boundaries / next:** no build, lint, standalone type-check, schema change,
+migration application, remote database operation or deployment ran. All five
+prior migrations remain unapplied; the release gate stays default-off. Prove
+two-session create quotas, join/capacity races, player-team drift, roster versus
+toss/start/scoring/archive/revocation and audit rollback on real PostgreSQL;
+inspect grants, constraints, query plans and RLS. Team/player read actions and
+dashboard ownership/context/privacy controls remain the next source slice.
+Other/admin writers and tournament/venue cascades remain unaudited. No complete
+registration/transfer/archival lifecycle, immutable XI, CAS, fencing, browser
+acceptance or full `ISO-04` certification is claimed. Whole-task roadmap counts
+stay **19 checked / 60 open / 79 IDs**.
 
 ### Decisions still requiring explicit review
 

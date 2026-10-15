@@ -2,40 +2,21 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { playerRepo, teamRepo, withTenantContext } from "@mtk/database"
-import { players, type Player, type Team } from "@mtk/database"
+import { playerRepo, withTenantContext, players, type Player } from "@mtk/database"
 import { eq, and, ilike, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
-import { checkPlanLimit, type PlanKey } from "@mtk/database"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { archiveRosterResource } from "@/lib/archive-roster-resource"
+import { playerInput, playerPatch } from "@/lib/roster-input"
+import { createRosterPlayer, mutateRosterPlayer } from "@/lib/roster-management"
 
 
 // ─── Validation Schemas ───────────────────────────────────────
 
-const createPlayerSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters").max(100),
-  tenantId: z.string().uuid("Invalid tenant ID").optional(),
-  teamId: z.string().uuid("Invalid team ID").optional().nullable(),
-  role: z.enum(["batsman", "bowler", "all_rounder", "wicket_keeper", "wicket_keeper_batsman"]).optional().nullable(),
-  battingStyle: z.enum(["right", "left"]).optional().nullable(),
-  bowlingStyle: z.enum(["right_arm_fast", "right_arm_medium", "right_arm_spin", "left_arm_fast", "left_arm_medium", "left_arm_spin"]).optional().nullable(),
-  jerseyNumber: z.number().int().min(0).max(999).optional().nullable(),
-  photoUrl: z.string().url("Invalid photo URL").optional().nullable(),
-  dateOfBirth: z.string().optional().nullable(),
-  phone: z.string().max(20).optional().nullable(),
-  email: z.string().email("Invalid email").optional().nullable(),
-  nationality: z.string().max(100).optional().nullable(),
-  city: z.string().max(100).optional().nullable(),
-  heightCm: z.number().int().min(100).max(250).optional().nullable(),
-  weightKg: z.number().int().min(30).max(200).optional().nullable(),
-  biography: z.string().max(2000).optional().nullable(),
-  status: z.enum(["active", "injured", "retired", "suspended", "inactive"]).optional(),
-})
-
-const updatePlayerSchema = createPlayerSchema.partial().omit({ tenantId: true })
+const createPlayerSchema = playerInput
+const updatePlayerSchema = playerPatch
 
 const playerFiltersSchema = z.object({
   tenantId: z.string().uuid().optional(),
@@ -59,73 +40,33 @@ async function requireTenant() {
   return tenant
 }
 
+async function mutationTenant(permission: "player:create" | "player:update") {
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer(permission, tenantId)
+  return tenantId
+}
+
 // ─── Actions ──────────────────────────────────────────────────
 
 export const createPlayer = withAuth("player:create", async (input: CreatePlayerInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const validated = createPlayerSchema.parse({
-    ...input,
-    tenantId: input.tenantId ?? tenant.id,
-  })
-  const tenantId = validated.tenantId ?? tenant.id
-  if (tenantId !== tenant.id) throw new Error("Invalid tenant")
-
-  const player = await withTenantContext({ userId, tenantId }, async () => {
-    if (validated.teamId) {
-      const team = await teamRepo.findById<Team>(validated.teamId)
-      if (!team) throw new Error("Team not found")
-    }
-
-    // Structured PlanLimitError so the UI can offer an upgrade prompt.
-    // `playerRepo.count()` is RLS-scoped to this tenant.
-    checkPlanLimit({
-      plan: tenant.plan as PlanKey,
-      feature: "maxPlayers",
-      current: await playerRepo.count(),
-    })
-
-    return playerRepo.insertOne<Player>({
-      ...validated,
-      createdBy: userId,
-    })
-  })
-
-  revalidatePath("/dashboard/players")
-  revalidatePath("/dashboard")
+  const data = createPlayerSchema.parse(input)
+  const tenantId = await mutationTenant("player:create")
+  const player = await createRosterPlayer(userId, tenantId, data)
+  revalidatePath("/dashboard", "layout")
   return { success: true, player }
 })
 
 export const updatePlayer = withAuth("player:update", async (id: string, input: UpdatePlayerInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  const validated = updatePlayerSchema.parse(input)
-
-  // Remove undefined values to avoid overwriting with null
-  const cleanData = Object.fromEntries(
-    Object.entries(validated).filter(([, v]) => v !== undefined)
-  )
-
-  const player = await withTenantContext({ userId, tenantId }, async () => {
-    if (cleanData.teamId) {
-      const team = await teamRepo.findById<Team>(cleanData.teamId as string)
-      if (!team) throw new Error("Team not found")
-    }
-
-    return playerRepo.updateById<Player>(id, {
-      ...cleanData,
-      updatedAt: new Date(),
-    })
-  })
-
-  if (!player) throw new Error("Player not found")
-
-  revalidatePath("/dashboard/players")
-  revalidatePath(`/dashboard/players/${id}`)
+  z.string().uuid().parse(id)
+  const data = updatePlayerSchema.parse(input)
+  const tenantId = await mutationTenant("player:update")
+  const player = await mutateRosterPlayer(userId, tenantId, { kind: "PLAYER_UPDATE", id, data })
+  revalidatePath("/dashboard", "layout")
   return { success: true, player }
 })
 

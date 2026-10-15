@@ -3,7 +3,7 @@ import { createTenant, getMyTenant } from "../app/actions/tenants";
 import { createPlayer } from "../app/actions/players";
 import { createMatch } from "../app/actions/matches";
 import { auth } from "@clerk/nextjs/server";
-import { db, playerRepo } from "@mtk/database";
+import { db, playerRepo, players, auditLogs } from "@mtk/database";
 
 const MOCK_TENANT_ID = "da7c0ab5-0810-482a-a92c-886a87754b2d";
 const MOCK_TEAM_A_ID = "da7c0ab5-0810-482a-a92c-886a87754b2e";
@@ -150,20 +150,23 @@ describe("Server Actions Unit Tests", () => {
 
   describe("Players Action - createPlayer", () => {
     it("should create a player successfully with valid permissions and tenant metadata", async () => {
-      // `plan` must be present: createPlayer reads `tenant.plan` to resolve plan
-      // limits before inserting.
-      const mockTenant = { id: MOCK_TENANT_ID, name: "Test Tenant", plan: "enterprise" };
-
-      // getMyTenant resolves Clerk identity to the database UUID, then tenant.
-      vi.mocked((db as any).limit)
-        .mockReturnValueOnce([{ id: "mock-db-user-id", isActive: true }] as any)
-        .mockReturnValueOnce([{ tenant: mockTenant }] as any);
-
+      const actor = { id: "da7c0ab5-0810-482a-a92c-886a87754b20", clerkId: "mock-user-123", isActive: true };
+      const mockTenant = { id: MOCK_TENANT_ID, isActive: true, plan: "enterprise" };
       const mockNewPlayer = { id: "player-123", name: "John Doe", tenantId: MOCK_TENANT_ID };
-
-      // Assert on the repo directly rather than the shared `returning` chain —
-      // this test's insert goes through playerRepo, not db.insert().
-      vi.mocked(playerRepo.insertOne).mockResolvedValueOnce(mockNewPlayer as any);
+      // Player creation checks current locked authority, counts, insertion and
+      // audit inside one transaction; it no longer uses getMyTenant/repo writes.
+      const countWhere = vi.fn().mockResolvedValue([{ total: 0 }]);
+      vi.mocked(db.transaction).mockImplementationOnce(async (callback: any) => callback({
+        ...db, execute: vi.fn().mockResolvedValue([]),
+        select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: countWhere }) }),
+        query: {
+          users: { findFirst: vi.fn().mockResolvedValue(actor) },
+          tenants: { findFirst: vi.fn().mockResolvedValue(mockTenant) },
+          userTenantRoles: { findFirst: vi.fn().mockResolvedValue({ userId: actor.id,
+            tenantId: MOCK_TENANT_ID, role: "league_owner", status: "active" }) },
+        },
+      }));
+      vi.mocked((db as any).returning).mockReturnValueOnce([mockNewPlayer]);
 
       const response = await createPlayer({
         name: "John Doe",
@@ -174,6 +177,13 @@ describe("Server Actions Unit Tests", () => {
 
       expect(response.success).toBe(true);
       expect(response.player).toEqual(mockNewPlayer);
+      expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" });
+      expect(playerRepo.insertOne).not.toHaveBeenCalled();
+      expect(db.insert).toHaveBeenNthCalledWith(1, players);
+      expect(db.insert).toHaveBeenNthCalledWith(2, auditLogs);
+      expect((db as any).values).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        tenantId: MOCK_TENANT_ID, createdBy: actor.id,
+      }));
     });
   });
 

@@ -1403,6 +1403,67 @@ writers. Archive adds no restore, purge, quota release, CAS or writer fencing.
 Historical import/correction requires an explicit canonical design. Whole-task
 roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 19: locked team/player and roster mutations
+
+#### Implemented
+
+- Synced clean `main` with remote `9f9a508` before edits. Scope is the six team/
+  player create/update/add/remove writers; read actions/dashboard pages stay open.
+- Resolve and explicitly authorize the exact active league; strict schemas reject
+  forged create scope and identity/ownership/activity fields. Validate IDs, bounded
+  names/slugs, DOB and HTTPS image URLs. Patch omission is not a nullable clear or
+  a reset to a creation default. Keep non-Latin names with a nonempty slug fallback.
+- READ COMMITTED transactions lock account -> league -> membership -> sorted
+  teams -> player as applicable and recheck current account/Clerk mapping, league,
+  exact active membership and assigned team authority. Owner-only create/player
+  edits; team edits/roster commands also allow active team-manager members with
+  a matching current manager/captain binding. Managers cannot change tournament
+  linkage. New/changed tournament references are locked and league/state checked.
+- Creates serialize current plan/count checks on an exclusive league lock; use
+  persisted account UUID authors and retain structured quota errors. Archived
+  rows still consume quota. These locks protect participating writers only.
+- Player create/edit and roster adds share team-locked capacity/eligibility checks;
+  squad-size reductions cannot undercut the linked roster (including archived
+  players). Explicit unlink is required before moving teams. Recheck player team
+  after locking and reject drift rather than chasing reverse-order resource locks.
+  Generic edits cannot restore archived players; inactive teams reject commands.
+- Block team/status eligibility changes during toss/live/innings-break fixtures
+  using non-locking current reads after resource locks. Scheduled fixtures do not
+  block roster amendments; contact-only edits can proceed in play. No match locks
+  after accounts/resources. This is not immutable XI/substitution enforcement.
+- Atomic minimal audits include linkage/status/capacity and changed field names,
+  not private profile/contact/DOB values. Reauthorized no-op add/remove retries
+  do not rewrite/audit. Cache invalidation follows a successful transaction; async
+  audit failures propagate. Identity and historical score rows are not deleted.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 44 files, **1,490 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **1,811 passing tests** (+234 over Batch 18) |
+
+Added 234 roster-management regressions and updated the legacy player-create
+fixture to exercise transactional authorization/count/insert/audit. SQL/call-order
+and state-change mocks test the source protocol, not PostgreSQL lock behavior,
+deadlock freedom, database constraints or real audit rollback. Current Drizzle
+transaction/count docs were consulted. Nest negative-fixture logs are expected.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five prior migrations remain
+unapplied and the release gate stays default-off. Real two-session create quotas,
+capacity/join races, roster versus toss/start/scoring/archive/revocation, grants,
+RLS and audit-failure rollback remain release acceptance work. Archived-team
+unlink/restore, immutable XI, stale-operator CAS and database-wide limits are not
+implemented. Other/admin writers and tournament/venue cascade paths need review.
+
+Next source work: exact-active-league team/player read actions and dashboard
+list/detail/new/edit/roster destinations, scoped joins/pickers and current
+authority/privacy-aware controls. No full ISO-04 or authenticated browser claim;
+whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

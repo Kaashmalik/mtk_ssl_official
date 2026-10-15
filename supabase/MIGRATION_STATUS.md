@@ -397,3 +397,31 @@ and two-session archive/create/scoring/revocation acceptance before rollout.
 Mocked call-order/SQL/render tests do not establish those database properties.
 Archive is not a restore/purge/quota-release workflow; existing lists/quotas can
 retain archived records. No broader team/player CRUD certification is claimed.
+
+## Batch 19 — team/player and roster writer protocol (15 October 2026)
+
+No new migration, remote SQL operation or deployment. `createTeam`, `updateTeam`,
+`createPlayer`, `updatePlayer` and add/remove roster actions now use exact-active-
+league READ COMMITTED transactions with current account/Clerk/membership and
+owner/assigned-manager checks. Lock account -> league -> membership -> sorted
+teams -> player. Both creates take an exclusive league lock before reading the
+current plan/count and inserting; other operations share the league lock. Team
+locks serialize participating roster joins and squad-capacity changes; player
+team drift is rejected after locking. All records, including archived rows,
+still consume quota/capacity. This is not a database-wide constraint.
+
+Current toss/live/innings-break reads after resource locks block roster team/
+status eligibility amendments during play; they do not take match locks after
+accounts/resources. Scheduled fixtures remain amendable under this roster rule.
+Audit/row writes are atomic; audits omit contact/profile/DOB values. Identity,
+membership and historical score rows are not deleted. This adds no immutable XI,
+restore, quota release, direct transfer, CAS or alternate scoring writer.
+
+All five prior migrations remain unapplied; release gate stays default-off.
+Before rollout, verify real two-session create limits, join/capacity races, player
+team drift, roster versus toss/start/scoring/archive/revocation, deadlocks and
+audit-failure rollback. Inspect actual grants, query plans, constraints and RLS;
+mocked SQL/count/call-order tests do not prove these properties. Other/admin
+writers and tournament/venue cascade paths still require protocol review.
+Team/player read actions and dashboard context/privacy behavior are the next
+source slice, not certified by these writer changes.

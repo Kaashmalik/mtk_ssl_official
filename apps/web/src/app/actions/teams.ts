@@ -2,37 +2,20 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, teamRepo, playerRepo, tournamentRepo, withTenantContext, withoutTenantContext, checkPlanLimit } from "@mtk/database"
-import { type PlanKey, type Team, type Player, type Tournament } from "@mtk/database"
-import { teams, players, users } from "@mtk/database"
+import { teamRepo, playerRepo, withTenantContext, type Team, type Player, teams, players } from "@mtk/database"
 import { eq, and, ilike, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { archiveRosterResource } from "@/lib/archive-roster-resource"
+import { teamInput, teamPatch } from "@/lib/roster-input"
+import { createRosterTeam, updateRosterTeam, mutateRosterPlayer } from "@/lib/roster-management"
 
 // ─── Validation Schemas ───────────────────────────────────────
 
-const createTeamSchema = z.object({
-  name: z.string().min(2, "Team name must be at least 2 characters").max(100),
-  tenantId: z.string().uuid("Invalid tenant ID").optional(),
-  shortName: z.string().min(2).max(10).optional().nullable(),
-  slug: z.string().min(2).max(50).optional(),
-  description: z.string().max(2000).optional().nullable(),
-  city: z.string().max(100).optional().nullable(),
-  logoUrl: z.string().url().optional().nullable(),
-  bannerUrl: z.string().url().optional().nullable(),
-  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Invalid hex color").optional().nullable(),
-  secondaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Invalid hex color").optional().nullable(),
-  jerseyColor: z.string().max(50).optional().nullable(),
-  homeGround: z.string().max(200).optional().nullable(),
-  foundedYear: z.number().int().min(1800).max(2100).optional().nullable(),
-  maxSquadSize: z.number().int().min(5).max(30).default(15).optional(),
-  tournamentId: z.string().uuid().optional().nullable(),
-})
-
-const updateTeamSchema = createTeamSchema.partial().omit({ tenantId: true })
+const createTeamSchema = teamInput
+const updateTeamSchema = teamPatch
 
 const teamFiltersSchema = z.object({
   tenantId: z.string().uuid().optional(),
@@ -55,22 +38,11 @@ async function requireTenant() {
   return tenant
 }
 
-async function requireAssignedTeamAccess(team: Team, tenantOwnerId: string, clerkUserId: string) {
-  const [actor] = await withoutTenantContext(() => db.select({ id: users.id }).from(users)
-    .where(eq(users.clerkId, clerkUserId)).limit(1))
-  if (!actor) throw new Error("Your account is still provisioning. Please try again.")
-  if (actor.id !== tenantOwnerId && team.managerId !== actor.id && team.captainId !== actor.id) {
-    throw new Error("You can only manage the team assigned to you")
-  }
-}
-
-// ─── Slug Generator ───────────────────────────────────────────
-
-function generateSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
+async function mutationTenant(permission: "team:create" | "team:update" | "team:manage_roster") {
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer(permission, tenantId)
+  return tenantId
 }
 
 // ─── Actions ──────────────────────────────────────────────────
@@ -78,78 +50,21 @@ function generateSlug(name: string): string {
 export const createTeam = withAuth("team:create", async (input: CreateTeamInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  const validated = createTeamSchema.parse({
-    ...input,
-    tenantId: input.tenantId ?? tenant.id,
-  })
-  const slug = validated.slug || generateSlug(validated.name)
-
-  const team = await withTenantContext({ userId, tenantId }, async () => {
-    // Plan-based team quota check. Throws a structured PlanLimitError that the
-    // UI can detect (`isPlanLimitError`) to show an upgrade prompt instead of a
-    // generic failure. `teamRepo.count()` is RLS-scoped to this tenant.
-    checkPlanLimit({
-      plan: tenant.plan as PlanKey,
-      feature: "maxTeams",
-      current: await teamRepo.count(),
-    })
-
-    if (validated.tournamentId) {
-      const tournament = await tournamentRepo.findById<Tournament>(validated.tournamentId)
-      if (!tournament) throw new Error("Tournament not found")
-    }
-
-    return teamRepo.insertOne<Team>({
-      ...validated,
-      slug,
-      createdBy: userId,
-    })
-  })
-
-  revalidatePath("/dashboard/teams")
-  revalidatePath("/dashboard")
+  const data = createTeamSchema.parse(input)
+  const tenantId = await mutationTenant("team:create")
+  const team = await createRosterTeam(userId, tenantId, data)
+  revalidatePath("/dashboard", "layout")
   return { success: true, team }
 })
 
 export const updateTeam = withAuth("team:update", async (id: string, input: UpdateTeamInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  const validated = updateTeamSchema.parse(input)
-  const cleanData = Object.fromEntries(
-    Object.entries(validated).filter(([, v]) => v !== undefined)
-  )
-
-  // Regenerate slug if name changes
-  if (cleanData.name && !cleanData.slug) {
-    cleanData.slug = generateSlug(cleanData.name as string)
-  }
-
-  const team = await withTenantContext({ userId, tenantId }, async () => {
-    const existingTeam = await teamRepo.findById<Team>(id)
-    if (!existingTeam) throw new Error("Team not found")
-    await requireAssignedTeamAccess(existingTeam, tenant.ownerId, userId)
-
-    if (cleanData.tournamentId) {
-      const tournament = await tournamentRepo.findById<Tournament>(cleanData.tournamentId as string)
-      if (!tournament) throw new Error("Tournament not found")
-    }
-
-    return teamRepo.updateById<Team>(id, {
-      ...cleanData,
-      updatedAt: new Date(),
-    })
-  })
-
-  if (!team) throw new Error("Team not found")
-
-  revalidatePath("/dashboard/teams")
-  revalidatePath(`/dashboard/teams/${id}`)
+  z.string().uuid().parse(id)
+  const data = updateTeamSchema.parse(input)
+  const tenantId = await mutationTenant("team:update")
+  const team = await updateRosterTeam(userId, tenantId, id, data)
+  revalidatePath("/dashboard", "layout")
   return { success: true, team }
 })
 
@@ -243,63 +158,22 @@ export const getTeams = withAuth("team:read", async (filters: TeamFilters) => {
 export const addPlayerToTeam = withAuth("team:manage_roster", async (teamId: string, playerId: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  const player = await withTenantContext({ userId, tenantId }, async () => {
-    const team = await teamRepo.findById<Team>(teamId)
-    if (!team) throw new Error("Team not found")
-    await requireAssignedTeamAccess(team, tenant.ownerId, userId)
-
-    const rosterMember = await playerRepo.findById<Player>(playerId)
-    if (!rosterMember) throw new Error("Player not found")
-    if (rosterMember.teamId && rosterMember.teamId !== teamId) {
-      throw new Error("Remove the player from their current team before moving them")
-    }
-    if (!rosterMember.teamId && team.maxSquadSize) {
-      const rosterSize = await playerRepo.count({ where: eq(players.teamId, teamId) })
-      if (rosterSize >= team.maxSquadSize) {
-        throw new Error(`This team has reached its ${team.maxSquadSize}-player squad limit`)
-      }
-    }
-
-    return playerRepo.updateById<Player>(playerId, {
-      teamId,
-      updatedAt: new Date(),
-    })
-  })
-
-  if (!player) throw new Error("Player not found")
-
-  revalidatePath(`/dashboard/teams/${teamId}`)
-  revalidatePath(`/dashboard/players/${playerId}`)
+  z.string().uuid().parse(teamId)
+  z.string().uuid().parse(playerId)
+  const tenantId = await mutationTenant("team:manage_roster")
+  const player = await mutateRosterPlayer(userId, tenantId, { kind: "ROSTER_ADD", id: playerId, teamId })
+  revalidatePath("/dashboard", "layout")
   return { success: true, player }
 })
 
 export const removePlayerFromTeam = withAuth("team:manage_roster", async (teamId: string, playerId: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  await withTenantContext({ userId, tenantId }, async () => {
-    const team = await teamRepo.findById<Team>(teamId)
-    if (!team) throw new Error("Team not found")
-    await requireAssignedTeamAccess(team, tenant.ownerId, userId)
-
-    const pl = await playerRepo.findById<Player>(playerId)
-    if (!pl || pl.teamId !== teamId) {
-      throw new Error("Player not found in this team")
-    }
-
-    return playerRepo.updateById<Player>(playerId, {
-      teamId: null,
-      updatedAt: new Date(),
-    })
-  })
-
-  revalidatePath(`/dashboard/teams/${teamId}`)
-  revalidatePath(`/dashboard/players/${playerId}`)
+  z.string().uuid().parse(teamId)
+  z.string().uuid().parse(playerId)
+  const tenantId = await mutationTenant("team:manage_roster")
+  await mutateRosterPlayer(userId, tenantId, { kind: "ROSTER_REMOVE", id: playerId, teamId })
+  revalidatePath("/dashboard", "layout")
   return { success: true }
 })
 
