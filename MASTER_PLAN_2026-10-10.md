@@ -1191,6 +1191,51 @@ assignment auditing are next; real PostgreSQL/browser ownership acceptance,
 privileged step-up and scoped grants remain open. Whole-task roadmap counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 15: scorer assignment/removal concurrency and audit
+
+#### Implemented
+
+- Synced clean local `main` with remote `3bf64bd` before edits.
+- `assignScorer` now uses a READ COMMITTED transaction and the canonical writer's
+  lock order: exact-tenant match -> sorted actor/candidate accounts -> league ->
+  sorted exact-league memberships. Recheck current Clerk mapping, active account/
+  league, owner authority and candidate scorer membership after locks.
+- Shared account locks serialize membership removal versus new assignments.
+  Removal explicitly uses READ COMMITTED and reads assignments after waiting,
+  without match locks that would invert the canonical writer's order.
+- Opposite slots are checked on the locked match. Clears allow cleanup without
+  requiring the old scorer to remain active. Unchanged commands reauthorize but
+  do not rewrite/audit. Changed slots write an atomic `MATCH_SCORER_ASSIGN`
+  before/after audit; caches revalidate only after transaction success.
+- Generic `updateMatch` strictly parses allowlisted metadata so crafted scorer,
+  backup, tenant, identity and status fields cannot bypass the command. The
+  existing edit-form payload remains compatible, without defaulting omissions.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 37 files, **782 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **184 tests** |
+| Combined | **1,094 passing tests** (+48 over Batch 14) |
+
+Scorer-assignment coverage is 51 tests, with six additional deterministic
+transaction-double interleavings and one removal lock/read regression. These
+check both race orders for both slots, duplicate opposite-slot assignment and
+staged audit failure; the model does not establish actual PostgreSQL snapshots,
+lock compatibility, rollback, constraints, RLS or deadlock freedom. Drizzle's
+current PostgreSQL transaction configuration documentation was consulted.
+
+No build, lint, standalone type-check, new migration, remote database operation
+or deployment ran. Prior five migrations remain unapplied; release gate remains
+default-off. Real two-session assignment/removal/scoring/ownership validation and
+schema/grant reconciliation are the immediate acceptance priority. Next source
+work: remaining match CRUD/lifecycle and member-command identity guards (ISO-04).
+Team-manager assignment/removal races, stale-operator CAS, pending assignments,
+fencing, scoped grants and live fan-out remain open. Broad roadmap counts remain
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -169,7 +169,10 @@ export async function removeMember(input: MemberRemoval) {
       throw new Error("Owner, platform and self access cannot be removed here")
     }
     if (target.version !== parsed.expectedVersion) throw new Error("Member changed. Reload before saving.")
-    // Refuse while operational assignments still reference this member.
+    // Keep these reads non-locking: assignment/scoring lock match -> users,
+    // whereas removal already holds users. Locking a match here would invert
+    // that order. READ COMMITTED ensures we see assignments committed by the
+    // transaction whose user locks we waited for (see assignScorer).
     const managedTeam = await tx.query.teams.findFirst({ where: and(
       eq(teams.tenantId, context.tenantId), eq(teams.managerId, target.userId),
     ) })
@@ -189,7 +192,7 @@ export async function removeMember(input: MemberRemoval) {
       payload: { membershipId: target.id, targetUserId: target.userId,
         before: { role: target.role, status: target.status, version: target.version }, after: null },
     })
-  })
+  }, { isolationLevel: "read committed" })
   revalidatePath("/dashboard", "layout")
   return { success: true as const, membershipId: parsed.membershipId }
 }

@@ -204,6 +204,16 @@ describe("League membership removal", () => {
     expect(dialect.sqlToQuery(mocks.team.mock.calls[0][0].where).params).toEqual([A, ALI])
     expect(dialect.sqlToQuery(mocks.match.mock.calls[0][0].where).params).toEqual([A, ALI, ALI])
   })
+  it("checks committed assignments only after ordered user locks without taking match locks", async () => {
+    await removeMember(removeKey)
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
+    expect(mocks.match.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[2])
+    expect(mocks.del.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.match.mock.invocationCallOrder[0])
+    const locks = mocks.execute.mock.calls.map(([query]) => dialect.sqlToQuery(query))
+    expect(locks[0].params).toEqual([OWNER, ALI].sort())
+    expect(locks.every(lock => !lock.sql.includes('"matches"'))).toBe(true)
+    // A match lock here would invert assignment/scoring's match -> user order.
+  })
   it("refuses removal while the member manages a team in this league", async () => {
     mocks.team.mockResolvedValue({ id: B, tenantId: A, managerId: ALI })
     await expect(removeMember(removeKey)).rejects.toThrow("manages a team")

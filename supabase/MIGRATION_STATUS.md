@@ -314,3 +314,21 @@ The Batch 13 ownership source findings have fixes, but real PostgreSQL lock,
 clock, rollback, accept/cancel races and RLS acceptance remain unverified. All
 five previous migrations remain unapplied here; the deployment gate stays
 default-off. Assignment/removal concurrency and writer fencing remain open.
+
+## Batch 15 assignment/removal serialization (15 October 2026)
+
+No new migration, remote database inspection/write or deployment occurred.
+Scorer assignment now locks exact-tenant match -> sorted accounts -> league ->
+sorted memberships, rechecks current authority and writes its before/after audit
+in one READ COMMITTED transaction. Membership removal uses READ COMMITTED and
+non-locking assignment checks after its shared account locks. Do not add a match
+lock after those accounts: that would invert assignment/scoring's lock order.
+Generic match metadata edits reject scorer-slot fields so they cannot bypass
+this application protocol. Team-manager assignment races are outside this fix.
+
+Source and scheduling-double regressions close the recorded source gap, not
+the real PostgreSQL acceptance gate. Repeat both two-session assignment/removal
+orders for both slots, opposite-slot conflicts, account/membership revocation,
+scoring/unassignment and audit rollback on a reconciled local/staging schema.
+All five prior migrations remain unapplied; the deployment gate stays default-
+off. Pending-member assignments, stale-operator CAS and writer fencing remain open.

@@ -1,10 +1,11 @@
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
+import { randomUUID } from "crypto"
 import { revalidatePath } from "next/cache"
 import { db, withTenantContext } from "@mtk/database"
-import { matches, teams, tournaments, users } from "@mtk/database"
-import { eq, and, desc, asc, count, or } from "drizzle-orm"
+import { matches, teams, tournaments, users, tenants, userTenantRoles, auditLogs } from "@mtk/database"
+import { eq, and, desc, asc, count, or, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
@@ -95,14 +96,14 @@ export const updateMatch = withAuth("match:update", async (id: string, input: Pa
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
+  // TypeScript types do not constrain server-action payloads. Do not let generic
+  // metadata edits bypass the locked scorer-assignment command (or change IDs).
+  const validated = createMatchSchema.omit({ tenantId: true }).partial().strict().parse(input)
   const cleanData = Object.fromEntries(
-    Object.entries(input).filter(([, v]) => v !== undefined)
+    Object.entries(validated).filter(([, v]) => v !== undefined)
   ) as Omit<Partial<CreateMatchInput>, "scheduledDate"> & {
     scheduledDate?: Date | null;
   };
-  if (cleanData.tenantId) {
-    delete cleanData.tenantId;
-  }
 
   return withTenantContext({ userId, tenantId: tenant.id }, async () => {
     if (cleanData.teamAId || cleanData.teamBId) {
@@ -271,32 +272,68 @@ export const assignScorer = withAuth("match:update", async (matchId: string, slo
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   await requirePermissionServer("match:update", tenantId)
-  return withTenantContext({ userId, tenantId }, async () => {
-    const [existing] = await db.select({ id: matches.id, scorerId: matches.scorerId, backupScorerId: matches.backupScorerId })
-      .from(matches)
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
-      .limit(1)
-    if (!existing) throw new Error("Match not found")
+  const match = await withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    // Match -> ordered users -> league -> ordered memberships. This matches the
+    // canonical writer. Member removal never locks matches: its plain reads run
+    // AFTER these same user locks, so assignment/removal cannot orphan a slot.
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const existing = await tx.query.matches.findFirst({ where: key })
+    if (!existing || existing.id !== matchId || existing.tenantId !== tenantId) throw new Error("Match not found")
+    const initialActor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!initialActor) throw new Error("Forbidden: assignment account not found")
+    const ids = [...new Set([initialActor.id, ...(scorerId ? [scorerId] : [])])].sort()
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${inArray(users.id, ids)} ORDER BY ${users.id} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR SHARE`)
+    await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
+      WHERE ${and(eq(userTenantRoles.tenantId, tenantId), inArray(userTenantRoles.userId, ids))}
+      ORDER BY ${userTenantRoles.id} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.id, initialActor.id) })
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, initialActor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!actor || actor.id !== initialActor.id || actor.clerkId !== userId || actor.isActive !== true
+      || !league || league.id !== tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || actorMember.status !== "active" || actorMember.role !== "league_owner") {
+      throw new Error("Forbidden: your scorer-assignment access changed")
+    }
     if (scorerId) {
-      const [scorer] = await db.select({ id: users.id }).from(users)
-        .where(and(eq(users.id, scorerId), scorerMembership(tenantId)))
-        .limit(1)
-      if (!scorer) throw new Error("Selected user is not a scorer in this tenant")
+      const account = await tx.query.users.findFirst({ where: eq(users.id, scorerId) })
+      const member = await tx.query.userTenantRoles.findFirst({ where: and(
+        eq(userTenantRoles.userId, scorerId), eq(userTenantRoles.tenantId, tenantId),
+      ) })
+      if (!account || account.id !== scorerId || account.isActive !== true
+        || !member || member.userId !== scorerId || member.tenantId !== tenantId
+        || member.status !== "active" || member.role !== "scorer") {
+        throw new Error("Selected user is not an active scorer in this tenant")
+      }
     }
     // A single person cannot occupy both the primary and backup slot.
     const otherSlot = targetSlot === "primary" ? existing.backupScorerId : existing.scorerId
     if (scorerId && otherSlot === scorerId) throw new Error("Primary and backup scorer must be different people")
+    if ((targetSlot === "primary" ? existing.scorerId : existing.backupScorerId) === scorerId) return existing
     const patch = targetSlot === "primary"
       ? { scorerId, updatedAt: new Date() }
       : { backupScorerId: scorerId, updatedAt: new Date() }
-    const [match] = await db.update(matches)
+    const [updated] = await tx.update(matches)
       .set(patch)
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
+      .where(key)
       .returning()
-    if (!match) throw new Error("Match not found")
-    revalidatePath(`/dashboard/matches/${matchId}`)
-    return { success: true, match }
-  })
+    if (!updated) throw new Error("Match changed. Reload before assigning.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id, actorRole: actorMember.role,
+      method: "MATCH_SCORER_ASSIGN", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId, slot: targetSlot,
+        before: { scorerId: existing.scorerId, backupScorerId: existing.backupScorerId },
+        after: { scorerId: updated.scorerId, backupScorerId: updated.backupScorerId } },
+    })
+    return updated
+  }, { isolationLevel: "read committed" }))
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/matches/${matchId}/scoring`)
+  return { success: true, match }
 })
 
 export const getScorersForTenant = withAuth("match:update", async () => {
