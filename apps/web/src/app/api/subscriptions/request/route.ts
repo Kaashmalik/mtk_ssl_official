@@ -1,23 +1,20 @@
 /**
- * Subscription Request API — creates a manual payment upgrade request.
- *
- * POST: Creates a subscription_requests row with payment proof + plan details.
- * GET:  Lists the tenant's subscription requests (for the billing page).
- *
- * The user must be authenticated and own a tenant. The request enters a
- * "pending" status and waits for super admin approval.
+ * Manual (bank/wallet) subscription upgrade requests, the non-Stripe sibling
+ * of api/billing/stripe/checkout. Owner-only; creation is serialized per
+ * league (lib/subscription-requests) so two concurrent submissions cannot
+ * both mint live requests; the loser 409s. Receipts must be the short-lived
+ * signed URLs produced by our private payment-proofs bucket, namespaced to
+ * the authenticated account — arbitrary external URLs are refused so
+ * reviewers never open attacker-chosen links.
  */
 
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, tenants, users, subscriptionRequests } from "@mtk/database";
-import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
 import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
-
-// Valid plans and payment methods are validated by createRequestSchema below.
+import { createManualSubscriptionRequest, findOwnedTenant, listSubscriptionRequests } from "@/lib/subscription-requests";
 
 const createRequestSchema = z.object({
   requestedPlan: z.enum(["starter", "pro", "enterprise"]),
@@ -33,44 +30,20 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Find the user's Clerk-linked DB record
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "User record not found. Please contact support." },
-        { status: 404 }
-      );
-    }
-
-    // Resolve the Clerk identity to the internal UUID used by tenants.owner_id.
-    const [tenantOwner] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
-
-    if (!tenantOwner) {
-      return NextResponse.json({ error: "User record not found" }, { status: 404 });
-    }
-
-    // Only the league owner may manage billing.
-    const [tenant] = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.ownerId, tenantOwner.id))
-      .limit(1);
-
-    if (!tenant) {
+    const owned = await findOwnedTenant(userId);
+    if (!owned.ok) {
+      if (owned.reason === "user_missing") {
+        return NextResponse.json(
+          { error: "User record not found. Please contact support." },
+          { status: 404 }
+        );
+      }
       return NextResponse.json(
         { error: "No league found. Create a league first." },
         { status: 404 }
       );
     }
+    const { userId: actorId, tenant } = owned;
 
     // Parse and validate request body
     const body = await req.json();
@@ -85,10 +58,6 @@ export async function POST(req: NextRequest) {
 
     const { requestedPlan, paymentMethod, paymentProofUrl, transactionReference } = validated.data;
 
-    // Receipts must be the short-lived signed URLs produced by our private
-    // payment-proofs bucket, namespaced to this authenticated Clerk account.
-    // This prevents arbitrary external URLs from being stored and opened by
-    // reviewers as part of the payment approval flow.
     const configuredStorageUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!configuredStorageUrl) {
       return NextResponse.json({ error: "Receipt storage is not configured" }, { status: 503 });
@@ -110,53 +79,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Receipt must be uploaded through SSL's private receipt uploader" }, { status: 400 });
     }
 
-    // Check for existing pending request (prevent duplicates)
-    const [existingPending] = await db
-      .select()
-      .from(subscriptionRequests)
-      .where(
-        and(
-          eq(subscriptionRequests.tenantId, tenant.id),
-          eq(subscriptionRequests.status, "pending")
-        )
-      )
-      .limit(1);
+    // Amount comes from the authoritative plan price table.
+    const amount = PLAN_PRICES[requestedPlan];
+    if (amount === undefined) {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    }
 
-    if (existingPending) {
+    const created = await createManualSubscriptionRequest({
+      tenantId: tenant.id,
+      userId: actorId,
+      requestedPlan,
+      currentPlan: tenant.plan,
+      amount,
+      paymentMethod,
+      paymentProofUrl,
+      transactionReference,
+    });
+    if ("conflict" in created) {
       return NextResponse.json(
         { error: "You already have a pending upgrade request. Please wait for admin review." },
         { status: 409 }
       );
     }
 
-    // Determine the amount from the plan prices
-    const amount = PLAN_PRICES[requestedPlan];
-    if (amount === undefined) {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
-    }
-
-    // Calculate expiry: 7 days from now
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    // Create the subscription request
-    const [request] = await db
-      .insert(subscriptionRequests)
-      .values({
-        tenantId: tenant.id,
-        userId: user.id,
-        requestedPlan,
-        currentPlan: tenant.plan,
-        amount: String(amount),
-        paymentMethod,
-        paymentProofUrl,
-        transactionReference,
-        status: "pending",
-        expiresAt,
-      })
-      .returning();
-
-    return NextResponse.json({ success: true, request }, { status: 201 });
+    return NextResponse.json({ success: true, request: created.request }, { status: 201 });
   } catch (error) {
     console.error("[subscription-request] Error:", error);
     return NextResponse.json(
@@ -173,37 +119,18 @@ export async function GET() {
   }
 
   try {
-    const [tenantOwner] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
-
-    if (!tenantOwner) {
-      return NextResponse.json({ error: "User record not found" }, { status: 404 });
+    const owned = await findOwnedTenant(userId);
+    if (!owned.ok) {
+      return NextResponse.json(
+        { error: owned.reason === "user_missing" ? "User record not found" : "Tenant not found" },
+        { status: 404 }
+      );
     }
 
-    // Find the tenant the authenticated league owner is authorized to bill.
-    const [tenant] = await db
-      .select({ id: tenants.id, plan: tenants.plan })
-      .from(tenants)
-      .where(eq(tenants.ownerId, tenantOwner.id))
-      .limit(1);
-
-    if (!tenant) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
-    }
-
-    // Fetch subscription requests for this tenant (newest first)
-    const requests = await db
-      .select()
-      .from(subscriptionRequests)
-      .where(eq(subscriptionRequests.tenantId, tenant.id))
-      .orderBy(desc(subscriptionRequests.createdAt))
-      .limit(20);
+    const requests = await listSubscriptionRequests(owned.tenant.id, 20);
 
     return NextResponse.json({
-      tenant,
+      tenant: { id: owned.tenant.id, plan: owned.tenant.plan },
       requests,
     });
   } catch (error) {

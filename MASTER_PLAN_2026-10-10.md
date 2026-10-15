@@ -2788,6 +2788,54 @@ Svix-verified — needs regressions only), `payments/upload-proof`,
 `subscriptions/request`) or the roadmap register. Roadmap counts remain
 **19 checked / 60 open / 79 IDs**.
 
+### Batch 48 — manual billing + proofs + clerk sync: last direct-db routes (16 October 2026)
+
+The final three direct-db API routes, closing the API tier.
+`webhooks/clerk` was already correct (Svix-verified with fail-closed secret
+handling and conflict-aware upserts) and gains regression coverage only.
+
+**Fix — manual request duplicates.** `POST /api/subscriptions/request` (the
+bank/jazzcash/easypaisa sibling of the Stripe checkout) had the same
+read-then-insert race: two concurrent owner submissions could both pass the
+pending-check and mint two live `subscription_requests`. New
+`lib/subscription-requests.ts` creates the request in one transaction that
+locks the tenant row `FOR UPDATE` and re-checks pending under the lock
+(loser → 409), with the 7-day expiry computed inside the transaction. It also
+dedupes the route's redundant double `users` lookup into
+`findOwnedTenant` (discriminating user-missing vs league-missing so the
+distinct 404 messages survive, e.g. "Create a league first."). The receipt
+allow-list (origin + `/storage/v1/object/sign/payment-proofs/receipts/<user>/`
++ required token) is kept byte-for-byte. `GET` stays bounded (20, newest first).
+
+**Proof uploads.** `lib/payment-proof.ts` extracts the pure primitives —
+magic-byte sniffing (JPEG/PNG/GIF/WebP), hostile-filename sanitization and the
+uploader-namespaced storage path — for direct regression; the route keeps the
+flow (declared-type allow-list, 5 MB cap, sniff-is-authority check, private
+bucket, 7-day signed URL, 503 fail-closed without service credentials).
+
+New regressions: `subscription-requests.test.ts` (6) — owned-tenant resolution
+(distinct missing-reasons), locked creation values/expiry, conflict without
+insert, bounded history; `payment-proof.test.ts` (5) — magic bytes
+(incl. RIFF-without-WEBP and truncated headers), sanitization alphabet
+(no separators survive), name cap, namespaced path; `clerk-webhook.test.ts`
+(8) — health alias, fail-closed 500 without a secret, 400 on missing
+Svix headers and bad signature without any write, `user.created` fan-account
+insert values (conflict set without login backfill), username fallback +
+`lastLoginAt` on update, `user.deleted` soft-delete predicate, ignored events.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **83** files, **2,233 tests** (+18) |
+| Focused: requests/proofs/clerk | PASS - 18 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: the API tier is fully covered. Remaining register items are
+product slices (fixtures/advancement, member UI, records) or environment-
+dependent acceptance. Roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
