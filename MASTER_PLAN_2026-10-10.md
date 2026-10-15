@@ -2306,6 +2306,55 @@ database operation or deployment ran. Next source work: `matches.ts`,
 the remaining admin APIs. Whole-task roadmap counts remain **19 checked / 60
 open / 79 IDs**.
 
+### Batch 37 — player-ids actions become pure delegates (15 October 2026)
+
+`app/actions/player-ids.ts` no longer touches `db` directly. All of its database
+work moved to the new tenant-scoped `lib/player-id-cards.ts`
+(`findExistingPlayerIdCard`, `requirePlayerInLeague`, `getLeagueSlug`,
+`issuePlayerIdCard`, `revokePlayerIdCard`, `setPlayerCardExpiry`,
+`listIssuedPlayerIdCards` + the `idPrefix` helper and the 200-row list bound).
+The action file now keeps only the `withAuth` gate, Clerk session check, zod
+validation, permission resolution, `revalidatePath` and response shaping, and
+every passed `playerId`/`tenantId` pair is re-predicated inside the lib, so a
+foreign-league player id can still never be issued, revoked, listed or
+expiry-amended through these actions. The advisory-lock allocation transaction
+(`pg_advisory_xact_lock` + `max(sequence)+1`) and its unique-violation
+lost-race recovery (`23505` → return the winning card) moved to the lib intact.
+
+`player-ids.ts` is removed from the `no-unscoped-queries` allowlist, so the
+guard now **enforces** repo-style access there (remaining allowlist:
+`tenants.ts`, `users.ts` bootstrap; `matches.ts`, `scoring.ts`, `scorecards.ts`,
+`users-invites.ts` pending migration).
+
+New regressions: `src/__tests__/player-id-cards.test.ts` (10 tests) asserts
+league-scoped select/update parameters (`params` never contain a foreign
+tenant), the list join's dual-tenant predicate, the 200-row cap, prefix
+formatting rules, no-allocation on an existing card, the locked-transaction
+allocation (`SSL-2026-0007` formatting, single transaction), and the
+`23505` lost-race recovery. Consumer pages (`dashboard/players/id-cards`,
+`components/players/player-id-actions`) keep the unchanged action signatures;
+`IssuedPlayerIdCard.issueDate` is typed `Date` (Drizzle `notNull`), catching a
+real `new Date(r.issueDate)` overload error in the page before it shipped.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **72** files, **2,121 tests** (+10) |
+| `--filter @mtk/database test` | PASS - 128 tests (unchanged) |
+| `--filter @ssl/scoring-service exec jest --runInBand --silent` | PASS - 193 tests (unchanged) |
+| Combined suites | **2,442 total** (+10 over Batch 36) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (id-cards clean after the `issueDate` fix) |
+| `git diff --check` | Clean |
+
+(Also this session, outside the batch cadence: the linked Supabase project was
+rebuilt from the canonical chain and reconciled — see
+`supabase/MIGRATION_STATUS.md`, commit `58f77cf`.)
+
+Next source work: `scorecards.ts` (7 direct-db sites), `users-invites.ts`
+(12), `matches.ts` (7), then the remaining admin APIs. Whole-task roadmap
+counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
