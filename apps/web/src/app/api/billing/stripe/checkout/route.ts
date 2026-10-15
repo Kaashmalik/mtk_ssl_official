@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { db, subscriptionRequests, users } from "@mtk/database";
-import { and, eq } from "drizzle-orm";
+import { db, users } from "@mtk/database";
+import { eq } from "drizzle-orm";
 import { getMyTenant } from "@/app/actions/tenants";
 import { PLAN_PRICES } from "@mtk/database/lib/plan-limits";
+import { attachIntentCheckoutUrl, createSubscriptionIntent, markIntentRejected } from "@/lib/stripe-billing";
 
 /**
  * POST /api/billing/stripe/checkout
  *
  * Creates a Stripe Checkout session for international tenants and records a
  * pending subscription_request so the normal admin approval flow still runs.
+ * Intent creation is serialized per league (lib/stripe-billing), so two
+ * concurrent owners cannot mint two live requests.
  *
  * Gated by STRIPE_SECRET_KEY: without it (the default for PK deployments) this
  * route returns 501 and the UI keeps offering manual bank/wallet transfers.
@@ -50,37 +53,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Only the league owner can manage billing" }, { status: 403 });
     }
 
-    const [pending] = await db.select({ id: subscriptionRequests.id }).from(subscriptionRequests)
-      .where(and(
-        eq(subscriptionRequests.tenantId, tenant.id),
-        eq(subscriptionRequests.status, "pending"),
-      )).limit(1);
-    if (pending) {
-      return NextResponse.json({ error: "A payment request is already awaiting review" }, { status: 409 });
-    }
-
     const monthly = PLAN_PRICES[plan];
     const months = period === "annual" ? 12 - ANNUAL_MONTHS_FREE : 1;
     const amount = monthly * months;
 
-    // Record the intent first so the approval queue has an auditable row.
-    // payment_proof_url is NOT NULL; it is updated with the real session URL
-    // below (the session needs the request id for metadata, hence two steps).
-    const [intent] = await db
-      .insert(subscriptionRequests)
-      .values({
-        tenantId: tenant.id,
-        userId: actor.id,
-        requestedPlan: plan,
-        currentPlan: tenant.plan,
-        amount: String(amount),
-        paymentMethod: "stripe",
-        paymentProofUrl: "stripe://pending",
-        transactionReference: `stripe_pending_${Date.now()}`,
-        status: "pending",
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      })
-      .returning();
+    // Record the intent first (under the per-tenant lock) so the approval
+    // queue has an auditable row. payment_proof_url is NOT NULL; it is
+    // updated with the real session URL below (the session needs the request
+    // id for metadata, hence two steps). The Stripe call itself stays outside
+    // the transaction — no provider/network calls under locks.
+    const created = await createSubscriptionIntent({
+      tenantId: tenant.id,
+      userId: actor.id,
+      requestedPlan: plan,
+      currentPlan: tenant.plan,
+      amount,
+    });
+    if ("conflict" in created) {
+      return NextResponse.json({ error: "A payment request is already awaiting review" }, { status: 409 });
+    }
+    const intent = created.intent;
 
     const baseUrl = (process.env.WEB_APP_URL || "").replace(/\/$/, "") || "http://localhost:3001";
 
@@ -92,7 +84,7 @@ export async function POST(request: Request) {
     form.set("line_items[0][quantity]", "1");
     form.set(
       "line_items[0][price_data][currency]",
-      // PKR is a zero-decimal currency for Stripe; amounts are whole rupees.
+      // PKR is a two-decimal currency: amounts go out in paisa (x100).
       "pkr",
     );
     form.set("line_items[0][price_data][unit_amount]", String(Math.round(amount * 100)));
@@ -117,10 +109,7 @@ export async function POST(request: Request) {
     const session = (await res.json()) as { url?: string; error?: { message?: string } };
     if (!res.ok || !session.url) {
       // Don't leave a dangling pending request behind.
-      await db
-        .update(subscriptionRequests)
-        .set({ status: "rejected", adminNotes: `Stripe error: ${session.error?.message ?? res.status}` })
-        .where(eq(subscriptionRequests.id, intent.id));
+      await markIntentRejected(intent.id, `Stripe error: ${session.error?.message ?? res.status}`);
       return NextResponse.json(
         { error: session.error?.message ?? "Failed to create checkout session" },
         { status: 502 },
@@ -128,10 +117,7 @@ export async function POST(request: Request) {
     }
 
     // Store the session URL as the payment reference for reconciliation.
-    await db
-      .update(subscriptionRequests)
-      .set({ paymentProofUrl: session.url.slice(0, 500) })
-      .where(eq(subscriptionRequests.id, intent.id));
+    await attachIntentCheckoutUrl(intent.id, session.url);
 
     return NextResponse.json({ url: session.url, requestId: intent.id });
   } catch (error) {

@@ -2596,6 +2596,58 @@ Next source work: continue the admin-API tier audit (`settings/branding` write,
 `cron/subscription-renewal` transaction, `billing/stripe/checkout` reads,
 `webhooks/stripe`). Roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 44 — Stripe billing: serialized intents, verified extraction, regressions (15 October 2026)
+
+Third pass over the admin-API tier: `POST /api/billing/stripe/checkout` and
+`POST /api/webhooks/stripe` (both previously untested, direct-db routes).
+Cross-checked against current Stripe guidance (context7): PKR is a
+**two-decimal** currency (paisa ×100 in checkout, ÷100 at settlement — the
+arithmetic was already consistent; the old "zero-decimal" comment was wrong and
+is fixed), and the manual `t=`/`v1` signature scheme already matched Stripe's
+documented HMAC-SHA256 + five-minute-tolerance verification.
+
+**Fix — checkout duplicate-creation race.** Two concurrent owner POSTs could
+both pass the pending-check before either inserted, minting two Stripe sessions
+and two live `subscription_requests`. New `lib/stripe-billing.ts` creates the
+intent inside one transaction that first takes a `FOR UPDATE` lock on the tenant
+row and re-checks for a pending request under the lock; the loser now gets 409.
+The Stripe HTTP call stays outside the transaction (no network under locks) and
+still rejects the intent (`markIntentRejected`) when session creation fails;
+`attachIntentCheckoutUrl` stores the session URL as the payment reference.
+
+**Webhook.** `verifyStripeSignature` is extracted as a pure function implementing
+Stripe's signed-payload scheme exactly (constant-time compare across every
+`v1`, ±300 s timestamp tolerance); `settleCheckoutCompleted` keeps the
+settlement transaction verbatim — `SELECT … FOR UPDATE`, pending-window expiry,
+amount verified against `PLAN_PRICES`, claim via `UPDATE … WHERE status =
+"pending" RETURNING` (idempotent against Stripe's duplicate deliveries), plan
+upgrade + subscription upsert + payment row; unknown plans / mismatched amounts
+throw so Stripe retries. `expireCheckoutSession` re-predicates the expired event
+on `status = "pending"`. Routes are thin wrappers; error mapping is unchanged
+(400 bad signature, 500 transient failure → retry, 501 unconfigured).
+
+New regressions: `stripe-billing.test.ts` (16) — signature accepts valid and
+multi-`v1` headers, rejects tampered body / wrong secret / stale timestamp /
+missing header; intent creation asserts the tenant lock + insert values and the
+conflict path with no insert; settlement pins ignore-on-missing-reference,
+`already_resolved` short-circuit without writes, pending-window expiry,
+amount-mismatch and invalid-price rejection, the full settle path (claim
+predicate, plan update, subscription insert/update, payment row), and
+pending-only expiry.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **76** files, **2,163 tests** (+16) |
+| Focused: stripe billing | PASS - 16 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (stripe files clean) |
+| `git diff --check` | Clean |
+
+Next source work: `settings/branding` unscoped write and
+`cron/subscription-renewal` unattended transaction close out the admin/API tier.
+Roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
