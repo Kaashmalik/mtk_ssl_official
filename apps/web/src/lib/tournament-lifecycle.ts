@@ -58,3 +58,39 @@ export async function archiveTournament(clerkId: string, tenantId: string, id: s
     return updated as Tournament
   }, { isolationLevel: "read committed" })
 }
+
+/**
+ * Opens or closes tournament registration as a locked, audited transition.
+ * Registration only opens for a draft/registration tournament; an archived
+ * (cancelled) tournament can never (re)open or close it. This is not a
+ * purge/refund/slot-release workflow.
+ */
+export async function setTournamentRegistration(clerkId: string, tenantId: string, id: string, open: boolean) {
+  z.string().uuid().parse(id)
+  return db.transaction(async (tx) => {
+    const context = await ownerContext(tx, clerkId, tenantId)
+    await tx.execute(sql`SELECT ${tournaments.id} FROM ${tournaments}
+      WHERE ${and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId))} FOR UPDATE`)
+    const tournament = await tx.query.tournaments.findFirst({ where: and(
+      eq(tournaments.id, id), eq(tournaments.tenantId, tenantId)) })
+    if (!tournament || tournament.id !== id || tournament.tenantId !== tenantId) throw new Error("Tournament not found")
+    if (tournament.status === "cancelled") throw new Error("Tournament is archived")
+    if (open && tournament.status !== "draft" && tournament.status !== "registration") {
+      throw new Error("Registration can only open for a draft or registration tournament")
+    }
+
+    const [updated] = await tx.update(tournaments)
+      .set(open ? { registrationOpen: true, status: "registration", updatedAt: new Date() }
+        : { registrationOpen: false, updatedAt: new Date() })
+      .where(and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId))).returning()
+    if (!updated) throw new Error("Tournament changed. Reload before updating registration.")
+    await tx.insert(auditLogs).values({ requestId: randomUUID(), tenantId, actorId: context.actor.id,
+      actorRole: context.member.role,
+      method: open ? "TOURNAMENT_REGISTRATION_OPEN" : "TOURNAMENT_REGISTRATION_CLOSE",
+      path: `/dashboard/tournaments/${id}`, statusCode: "200", payload: { resourceId: id,
+        before: { status: tournament.status, registrationOpen: tournament.registrationOpen },
+        after: { status: updated.status, registrationOpen: updated.registrationOpen },
+        changedFields: open ? ["registrationOpen", "status"] : ["registrationOpen"] } })
+    return updated as Tournament
+  }, { isolationLevel: "read committed" })
+}

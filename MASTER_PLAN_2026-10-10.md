@@ -1773,6 +1773,49 @@ venue/admin writers, then public/anonymous follow, publication and notification
 paths. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 26: locked tournament registration lifecycle
+
+#### Implemented
+
+- Synced clean `main` with remote `969a9ef`. Scope is the registration open/close
+  writers; the tournament create/update writers, venue/admin writers and
+  public/anonymous follow stay open.
+- New `setTournamentRegistration` in `lib/tournament-lifecycle.ts` moves open/close
+  off the repository `updateById` into a READ COMMITTED account → league → membership
+  → tournament lock with a post-wait owner recheck and an atomic minimal audit
+  (`TOURNAMENT_REGISTRATION_OPEN`/`..._CLOSE`). `openRegistration`/`closeRegistration`
+  are thin wrappers and validate the id shape before the transaction.
+- Guards: an archived tournament can neither open nor close registration;
+  registration only opens for a `draft`/`registration` tournament (refusing
+  `live`/`completed`); closing keeps the status and only clears `registrationOpen`.
+  A failing audit aborts the write. Not a purge/refund/slot-release workflow.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 53 files, **1,942 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,263 passing tests** (+7 over Batch 25) |
+
+The `tournament-actions.test.ts` lifecycle block adds cases for the locked open with
+audit/revalidate, locked close without a status change, archived refusal,
+live/completed refusal, non-owner denial, foreign/missing tournament, propagated
+audit failure, permission denial before the transaction and id-shape validation.
+Mocked call-order/SQL tests are not PostgreSQL lock, rollback or RLS proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. A standalone `tsc --noEmit` still reports only its pre-existing
+unrelated errors. Five prior migrations remain unapplied and the release gate stays
+default-off. Real two-session open/close ordering against archive and registration
+writes, audit rollback and RLS remain release acceptance work.
+
+Next source work: the remaining tournament create/update writers and venue/admin
+writers, then public/anonymous follow, publication and notification paths. No full
+ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19 checked
+/ 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

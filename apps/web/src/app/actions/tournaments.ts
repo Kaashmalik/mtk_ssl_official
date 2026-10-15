@@ -9,7 +9,7 @@ import { z } from "zod"
 import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-server"
 import type { Permission } from "@/lib/rbac"
 import { calendarDateSchema, decimalMoney, moneySchema, readTournamentConfiguration, resizeSeedOrder, tournamentConfigurationSchema } from "@mtk/database/lib/tournament-configuration"
-import { archiveTournament } from "@/lib/tournament-lifecycle"
+import { archiveTournament, setTournamentRegistration } from "@/lib/tournament-lifecycle"
 
 const createTournamentSchema = z.object({
   name: z.string().min(2).max(200),
@@ -209,17 +209,12 @@ export async function getTournamentCopyOptions() {
  */
 export async function openRegistration(tournamentId: string) {
   const { userId, tenantId } = await requireTournamentContext("tournament:manage_registrations")
+  z.string().uuid().parse(tournamentId)
 
-  const tournament = await withTenantContext({ userId, tenantId }, () =>
-    tournamentRepo.updateById(tournamentId, {
-      registrationOpen: true,
-      status: "registration",
-      updatedAt: new Date(),
-    })
-  )
+  const tournament = await setTournamentRegistration(userId, tenantId, tournamentId, true)
 
-  if (!tournament) throw new Error("Tournament not found")
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
+  revalidatePath("/dashboard/tournaments")
   return { success: true, tournament }
 }
 
@@ -228,15 +223,11 @@ export async function openRegistration(tournamentId: string) {
  */
 export async function closeRegistration(tournamentId: string) {
   const { userId, tenantId } = await requireTournamentContext("tournament:manage_registrations")
+  z.string().uuid().parse(tournamentId)
 
-  const tournament = await withTenantContext({ userId, tenantId }, () =>
-    tournamentRepo.updateById(tournamentId, {
-      registrationOpen: false,
-      updatedAt: new Date(),
-    })
-  )
+  const tournament = await setTournamentRegistration(userId, tenantId, tournamentId, false)
 
-  if (!tournament) throw new Error("Tournament not found")
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
+  revalidatePath("/dashboard/tournaments")
   return { success: true, tournament }
 }

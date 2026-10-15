@@ -156,8 +156,6 @@ describe("Tournament action tenant and author boundaries", () => {
     { name: "update", permission: "tournament:update", repo: mocks.updateLocked, run: () => updateTournament(TOURNAMENT_ID, { name: "Updated League" }) },
     { name: "read", permission: "tournament:read", repo: mocks.find, run: () => getTournament(TOURNAMENT_ID) },
     { name: "list", permission: "tournament:read", repo: mocks.list, run: () => getTournaments({ page: 1, pageSize: 20, sortBy: "createdAt", sortOrder: "desc" }) },
-    { name: "open registration", permission: "tournament:manage_registrations", repo: mocks.update, run: () => openRegistration(TOURNAMENT_ID) },
-    { name: "close registration", permission: "tournament:manage_registrations", repo: mocks.update, run: () => closeRegistration(TOURNAMENT_ID) },
   ]
 
   it.each(operations)("$name authorizes the exact tenant passed to the repository", async ({ permission, repo, run }) => {
@@ -361,6 +359,106 @@ describe("Tournament archival replaces destructive delete", () => {
 
   it("validates the id shape before any transaction", async () => {
     await expect(deleteTournament("not-a-uuid")).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe("Tournament registration opens/closes under the owner lock", () => {
+  const actor = { id: USER_ID, clerkId: CLERK_ID, isActive: true }
+  const member = { userId: USER_ID, tenantId: ACTIVE_TENANT, role: "league_owner", status: "active" }
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.auth.mockResolvedValue({ userId: CLERK_ID })
+    mocks.resolveTenant.mockResolvedValue(ACTIVE_TENANT)
+    mocks.authorize.mockResolvedValue(undefined)
+    mocks.execute.mockResolvedValue([])
+    mocks.txUser.mockResolvedValue(actor)
+    mocks.txLeague.mockResolvedValue({ id: ACTIVE_TENANT, isActive: true })
+    mocks.txMember.mockResolvedValue(member)
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status: "draft", registrationOpen: false })
+    mocks.txUpdate.mockReturnValue({ set: mocks.txSet })
+    mocks.txSet.mockReturnValue({ where: mocks.txWhere })
+    mocks.txWhere.mockReturnValue({ returning: mocks.txReturning })
+    mocks.txReturning.mockResolvedValue([{ id: TOURNAMENT_ID, status: "registration", registrationOpen: true }])
+    mocks.txInsert.mockReturnValue({ values: mocks.txValues })
+    mocks.txValues.mockResolvedValue(undefined)
+    mocks.transaction.mockImplementation(async (fn: any) => fn({
+      execute: mocks.execute, update: mocks.txUpdate, insert: mocks.txInsert,
+      query: { users: { findFirst: mocks.txUser }, tenants: { findFirst: mocks.txLeague },
+        userTenantRoles: { findFirst: mocks.txMember }, tournaments: { findFirst: mocks.txTournament } },
+    }))
+  })
+
+  it("opens registration under the owner lock, audits, and revalidates", async () => {
+    await expect(openRegistration(TOURNAMENT_ID)).resolves.toMatchObject({ success: true })
+    expect(mocks.authorize).toHaveBeenCalledWith("tournament:manage_registrations", ACTIVE_TENANT)
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.txSet).toHaveBeenCalledWith(expect.objectContaining({ registrationOpen: true, status: "registration" }))
+    const locks = mocks.execute.mock.calls.map(([query]) => dialect.sqlToQuery(query))
+    expect(locks.slice(0, 3).map(query => query.params)).toEqual([[USER_ID], [ACTIVE_TENANT], [USER_ID, ACTIVE_TENANT]])
+    expect(locks[0].sql).toContain("FOR UPDATE")
+    expect(locks[3].sql).toContain('FROM "tournaments"')
+    expect(locks[3].sql).toContain("FOR UPDATE")
+    expect(mocks.txValues.mock.calls[0][0]).toMatchObject({ tenantId: ACTIVE_TENANT, actorId: USER_ID,
+      actorRole: "league_owner", method: "TOURNAMENT_REGISTRATION_OPEN",
+      payload: { changedFields: ["registrationOpen", "status"] } })
+    expect(mocks.revalidate).toHaveBeenCalled()
+    expect(mocks.revalidate.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.txValues.mock.invocationCallOrder[0])
+  })
+
+  it("closes registration under the owner lock without touching status", async () => {
+    mocks.txReturning.mockResolvedValue([{ id: TOURNAMENT_ID, status: "registration", registrationOpen: false }])
+    await expect(closeRegistration(TOURNAMENT_ID)).resolves.toMatchObject({ success: true })
+    const setArg = mocks.txSet.mock.calls[0][0]
+    expect(setArg).toMatchObject({ registrationOpen: false })
+    expect(setArg).not.toHaveProperty("status")
+    expect(mocks.txValues.mock.calls[0][0]).toMatchObject({ method: "TOURNAMENT_REGISTRATION_CLOSE",
+      payload: { changedFields: ["registrationOpen"] } })
+  })
+
+  it.each([["open", openRegistration], ["close", closeRegistration]] as const)("refuses an archived tournament on %s", async (_label, action) => {
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status: "cancelled" })
+    await expect(action(TOURNAMENT_ID)).rejects.toThrow("archived")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+    expect(mocks.txInsert).not.toHaveBeenCalled()
+  })
+
+  it.each([["live"], ["completed"]])("refuses to open registration on a %s tournament", async (status) => {
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, status })
+    await expect(openRegistration(TOURNAMENT_ID)).rejects.toThrow("draft or registration")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+  })
+
+  it("denies a non-owner membership under the lock", async () => {
+    mocks.txMember.mockResolvedValue({ ...member, role: "team_manager" })
+    await expect(openRegistration(TOURNAMENT_ID)).rejects.toThrow("access changed")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+  })
+
+  it("rejects a foreign or missing tournament before any write", async () => {
+    mocks.txTournament.mockResolvedValue(null)
+    await expect(openRegistration(TOURNAMENT_ID)).rejects.toThrow("Tournament not found")
+    mocks.txTournament.mockResolvedValue({ id: TOURNAMENT_ID, tenantId: "foreign", status: "draft" })
+    await expect(closeRegistration(TOURNAMENT_ID)).rejects.toThrow("Tournament not found")
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+  })
+
+  it("propagates an audit failure without revalidating", async () => {
+    mocks.txValues.mockRejectedValue(new Error("Audit unavailable"))
+    await expect(openRegistration(TOURNAMENT_ID)).rejects.toThrow("Audit unavailable")
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+
+  it("rejects a permission denial before opening a transaction", async () => {
+    mocks.authorize.mockRejectedValue(new Error("Forbidden"))
+    await expect(openRegistration(TOURNAMENT_ID)).rejects.toThrow("Forbidden")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("validates the id shape before any transaction", async () => {
+    await expect(openRegistration("not-a-uuid")).rejects.toThrow()
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })

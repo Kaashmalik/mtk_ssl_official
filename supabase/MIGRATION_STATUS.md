@@ -544,3 +544,29 @@ grouped count queries; mocked SQL/call-order and render tests do not prove those
 database properties. Next source slice: remaining tournament registration lifecycle
 writers and venue/admin writers, then public/anonymous follow, publication and
 notification boundaries.
+
+## Batch 26 — locked tournament registration lifecycle (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. `openRegistration`/`closeRegistration` no longer call
+`tournamentRepo.updateById`; a new `setTournamentRegistration` in
+`lib/tournament-lifecycle.ts` performs the write in a READ COMMITTED transaction that
+locks account → league → membership → tournament, rechecks the current owner after
+the wait and writes an atomic minimal audit
+(`TOURNAMENT_REGISTRATION_OPEN`/`TOURNAMENT_REGISTRATION_CLOSE`). The action wrappers
+validate the id shape before the transaction.
+
+Guards: an archived (`cancelled`) tournament can neither open nor close
+registration; registration only opens for a `draft`/`registration` tournament
+(refusing `live`/`completed`); closing keeps the current status and only clears
+`registrationOpen`. The audit row and the status write share the transaction, so a
+failing audit aborts the update. The permission gate (`tournament:manage_registrations`)
+runs before the transaction and the owner role is rechecked under the lock. This is
+not a purge, refund, slot-release or restore workflow.
+
+All five prior migrations remain unapplied; release gate stays default-off. Before
+rollout, verify real two-session open/close ordering against archive and registration
+writes, audit rollback, lock deadlock freedom and RLS; mocked call-order/SQL tests do
+not prove those database properties. Next source slice: remaining tournament
+create/update writers and venue/admin writers, then public/anonymous follow,
+publication and notification boundaries.
