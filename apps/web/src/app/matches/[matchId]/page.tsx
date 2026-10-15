@@ -3,30 +3,27 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { Trophy, Video } from "lucide-react"
-import { db, matches, teams, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls } from "@mtk/database"
+import { db, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls } from "@mtk/database"
 import { eq, and, asc, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { ShareButton } from "@/components/share/share-button"
 import { PrintButton } from "@/components/share/print-button"
 import { requirePublicTenantId } from "@/lib/public-tenant"
+import { readPublishedMatch, readPublishedMatchTeams } from "@/lib/public-visibility"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
   const { matchId } = await params
 
-  // Tenant-scoped: this route is unauthenticated, so the match must be proven to
-  // belong to the tenant that owns the request host. Without this, any holder of
-  // a match UUID could read another tenant's scorecard.
+  // Tenant-scoped AND publication-gated: this route is unauthenticated, so the
+  // match must belong to the tenant that owns the request host and be published
+  // (not cancelled, and not part of a draft competition). Otherwise 404.
   const tenantId = await requirePublicTenantId()
-
-  const [match] = await db.select().from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
-    .limit(1)
+  const match = await readPublishedMatch(tenantId, matchId)
   if (!match) notFound()
 
-  const [teamA] = await db.select().from(teams).where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, tenantId))).limit(1)
-  const [teamB] = await db.select().from(teams).where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, tenantId))).limit(1)
+  const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
   if (!teamA || !teamB) notFound()
 
   let venueName = "TBD Venue"

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db, matches, teams, matchInnings, players, battingScorecards, bowlingScorecards, venues } from "@mtk/database"
+import { db, teams, matchInnings, players, battingScorecards, bowlingScorecards, venues } from "@mtk/database"
 import { eq, and, asc, inArray } from "drizzle-orm"
 import { getPublicTenantContext } from "@/lib/public-tenant"
+import { readPublishedMatch } from "@/lib/public-visibility"
 
 /**
  * GET /api/scorecards/[matchId]/pdf
@@ -27,10 +28,8 @@ export async function GET(
   }
   const { tenantId } = ctx
 
-  // Load match (tenant-scoped)
-  const [match] = await db.select().from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)))
-    .limit(1)
+  // Load match (tenant-scoped AND publication-gated)
+  const match = await readPublishedMatch(tenantId, matchId)
   if (!match) return new NextResponse("Not Found", { status: 404 })
 
   // Load supporting data

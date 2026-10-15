@@ -2143,6 +2143,69 @@ publication boundaries, then the `dashboard-context`/`league-setup` `getMyTenant
 consumers. No full ISO-04 or authenticated browser claim; whole-task roadmap
 counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 34: public publication boundary + leaderboard isolation
+
+#### Implemented
+
+- Synced clean `main` with remote `6632814`. Scope is the public/anonymous
+  surface named as the next source work: the unauthenticated match, live and
+  tournament routes, the scorecard PDF export, and the public leaderboard hub.
+- Found and fixed a genuine **cross-tenant leak**: `app/leaderboards/page.tsx`
+  aggregated `player_season_stats` and `players` with **no tenant predicate at
+  all**, so a visitor on one league's host ranked every other league's players.
+  It now resolves the request-host league through `requirePublicTenantId()` and
+  reads through a scoped, publication-gated reader.
+- New `lib/public-visibility.ts` centralizes the publication decision. Public
+  pages were already tenant-scoped to the request host (`lib/public-tenant.ts`)
+  but had no publication gate, so an organizer's unannounced `draft` tournament
+  and a `cancelled` fixture were publicly readable. The library derives
+  publication from the existing lifecycle columns (no new schema), so nothing
+  ambiguous is exposed and the database stays authoritative.
+- Pure predicates `isTournamentPublished` (only `registration`/`live`/`completed`)
+  and `isMatchPublished` (every match status except `cancelled`) are the single
+  source of truth and are exported with their value tuples for reuse in SQL
+  `inArray` filters.
+- Scoped readers: `readPublishedTournament`, `readPublishedMatch` (also rejects a
+  match whose same-tenant parent tournament is unpublished, and fails closed on a
+  broken/missing parent; a tournament-less friendly follows its own status),
+  `readPublishedMatchTeams`, `matchHasInnings`, and the publication-gated
+  `readPublicBattingLeaderboard`/`readPublicBowlingLeaderboard` (joined to
+  published tournaments, deterministic tiebreak on `playerId`, bounded by
+  `PUBLIC_LEADERBOARD_LIMIT`).
+- Wired the gate into `matches/[matchId]/page.tsx`, `matches/[matchId]/live/page.tsx`,
+  `tournaments/[id]/page.tsx` and the `api/scorecards/[matchId]/pdf` route. Each
+  still 404s (or returns 404) for a hidden row exactly as for a foreign/missing
+  id, so nothing signals that an unpublished row exists. Unused direct-`db`
+  imports were trimmed.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 69 files, **2,098 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,419 passing tests** (+29 over Batch 33) |
+
+New regressions: `public-visibility.test.ts` (26) and `leaderboards-page.test.tsx`
+(3). They assert the publication predicates, the tenant+id SQL predicates on
+every reader, match hiding on a cancelled status or unpublished/missing parent,
+friendly status omission, leaderboard tenant/status joins and bound, and that the
+leaderboard page reads for the resolved host league and propagates a no-tenant
+resolution instead of rendering a global list. Mocked readers/SQL and a
+client-mocked page are **not** PostgreSQL RLS, index or authenticated-browser
+proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its **19 pre-existing** error
+lines, none in the new files. Five prior migrations remain unapplied and the
+release gate stays default-off. Publication here is derived from lifecycle status
+(request-local reads), not a read-versus-revocation lock, and does not yet cover
+private contact fields, exports or sockets. Next source work: the
+`dashboard-context`/league-setup `getMyTenant` consumers, then public/anonymous
+follow. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

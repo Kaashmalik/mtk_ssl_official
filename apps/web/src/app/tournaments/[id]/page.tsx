@@ -1,13 +1,14 @@
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
-import { db, tournaments, teams, matches, matchInnings, leagueRegistrations } from "@mtk/database"
+import { db, teams, matches, matchInnings, leagueRegistrations } from "@mtk/database"
 import { eq, asc, and, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { Calendar } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
+import { readPublishedTournament } from "@/lib/public-visibility"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft", registration: "Registration Open", live: "Live", completed: "Completed", cancelled: "Cancelled",
@@ -17,13 +18,11 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   noStore()
   const { id } = await params
 
-  // Tenant-scoped: this route is unauthenticated, so every read below is pinned
-  // to the tenant that owns the request host.
+  // Tenant-scoped AND publication-gated: this route is unauthenticated, so the
+  // tournament must belong to the tenant that owns the request host and be
+  // published. A draft or cancelled tournament 404s.
   const tenantId = await requirePublicTenantId()
-
-  const [tournament] = await db.select().from(tournaments)
-    .where(and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId)))
-    .limit(1)
+  const tournament = await readPublishedTournament(tenantId, id)
   if (!tournament) notFound()
 
   const approvedRegs = await db.select().from(leagueRegistrations)
