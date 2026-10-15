@@ -34,14 +34,12 @@ const ALLOWLIST = new Set([
   // TODO: migrate these to repos and remove from allowlist:
   "matches.ts", // withTenantContext + explicit tenantId filters; still direct db
   "scoring.ts", // all WRITES proxy to scoring-service (SoT); remaining db.select are tenant-scoped authz reads
-  "registrations.ts", // withTenantContext + tenantId filters; still direct db
   "scorecards.ts",
-  "follows.ts",
-  // notifications.ts no longer uses direct db: the personal reads/writes live in
-  // lib/notification-reads.ts scoped to the verified active league, so the guard
-  // now enforces repo-only access here.
   "player-ids.ts", // tenantId-filtered; uses direct db pending repo migration
   "users-invites.ts", // tenantId-filtered; uses direct db pending repo migration
+  // notifications.ts (Batch 33) and follows.ts/registrations.ts (Batch 36) no
+  // longer use direct db — they delegate to tenant-scoped readers/writers in
+  // lib/ — so the guard now enforces repo-only access there.
 ]);
 
 /** Patterns that indicate intentional unscoped access. */

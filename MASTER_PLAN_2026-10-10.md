@@ -2267,6 +2267,45 @@ fix (recorded as schema work, not guessed at without a migration window). Next
 source work: public/anonymous follow hardening. No full ISO-04 or authenticated
 browser claim; whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 36: repo-only guard tightened for follows and registrations
+
+#### Implemented
+
+- Synced clean `main` with remote `f4f1be6`. Scope is the follow/registration
+  action modules and the tenant-isolation guard named in the public/anonymous
+  follow work.
+- Verified source: `app/actions/follows.ts` and `app/actions/registrations.ts`
+  now contain **zero** direct `db` access — follows delegates entirely to the
+  tenant-scoped `lib/fan-follows.ts` (Batch 23) and registrations to its
+  dedicated readers/writers. Both were removed from the
+  `no-unscoped-queries` allowlist, so the guard now *enforces* repo-only access
+  there and fails on any future unscoped query, exactly as Batch 33 did for
+  `notifications.ts`. The remaining allowlist (`matches`, `scoring`,
+  `scorecards`, `player-ids`, `users-invites` + the bootstrap flows) still has
+  real direct-`db` call sites (verified per file) and stays listed with its
+  migration TODO.
+- Re-reviewed the follow surface for the anonymous half of this task: writes
+  require an active `fan:follow` membership in the exact active league; reads
+  are tenant-scoped and anonymous calls read as `0`/`false`/`[]` with no
+  cross-tenant or cross-account leakage; `fan-follows.test.ts` covers denial,
+  UUID/enum validation, foreign-target refusal and scope assertions.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 71 files, **2,111 tests** |
+| Combined suites | web/databases/scoring unchanged from Batch 35 (**2,432 total**) |
+| `git diff --check` | Clean |
+
+No production behavior changed in this batch; it converts an audit observation
+into an enforced guard. `tsc --noEmit` still reports only its **19 pre-existing**
+error lines. No build, lint, schema change, migration application, remote
+database operation or deployment ran. Next source work: `matches.ts`,
+`scorecards.ts`, `player-ids.ts` and `users-invites.ts` allowlist migrations, then
+the remaining admin APIs. Whole-task roadmap counts remain **19 checked / 60
+open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
