@@ -2,7 +2,7 @@ import React from "react"
 import { redirect } from "next/navigation"
 import { auth } from "@clerk/nextjs/server"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
-import { requireLeagueReadContext, readComparisonRoster, readPlayerComparison } from "@/lib/league-reads"
+import { requireActiveLeagueContext, readComparisonRoster, readPlayerComparison } from "@/lib/league-reads"
 import { PlayerComparisonRadar } from "@/components/stats/player-comparison-radar"
 import { ComparisonPicker } from "@/components/stats/comparison-picker"
 import { unstable_noStore as noStore } from "next/cache"
@@ -20,7 +20,7 @@ export default async function ComparePlayersPage({
   if (!userId) redirect("/sign-in")
 
   // Exact active league + stats:read. Player and scorecard reads stay in that league.
-  const context = await requireLeagueReadContext("stats:read")
+  const context = await requireActiveLeagueContext("stats:read")
 
   const { a, b } = await searchParams
 

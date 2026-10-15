@@ -515,3 +515,32 @@ query plans/indexes on these read paths; mocked SQL/call-order and render tests 
 not prove those database properties. Next source slice: remaining tournament
 lifecycle/list/detail writers and venue/admin writers, then public/anonymous
 follow, publication and notification boundaries.
+
+## Batch 25 — tournament dashboard read scope (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. The tournament dashboard list and creator no longer use the
+primary-membership fallback (`getMyTenant`) or redirect to league setup on an
+authorization failure. A new `lib/tournament-reads.ts` provides
+`readTournamentList(tenantId)`, and the Batch 24 context helper is renamed
+`requireActiveLeagueContext` for reuse as a page-level gate. The list resolves the
+exact active league with `tournament:read`, the creator with `tournament:create`;
+both reject a global role, tenant array or primary membership.
+
+The list is bounded (200 rows, +1 fetch to flag truncation) and orders
+deterministically. Registered-team and match counts are aggregated with grouped
+queries that carry the same tenant predicate as the list, so a foreign team or match
+link cannot inflate a tournament's totals; the previous whole-league N+1 reads ran
+child counts by `tournamentId` only. Resolution and query failures now propagate
+instead of being swallowed into a fake empty list. The creator no longer receives a
+primary-membership `tenantId` (it was unused; the create action resolves the league
+server-side).
+
+All five prior migrations remain unapplied; release gate stays default-off. These
+are request-local authorization/projection checks — not database RLS, read-versus-
+revocation locks or a public/anonymous experience, and not certified for export or
+cache scoping. Before rollout, verify real RLS/grants and index support for the
+grouped count queries; mocked SQL/call-order and render tests do not prove those
+database properties. Next source slice: remaining tournament registration lifecycle
+writers and venue/admin writers, then public/anonymous follow, publication and
+notification boundaries.

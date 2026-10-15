@@ -8,7 +8,7 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Trophy, Target, Award, Zap } from "lucide-react"
-import { requireLeagueReadContext, readBattingLeaderboard, readBowlingLeaderboard } from "@/lib/league-reads"
+import { requireActiveLeagueContext, readBattingLeaderboard, readBowlingLeaderboard } from "@/lib/league-reads"
 import { unstable_noStore as noStore } from "next/cache"
 
 export default async function StatisticsPage() {
@@ -19,7 +19,7 @@ export default async function StatisticsPage() {
 
   // Exact active league + stats:read. Read failures propagate; they never become
   // a fake "no statistics" empty state.
-  const context = await requireLeagueReadContext("stats:read")
+  const context = await requireActiveLeagueContext("stats:read")
   const [topRunScorers, topSixHitters, topFourHitters, topWicketTakers] = await Promise.all([
     readBattingLeaderboard(context.tenantId, "runs"),
     readBattingLeaderboard(context.tenantId, "sixes"),

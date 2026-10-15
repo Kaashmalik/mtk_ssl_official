@@ -8,10 +8,10 @@ import { z } from "zod"
 import { resolveActiveTenantId, requirePermissionServer } from "./rbac-server"
 import { hasPermission, type Permission, type UserRole } from "./rbac"
 
-export type LeagueReadContext = { tenantId: string; actorId: string; clerkId: string; role: UserRole }
+export type ActiveLeagueContext = { tenantId: string; actorId: string; clerkId: string; role: UserRole }
 
 /** Request-local authorization for dashboard reads in the exact active league. */
-export async function requireLeagueReadContext(permission: Permission): Promise<LeagueReadContext> {
+export async function requireActiveLeagueContext(permission: Permission): Promise<ActiveLeagueContext> {
   const { userId: clerkId } = await auth()
   if (!clerkId) throw new Error("Unauthorized")
   const tenantId = await resolveActiveTenantId()

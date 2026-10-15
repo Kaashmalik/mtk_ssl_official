@@ -1726,6 +1726,53 @@ venue/admin writers, then public/anonymous follow, publication and notification
 paths. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 25: exact-league tournament dashboard reads
+
+#### Implemented
+
+- Synced clean `main` with remote `a36d01a`. Scope is the tournament dashboard list
+  and creator; the registration lifecycle writers, venue/admin writers and
+  public/anonymous follow stay open.
+- Renamed the Batch 24 context helper to `requireActiveLeagueContext` for reuse as a
+  page-level authorization gate; the stats/compare/scoring pages and tests use the
+  new name.
+- New `lib/tournament-reads.ts` replaces the list page's whole-league N+1 counts with
+  a bounded (200, +1 for truncation) list whose team/match counts are grouped queries
+  carrying the same tenant predicate as the list. `dashboard/tournaments/page.tsx`
+  drops `getMyTenant` and the setup redirect, resolves the exact active league with
+  `tournament:read` and propagates failures instead of returning `[]`.
+  `dashboard/tournaments/new/page.tsx` gates the creator on `tournament:create` and
+  no longer passes a primary-membership tenant.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 53 files, **1,935 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,256 passing tests** (+14 over Batch 24) |
+
+Added 14 read cases across `tournament-reads.test.ts` (4) and
+`tournament-pages.test.tsx` (10): league-scoped aggregated counts, child-query
+scoping, zero counts, truncation/empty short-circuit, per-route permission,
+resolved-league reader arguments, setup-redirect removal, propagated failures and
+anonymous redirects. Mocked SQL/call-order and render tests are not PostgreSQL RLS,
+index or concurrency proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. A standalone `tsc --noEmit` still reports only its pre-existing
+unrelated errors; none reference the new lib, pages or tests. Five prior migrations
+remain unapplied and the release gate stays default-off. These reads are not a
+public/anonymous experience and are not certified for export or cache scoping. Real
+RLS, grants and index support for the grouped count queries remain release
+acceptance work.
+
+Next source work: the remaining tournament registration lifecycle writers and
+venue/admin writers, then public/anonymous follow, publication and notification
+paths. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

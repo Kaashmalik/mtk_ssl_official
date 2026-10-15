@@ -12,7 +12,7 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: (href: string) => { throw new Error(`redirect:${href}`) } }))
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }))
 vi.mock("@/lib/league-reads", () => ({
-  requireLeagueReadContext: mocks.context, readBattingLeaderboard: mocks.batting,
+  requireActiveLeagueContext: mocks.context, readBattingLeaderboard: mocks.batting,
   readBowlingLeaderboard: mocks.bowling, readComparisonRoster: mocks.roster,
   readPlayerComparison: mocks.comparison, readScoringConsoleMatches: mocks.console,
 }))

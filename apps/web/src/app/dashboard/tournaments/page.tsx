@@ -1,3 +1,4 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
@@ -7,9 +8,8 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Progress } from "@mtk/ui/components/ui/progress"
 import { Plus, Trophy, CalendarDays, Users, Swords, ArrowRight } from "lucide-react"
-import { getMyTenant } from "@/app/actions/tenants"
-import { db, teams, matches, tournaments } from "@mtk/database"
-import { eq, and, count } from "drizzle-orm"
+import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { readTournamentList } from "@/lib/tournament-reads"
 import { unstable_noStore as noStore } from "next/cache"
 
 // ─── Constants ────────────────────────────────────────────────
@@ -37,39 +37,6 @@ const FORMAT_LABELS: Record<string, string> = {
   round_robin: "Round Robin",
 }
 
-// ─── Data Fetching ────────────────────────────────────────────
-
-async function getTournamentsData(tenantId: string) {
-  try {
-    const tournamentsRaw = await db.select().from(tournaments)
-      .where(eq(tournaments.tenantId, tenantId))
-      .orderBy(tournaments.createdAt)
-
-    return await Promise.all(
-      tournamentsRaw.map(async (t) => {
-        const [[{ registeredTeams }], [{ totalMatches }], [{ completedMatches }]] = await Promise.all([
-          db.select({ registeredTeams: count() }).from(teams)
-            .where(eq(teams.tournamentId, t.id)),
-          db.select({ totalMatches: count() }).from(matches)
-            .where(eq(matches.tournamentId, t.id)),
-          db.select({ completedMatches: count() }).from(matches)
-            .where(and(eq(matches.tournamentId, t.id), eq(matches.status, "completed"))),
-        ])
-
-        return {
-          ...t,
-          registeredTeams: Number(registeredTeams),
-          totalMatches: Number(totalMatches),
-          completedMatches: Number(completedMatches),
-        }
-      })
-    )
-  } catch (error) {
-    console.error("Failed to fetch tournaments:", error)
-    return []
-  }
-}
-
 // ─── Page ─────────────────────────────────────────────────────
 
 export default async function TournamentsPage() {
@@ -78,10 +45,10 @@ export default async function TournamentsPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
-
-  const tournamentsData = await getTournamentsData(tenant.id)
+  // Exact active league + tournament:read. Read failures propagate instead of
+  // rendering a fake empty list.
+  const context = await requireActiveLeagueContext("tournament:read")
+  const { tournaments, truncated } = await readTournamentList(context.tenantId)
 
   return (
     <div className="space-y-6">
@@ -102,26 +69,26 @@ export default async function TournamentsPage() {
       <MotionWrapper variant="fadeInUp" delay={0.1}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-xl border bg-card p-4">
-            <p className="text-2xl font-bold tabular-nums">{tournamentsData.length}</p>
+            <p className="text-2xl font-bold tabular-nums">{tournaments.length}</p>
             <p className="text-xs text-muted-foreground">Total Tournaments</p>
           </div>
           <div className="rounded-xl border bg-card p-4">
-            <p className="text-2xl font-bold tabular-nums text-live">{tournamentsData.filter((t) => t.status === "live").length}</p>
+            <p className="text-2xl font-bold tabular-nums text-live">{tournaments.filter((t) => t.status === "live").length}</p>
             <p className="text-xs text-muted-foreground">Active Now</p>
           </div>
           <div className="rounded-xl border bg-card p-4">
-            <p className="text-2xl font-bold tabular-nums text-info">{tournamentsData.filter((t) => t.status === "registration").length}</p>
+            <p className="text-2xl font-bold tabular-nums text-info">{tournaments.filter((t) => t.status === "registration").length}</p>
             <p className="text-xs text-muted-foreground">Registration Open</p>
           </div>
           <div className="rounded-xl border bg-card p-4">
-            <p className="text-2xl font-bold tabular-nums text-success">{tournamentsData.filter((t) => t.status === "completed").length}</p>
+            <p className="text-2xl font-bold tabular-nums text-success">{tournaments.filter((t) => t.status === "completed").length}</p>
             <p className="text-xs text-muted-foreground">Completed</p>
           </div>
         </div>
       </MotionWrapper>
 
       {/* Tournament Cards Grid */}
-      {tournamentsData.length === 0 ? (
+      {tournaments.length === 0 ? (
         <MotionWrapper variant="fadeInUp">
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="rounded-full bg-muted/50 p-5 mb-4">
@@ -138,7 +105,7 @@ export default async function TournamentsPage() {
         </MotionWrapper>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          {tournamentsData.map((tournament, i) => {
+          {tournaments.map((tournament, i) => {
             const matchProgress = tournament.totalMatches > 0
               ? Math.round((tournament.completedMatches / tournament.totalMatches) * 100)
               : 0
@@ -211,6 +178,12 @@ export default async function TournamentsPage() {
             )
           })}
         </div>
+      )}
+
+      {truncated && (
+        <p className="text-sm text-muted-foreground text-center">
+          Showing the first {tournaments.length} tournaments. Archive older tournaments to see the rest.
+        </p>
       )}
     </div>
   )

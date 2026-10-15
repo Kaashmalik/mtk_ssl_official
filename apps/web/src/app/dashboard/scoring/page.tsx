@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@mtk/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Play, Swords } from "lucide-react"
-import { requireLeagueReadContext, readScoringConsoleMatches } from "@/lib/league-reads"
+import { requireActiveLeagueContext, readScoringConsoleMatches } from "@/lib/league-reads"
 import { unstable_noStore as noStore } from "next/cache"
 
 export default async function ScoringConsolePage() {
@@ -18,7 +18,7 @@ export default async function ScoringConsolePage() {
 
   // Exact active league + match:read. Match and team-name reads are league-scoped
   // and failures propagate instead of rendering a fake empty console.
-  const context = await requireLeagueReadContext("match:read")
+  const context = await requireActiveLeagueContext("match:read")
   const { matches, truncated } = await readScoringConsoleMatches(context.tenantId)
 
   const resolvedMatches = matches.map((m) => ({

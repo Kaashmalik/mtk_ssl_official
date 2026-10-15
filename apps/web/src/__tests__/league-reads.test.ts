@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { battingScorecards, bowlingScorecards, fieldingScorecards, matches, players, teams } from "@mtk/database"
 import {
-  requireLeagueReadContext, readBattingLeaderboard, readBowlingLeaderboard,
+  requireActiveLeagueContext, readBattingLeaderboard, readBowlingLeaderboard,
   readComparisonRoster, readPlayerComparison, readScoringConsoleMatches,
   leaderboardLimit, comparisonRosterLimit, scoringConsoleLimit,
 } from "@/lib/league-reads"
@@ -78,45 +78,45 @@ beforeEach(() => {
   mocks.select.mockImplementation(selectChain)
 })
 
-describe("requireLeagueReadContext resolves the exact active league", () => {
+describe("requireActiveLeagueContext resolves the exact active league", () => {
   it("returns the context after the exact-league permission check", async () => {
-    await expect(requireLeagueReadContext("stats:read")).resolves
+    await expect(requireActiveLeagueContext("stats:read")).resolves
       .toMatchObject({ tenantId: TENANT, actorId: ACTOR, clerkId: CLERK, role: "league_owner" })
     expect(mocks.permission).toHaveBeenCalledWith("stats:read", TENANT)
   })
   it("rejects an unauthenticated caller before resolving a tenant or permission", async () => {
     mocks.auth.mockResolvedValue({ userId: null })
-    await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("Unauthorized")
+    await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("Unauthorized")
     expect(mocks.tenant).not.toHaveBeenCalled()
     expect(mocks.permission).not.toHaveBeenCalled()
   })
   it("rejects a caller with no active league", async () => {
     mocks.tenant.mockResolvedValue(null)
-    await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("Tenant not found")
+    await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("Tenant not found")
     expect(mocks.permission).not.toHaveBeenCalled()
   })
   it("rejects a missing or inactive account", async () => {
     mocks.state.actor = undefined
-    await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("league account unavailable")
+    await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("league account unavailable")
     mocks.state.actor = { ...actor, isActive: false }
-    await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("league account unavailable")
+    await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("league account unavailable")
     mocks.state.actor = { ...actor, clerkId: "someone_else" }
-    await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("league account unavailable")
+    await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("league account unavailable")
   })
   it("rejects a missing, suspended, super-admin or wrong-league membership", async () => {
     for (const bad of [
       null, { ...member, status: "suspended" }, { ...member, role: "super_admin" }, { ...member, tenantId: OTHER },
     ]) {
       mocks.state.member = bad
-      await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("league access unavailable")
+      await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("league access unavailable")
     }
   })
   it("rejects a role without the requested permission and an inactive league", async () => {
     mocks.state.member = { ...member, role: "fan" }
-    await expect(requireLeagueReadContext("match:score")).rejects.toThrow("league access unavailable")
+    await expect(requireActiveLeagueContext("match:score")).rejects.toThrow("league access unavailable")
     mocks.state.member = member
     mocks.state.league = { id: TENANT, isActive: false }
-    await expect(requireLeagueReadContext("stats:read")).rejects.toThrow("league access unavailable")
+    await expect(requireActiveLeagueContext("stats:read")).rejects.toThrow("league access unavailable")
   })
 })
 
