@@ -2313,6 +2313,21 @@ pre-existing** lines; `git diff --check` clean. Next: continue the admin-API tie
 (impersonation, `settings/branding`, `cron/subscription-renewal`, `billing/stripe`).
 Roadmap counts stay **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 43: impersonation routes — atomic claim + first regressions
+
+- `GET /api/impersonation/session` no longer races: the ledger row is claimed in one
+  `UPDATE … WHERE jti AND status = "issued" RETURNING` (`lib/impersonation-ledger.ts`),
+  so concurrent redemptions of a single-use token cannot both succeed — the loser 409s.
+  The old read-then-update flow allowed a duplicate-use window. `revokeImpersonationSession`
+  only transitions live sessions; the exit route still clears its cookie on every path.
+- New regressions: `impersonation-routes.test.ts` (11) covering 400/401/200/409/500 on
+  session (claim predicate, cookie attributes, no-cookie-on-failure) and all exit paths.
+
+**Fresh verification:** web **2,147 / 74** (+11); `tsc --noEmit` at its **19 pre-existing**
+lines; `git diff --check` clean. Next: continue the admin-API tier audit (`settings/
+branding`, `cron/subscription-renewal`, `billing/stripe/checkout`, `webhooks/stripe`).
+Roadmap counts stay **19 checked / 60 open / 79 IDs**.
+
 ### Decisions still requiring explicit review
 
 Identity migration/linking; membership/grant schema and fallback retirement; MFA/recovery policy; invite/OTP defaults; league onboarding policy; official independent approvals; supported cricket laws/formats; currency/payment providers; visibility/minor consent; product limits/grace; feed/media rights; recovery/performance load targets. Record decisions rather than guessing business/legal rules in code.

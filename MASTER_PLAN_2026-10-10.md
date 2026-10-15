@@ -2556,6 +2556,46 @@ Next source work: continue the admin-API tier audit (impersonation session/exit,
 checkout reads — all still direct-db with no tests). Roadmap counts remain
 **19 checked / 60 open / 79 IDs**.
 
+### Batch 43 — impersonation routes: atomic claim + first regressions (15 October 2026)
+
+Second pass over the admin-API tier: `GET /api/impersonation/session` and
+`POST /api/impersonation/exit` (previously untested, and the session route
+carried a real duplicate-use race).
+
+**Fix — atomic single-use claim.** The old flow read the ledger row with
+`status = "issued"` and *later* updated it by `jti` alone, so two concurrent
+redemptions of one token could both observe `issued` and both proceed. The new
+`lib/impersonation-ledger.ts` claims the row in a single `UPDATE … WHERE jti
+AND status = "issued" RETURNING` — the status transition is the predicate, so
+exactly one redemption wins and the loser sees the same 409 as a reused token.
+`revokeImpersonationSession` likewise only transitions live sessions
+(`issued`/`active`), so the ledger never re-stamps an existing revocation;
+`findImpersonationTarget` is the cosmetic display lookup. Routes keep token
+shape/errors/status codes; the exit route keeps clearing its cookie on every
+path — success, invalid token, and error — which the regressions now pin.
+
+New regressions: `impersonation-routes.test.ts` (11) — 400 missing token before
+any work; 401 surfacing the token-verify reason before the ledger; the atomic
+claim (`status = "issued"` inside the UPDATE predicate) with the identity
+body, httpOnly/lax 30-minute cookie value `{ email, jti }`; 409 without a
+cookie when the claim loses (incl. concurrent redemptions); 500 fail-closed
+without a cookie on ledger errors; exit revoking only live sessions
+(predicates carry `issued`/`active`), ignoring invalid tokens, and clearing
+the cookie in all four paths.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **74** files, **2,147 tests** (+11) |
+| Focused: impersonation routes | PASS - 11 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (impersonation files clean) |
+| `git diff --check` | Clean |
+
+Next source work: continue the admin-API tier audit (`settings/branding` write,
+`cron/subscription-renewal` transaction, `billing/stripe/checkout` reads,
+`webhooks/stripe`). Roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

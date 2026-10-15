@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { db, impersonationSessions } from "@mtk/database";
-import { eq } from "drizzle-orm";
 import { verifyImpersonationToken } from "@mtk/database";
+import { revokeImpersonationSession } from "@/lib/impersonation-ledger";
 
 const WEB_COOKIE = "__ssl_impersonating";
 
 /**
  * POST /api/impersonation/exit — clears the web-side impersonation marker
- * cookie and revokes the ledger session when a token is supplied.
+ * cookie and revokes the live ledger session when a token is supplied. The
+ * cookie is cleared on every path, including errors.
  */
 export async function POST(request: Request) {
   try {
@@ -16,10 +16,7 @@ export async function POST(request: Request) {
     if (token) {
       const result = await verifyImpersonationToken(token);
       if (result.ok) {
-        await db
-          .update(impersonationSessions)
-          .set({ status: "revoked", revokedAt: new Date() })
-          .where(eq(impersonationSessions.jti, result.payload.jti));
+        await revokeImpersonationSession(result.payload.jti);
       }
     }
 
