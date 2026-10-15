@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import { db, matches, matchBalls, matchInnings, scoringEvents, scorecardProjections } from '@mtk/database';
+import { db, matches, matchBalls, matchInnings, scoringEvents, scorecardProjections, auditLogs } from '@mtk/database';
 import { ScoringService, BallEvent } from './scoring.service';
 import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 
@@ -48,7 +48,7 @@ function createTransaction() {
       updatedAt: new Date('2026-10-12T12:00:00.000Z'),
     },
     match: { id: MATCH, tenantId: TENANT, scorerId: ACTOR as string | null, backupScorerId: null as string | null, teamAId: TENANT, teamBId: TEAM_B,
-      winnerId: null as string | null, result: null as string | null,
+      winnerId: null as string | null, result: null as string | null, manOfMatchId: null as string | null,
       status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
     membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active' } as { userId: string; tenantId: string; role: string; status: string } | null,
@@ -58,6 +58,7 @@ function createTransaction() {
     ]),
     balls: [] as Array<Record<string, any>>,
     events: [] as Array<Record<string, any>>,
+    audits: [] as Array<Record<string, any>>,
     projection: {} as Record<string, any>,
   };
   const tx = {
@@ -99,6 +100,7 @@ function createTransaction() {
       const row = { ...values, id: uuid(), createdAt: new Date() };
       if (table === matchBalls) state.balls.push(row);
       if (table === scoringEvents) state.events.push(row);
+      if (table === auditLogs) state.audits.push(row);
       if (table === scorecardProjections) state.projection = row;
       if (table === matchInnings) Object.assign(state.innings, row);
       return { returning: async () => [row] };
@@ -453,5 +455,53 @@ describe('Canonical delivery record, replay and undo', () => {
     await expect(service.completeMatch(TENANT, ACTOR, MATCH, BATTER)).rejects.toBeInstanceOf(BadRequestException);
     expect(mockTx.update).not.toHaveBeenCalled();
     expect(mockTx.state.match.status).toBe('live');
+  });
+  it('completes and audits the optional match-team award under the canonical transaction', async () => {
+    const ended = jest.spyOn(service as any, 'publishMatchEnded').mockResolvedValue(undefined);
+    await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BATTER);
+    expect(mockTx.state.match.manOfMatchId).toBe(BATTER);
+    const lock = dialect.sqlToQuery(mockTx.execute.mock.calls.at(-1)[0]);
+    expect(lock.params).toEqual([BATTER, TENANT]);
+    expect(lock.sql).toContain('FOR SHARE');
+    expect(dialect.sqlToQuery(mockTx.query.players.findFirst.mock.calls[0][0].where).params).toEqual([BATTER, TENANT]);
+    expect(mockTx.state.audits).toEqual([expect.objectContaining({ method: 'MATCH_COMPLETE', tenantId: TENANT, actorId: ACTOR,
+      payload: expect.objectContaining({ before: expect.objectContaining({ status: 'live', manOfMatchId: null }),
+        after: expect.objectContaining({ status: 'completed', manOfMatchId: BATTER }) }) })]);
+    await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BATTER);
+    // Legacy clients omit the award; a retry must not clear the committed one.
+    await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won');
+    expect(mockTx.state.audits).toHaveLength(1);
+    expect(ended).toHaveBeenCalledTimes(1);
+    await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BOWLER)).rejects.toBeInstanceOf(ConflictException);
+    expect(mockTx.state.match.manOfMatchId).toBe(BATTER);
+  });
+  it.each([undefined, { id: BATTER, tenantId: TEAM_B, teamId: TENANT },
+    { id: BOWLER, tenantId: TENANT, teamId: TENANT }, { id: BATTER, tenantId: TENANT, teamId: ACTOR }])(
+    'rejects missing, foreign or third-team award recipient %s before writes', async player => {
+      mockTx.query.players.findFirst.mockResolvedValueOnce(player);
+      await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BATTER)).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockTx.update).not.toHaveBeenCalled();
+      expect(mockTx.insert).not.toHaveBeenCalled();
+      expect(mockRedis.del).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects a malformed award UUID before SQL', async () => {
+    await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', 'bad')).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockTx.execute).not.toHaveBeenCalled();
+  });
+  it('preserves and validates a pre-existing award when a legacy first completion omits it', async () => {
+    mockTx.state.match.manOfMatchId = BATTER;
+    await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won');
+    expect(mockTx.state.match.manOfMatchId).toBe(BATTER);
+    expect(mockTx.state.audits[0].payload.after.manOfMatchId).toBe(BATTER);
+    expect(mockTx.query.players.findFirst).toHaveBeenCalledTimes(1);
+  });
+  it('propagates completion audit failure before cache invalidation or match-ended publication', async () => {
+    const ended = jest.spyOn(service as any, 'publishMatchEnded').mockResolvedValue(undefined);
+    mockTx.insert.mockImplementationOnce(() => { throw new Error('Audit unavailable'); });
+    await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won')).rejects.toThrow('Audit unavailable');
+    expect(mockRedis.del).not.toHaveBeenCalled();
+    expect(ended).not.toHaveBeenCalled();
+    // This in-memory adapter does not prove PostgreSQL rollback.
   });
 });

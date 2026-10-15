@@ -29,7 +29,7 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ userId: "clerk-owner" })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: OWNER, role: "league_owner" } })
   mocks.member.mockResolvedValueOnce(target).mockResolvedValueOnce(actorMember).mockResolvedValueOnce(target)
-  mocks.user.mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: ALI, role: "player", isActive: true })
+  mocks.user.mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: ALI, role: "player", isActive: true })
   mocks.league.mockResolvedValue({ id: A, ownerId: OWNER, isActive: true })
   mocks.execute.mockResolvedValue([])
   mocks.update.mockReturnValue({ set: mocks.set }); mocks.set.mockReturnValue({ where: mocks.where })
@@ -69,7 +69,7 @@ describe("League-only member administration", () => {
   })
   it("reactivates the league only, even when the platform account stays blocked", async () => {
     mocks.member.mockReset().mockResolvedValueOnce({ ...target, status: "suspended" }).mockResolvedValueOnce(actorMember).mockResolvedValueOnce({ ...target, status: "suspended" })
-    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: ALI, role: "player", isActive: false })
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: ALI, role: "player", isActive: false })
     await toggleUserStatus({ ...key, status: "active" })
     expect(mocks.set).toHaveBeenCalledWith({ status: "active" })
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith(userTenantRoles)
@@ -123,7 +123,7 @@ describe("League-only member administration", () => {
   it.each([{ role: "league_owner" }, { role: "super_admin" }, { userId: OWNER }])("protects owner/self/platform membership %s", async changes => {
     const protectedMember = { ...target, ...changes }
     mocks.member.mockReset().mockResolvedValueOnce(protectedMember).mockResolvedValueOnce(actorMember).mockResolvedValueOnce(protectedMember)
-    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: protectedMember.userId, role: "player" })
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: protectedMember.userId, role: "player" })
     await expect(toggleUserStatus({ ...key, status: "suspended" })).rejects.toThrow("cannot be changed")
     expect(mocks.update).not.toHaveBeenCalled()
   })
@@ -133,7 +133,7 @@ describe("League-only member administration", () => {
     expect(mocks.update).not.toHaveBeenCalled()
   })
   it("protects a platform administrator even if their league role is ordinary", async () => {
-    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: ALI, role: "super_admin" })
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: ALI, role: "super_admin" })
     await expect(updateUserRole({ ...key, role: "fan" })).rejects.toThrow("cannot be changed")
     expect(mocks.update).not.toHaveBeenCalled()
   })
@@ -235,12 +235,12 @@ describe("League membership removal", () => {
   it.each([{ userId: OWNER }, { role: "league_owner" }, { role: "super_admin" }])("protects owner/self/platform membership from removal %s", async changes => {
     const protectedMember = { ...target, ...changes }
     mocks.member.mockReset().mockResolvedValueOnce(protectedMember).mockResolvedValueOnce(actorMember).mockResolvedValueOnce(protectedMember)
-    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: protectedMember.userId, role: "player" })
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: protectedMember.userId, role: "player" })
     await expect(removeMember(removeKey)).rejects.toThrow("cannot be removed")
     expect(mocks.del).not.toHaveBeenCalled()
   })
   it("protects a platform administrator whose league role is ordinary", async () => {
-    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, isActive: true }).mockResolvedValueOnce({ id: ALI, role: "super_admin" })
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: ALI, role: "super_admin" })
     await expect(removeMember(removeKey)).rejects.toThrow("cannot be removed")
     expect(mocks.del).not.toHaveBeenCalled()
   })
@@ -276,5 +276,25 @@ describe("League membership removal", () => {
   it.each([{ membershipId: "not-a-uuid" }, { expectedVersion: -1 }, { expectedVersion: 1.5 }])("rejects invalid removal input %s", async change => {
     await expect(removeMember({ ...removeKey, ...change } as never)).rejects.toThrow()
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe("Member-command current session mapping", () => {
+  it.each(["role", "status", "remove"])("%s rejects a remapped Clerk subject after locks", async command => {
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: "another-clerk", isActive: true })
+    await expect(command === "role" ? updateUserRole({ ...key, role: "coach" })
+      : command === "status" ? toggleUserStatus({ ...key, status: "suspended" }) : removeMember(key))
+      .rejects.toThrow("access changed")
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.del).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+    expect(mocks.user.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[2])
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
+  })
+  it("rejects an unlinked session even on an otherwise unchanged membership command", async () => {
+    mocks.user.mockReset().mockResolvedValueOnce({ id: OWNER, clerkId: null, isActive: true })
+    await expect(toggleUserStatus({ ...key, status: "active" })).rejects.toThrow("access changed")
+    expect(mocks.update).not.toHaveBeenCalled()
   })
 })

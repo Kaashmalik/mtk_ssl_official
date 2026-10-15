@@ -332,3 +332,23 @@ orders for both slots, opposite-slot conflicts, account/membership revocation,
 scoring/unassignment and audit rollback on a reconciled local/staging schema.
 All five prior migrations remain unapplied; the deployment gate stays default-
 off. Pending-member assignments, stale-operator CAS and writer fencing remain open.
+
+## Batch 16 lifecycle and session authorization (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. Toss/start use an exact-league READ COMMITTED transaction
+with match -> account -> league -> membership -> sorted-team locks, current
+assignment/session checks and atomic audits. Member role/status/removal commands
+also compare the current locked Clerk mapping; role/status isolation is explicit.
+
+Web end-match writes now proxy to canonical completion. The service validates
+optional Player of the Match against an exact-league match-team player and
+atomically audits result/award changes using the existing `man_of_match_id` and
+`audit_logs` schema. Deploy matching web/service code and workspace artifacts;
+old service code would ignore the optional award. Verify scoring-service audit
+INSERT grants, real audit rollback, revocation/completion races and replay in
+staging. Tests are mocked; no actual PostgreSQL behavior is certified here.
+
+All five prior migrations remain unapplied; the deployment gate remains
+default-off. Broader match CRUD/read/stream context, historical deletion policy,
+team-manager races and reliable lifecycle event fan-out remain open.

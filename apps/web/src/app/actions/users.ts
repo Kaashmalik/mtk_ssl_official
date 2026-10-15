@@ -29,7 +29,7 @@ async function requireMemberManager() {
   if (access.status !== "ready" || access.context.role !== "league_owner" || !hasPermission(access.context.role, "user:manage")) {
     throw new Error("Forbidden: league member management requires an active owner membership")
   }
-  return access.context
+  return { ...access.context, clerkId: userId }
 }
 
 /** Administrative contact details are owner-only, not team-manager user:read. */
@@ -73,7 +73,7 @@ async function changeMember(input: MemberRoleChange | MemberStatusChange) {
     const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
       eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
     ) })
-    if (!actor || actor.id !== context.actorId || actor.isActive !== true
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
       || actorMember.status !== "active" || actorMember.role !== "league_owner") {
@@ -86,7 +86,7 @@ async function changeMember(input: MemberRoleChange | MemberStatusChange) {
       throw new Error("Member not found in this league")
     }
     // Ownership and platform authority are not editable in ordinary member CRUD.
-    // Protect every owner, including the last one, until two-party transfer ships.
+    // Protect every owner, including the last one; use the two-party transfer.
     if (target.userId === context.actorId || target.userId === league.ownerId
       || target.role === "league_owner" || target.role === "super_admin" || account.role === "super_admin") {
       throw new Error("Owner, platform and self access cannot be changed here")
@@ -108,7 +108,7 @@ async function changeMember(input: MemberRoleChange | MemberStatusChange) {
         before: { role: target.role, status: target.status, version: target.version }, after: updated },
     })
     return updated
-  })
+  }, { isolationLevel: "read committed" })
   revalidatePath("/dashboard", "layout")
   return { success: true as const, member }
 }
@@ -152,7 +152,7 @@ export async function removeMember(input: MemberRemoval) {
     const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
       eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
     ) })
-    if (!actor || actor.id !== context.actorId || actor.isActive !== true
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
       || actorMember.status !== "active" || actorMember.role !== "league_owner") {

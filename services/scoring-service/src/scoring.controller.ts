@@ -164,7 +164,7 @@ export class ScoringController {
   async completeMatch(
     @Req() req: Request,
     @Param('matchId') matchId: string,
-    @Body() body: { winnerId?: string; result?: string },
+    @Body() body: { winnerId?: string; result?: string; manOfMatchId?: string },
   ) {
     await this.scoringService.completeMatch(
       tenantIdOf(req),
@@ -172,6 +172,7 @@ export class ScoringController {
       matchId,
       body.winnerId,
       body.result,
+      body.manOfMatchId,
     );
     await this.gateway.broadcastMatchState(matchId);
     return { success: true, matchId, status: 'completed' };

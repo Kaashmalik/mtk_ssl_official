@@ -57,6 +57,11 @@ describe('Post-commit match-state broadcast', () => {
       { matchId: MATCH, ballId: MATCH })).rejects.toThrow('Scoring actor missing');
     expect(service.undoBall).not.toHaveBeenCalled();
   });
+  it('passes award details but takes tenant and actor only from guarded request context', async () => {
+    await controller.completeMatch(request, MATCH, { winnerId: MATCH, result: 'Won', manOfMatchId: MATCH,
+      tenantId: 'forged', actorId: 'forged' } as never);
+    expect(service.completeMatch).toHaveBeenCalledWith('tenant', '00000000-0000-4000-8000-000000000006', MATCH, MATCH, 'Won', MATCH);
+  });
 
   it.each(Object.keys(service))('protects the real %s route with ordered token, tenant, and actor guards', (operation) => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, ScoringController.prototype[operation]) as unknown[];

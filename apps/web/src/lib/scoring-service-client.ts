@@ -210,3 +210,16 @@ export async function proxyCompleteInnings(
     actorId,
   );
 }
+
+/** Match completion stays in the canonical writer, including optional awards. */
+export async function proxyCompleteMatch(matchId: string,
+  input: { winnerId?: string; result?: string; manOfMatchId?: string }, tenantId: string, actorId: string,
+): Promise<{ success: true; matchId: string; status: "completed" }> {
+  const response = await scoringFetch<unknown>(`/scoring/match/${encodeURIComponent(matchId)}/complete`, {
+    method: "POST", body: JSON.stringify(input),
+  }, tenantId, actorId);
+  const accepted = z.object({ success: z.literal(true), matchId: z.literal(matchId), status: z.literal("completed") })
+    .safeParse(response);
+  if (!accepted.success) throw new Error("Scoring service did not acknowledge this match completion");
+  return accepted.data;
+}

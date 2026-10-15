@@ -12,6 +12,9 @@ import { withAuth } from "./action-guard"
 import { checkPlanFeature, type PlanKey } from "@mtk/database"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { scorerMembership } from "@/lib/scorer-membership"
+import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
+import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
+import { proxyCompleteMatch } from "@/lib/scoring-service-client"
 
 
 
@@ -184,47 +187,57 @@ export const getMatches = withAuth("match:read", async (filters: MatchFilters) =
 export const setTossResult = withAuth("match:score", async (matchId: string, tossWinnerId: string, tossDecision: "bat" | "bowl") => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  return withTenantContext({ userId, tenantId: tenant.id }, async () => {
-    const [match] = await db.update(matches)
-      .set({ tossWinnerId, tossDecision, status: "toss", updatedAt: new Date() })
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-      .returning()
-    if (!match) throw new Error("Match not found")
-    revalidatePath(`/dashboard/matches/${matchId}`)
-    return { success: true, match }
+  z.object({ matchId: z.string().uuid(), tossWinnerId: z.string().uuid(), tossDecision: z.enum(["bat", "bowl"]) })
+    .parse({ matchId, tossWinnerId, tossDecision })
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:score", tenantId)
+  const match = await mutateMatchLifecycle(userId, tenantId, matchId, "MATCH_TOSS_SET", existing => {
+    if (!["scheduled", "toss"].includes(existing.status)) throw new Error("Toss cannot change after the match has started")
+    if (![existing.teamAId, existing.teamBId].includes(tossWinnerId)) throw new Error("Toss winner must be a match team")
+    if (existing.status === "toss" && existing.tossWinnerId === tossWinnerId && existing.tossDecision === tossDecision) return null
+    return { tossWinnerId, tossDecision, status: "toss" }
   })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/matches/${matchId}/scoring`)
+  return { success: true, match }
 })
 
 export const startMatch = withAuth("match:score", async (matchId: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  return withTenantContext({ userId, tenantId: tenant.id }, async () => {
-    const [match] = await db.update(matches)
-      .set({ status: "live", startDate: new Date(), updatedAt: new Date() })
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-      .returning()
-    if (!match) throw new Error("Match not found")
-    revalidatePath(`/dashboard/matches/${matchId}`)
-    return { success: true, match }
+  z.string().uuid().parse(matchId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:score", tenantId)
+  const match = await mutateMatchLifecycle(userId, tenantId, matchId, "MATCH_START", existing => {
+    if (existing.status === "live") return null
+    if (!["scheduled", "toss"].includes(existing.status)) throw new Error("This match cannot be started")
+    return { status: "live", startDate: existing.startDate ?? new Date() }
   })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/matches/${matchId}/scoring`)
+  return { success: true, match }
 })
 
 export const endMatch = withAuth("match:score", async (matchId: string, winnerId: string | null, result: string, manOfMatchId?: string | null) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  return withTenantContext({ userId, tenantId: tenant.id }, async () => {
-    const [match] = await db.update(matches)
-      .set({ status: "completed", winnerId, result, manOfMatchId: manOfMatchId ?? null, endDate: new Date(), updatedAt: new Date() })
-      .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-      .returning()
-    if (!match) throw new Error("Match not found")
-    revalidatePath(`/dashboard/matches/${matchId}`)
-    revalidatePath("/dashboard/matches")
-    return { success: true, match }
-  })
+  const command = z.object({ matchId: z.string().uuid(), winnerId: z.string().uuid().nullable(),
+    result: z.string().trim().min(1).max(2000), manOfMatchId: z.string().uuid().nullish() })
+    .parse({ matchId, winnerId, result, manOfMatchId })
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requireMatchScoringAccess(userId, tenantId, matchId)
+  const actorId = await requireScoringActorId(userId)
+  // Never write completed results locally: canonical authorization, replay,
+  // cache invalidation and broadcasts belong to the scoring service.
+  await proxyCompleteMatch(matchId, { winnerId: command.winnerId ?? undefined,
+    result: command.result, manOfMatchId: command.manOfMatchId ?? undefined }, tenantId, actorId)
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/matches/${matchId}/scoring`)
+  revalidatePath(`/matches/${matchId}/live`)
+  return { success: true, matchId, status: "completed" as const }
 })
 
 const startStreamSchema = z.object({

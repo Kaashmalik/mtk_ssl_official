@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import { db } from '@mtk/database';
 import {
   matchBalls,
@@ -20,6 +21,7 @@ import {
   tournaments,
   venues,
   isUniqueViolation,
+  auditLogs,
 } from '@mtk/database';
 import Redis from 'ioredis';
 import { calculateDeliveryDelta } from '@mtk/database/lib/scoring-delivery';
@@ -980,10 +982,11 @@ export class ScoringService {
     matchId: string,
     winnerId?: string,
     result?: string,
+    manOfMatchId?: string,
   ): Promise<void> {
     validateMutationIds(matchId);
-    const completion = z.object({ winnerId: z.string().uuid().optional(), result: z.string().min(1).max(2000).optional() })
-      .safeParse({ winnerId, result });
+    const completion = z.object({ winnerId: z.string().uuid().optional(), result: z.string().min(1).max(2000).optional(),
+      manOfMatchId: z.string().uuid().optional() }).safeParse({ winnerId, result, manOfMatchId });
     if (!completion.success) throw new BadRequestException('Invalid match completion command');
     const wasAlreadyComplete = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
@@ -998,7 +1001,8 @@ export class ScoringService {
       }
       // An identical retry cannot overwrite the committed result/end timestamp.
       if (match.status === 'completed') {
-        if ((winnerId || null) !== match.winnerId || (result || null) !== match.result) {
+        if ((winnerId || null) !== match.winnerId || (result || null) !== match.result
+          || (manOfMatchId !== undefined && manOfMatchId !== match.manOfMatchId)) {
           throw new ConflictException('Completed result requires an audited correction');
         }
         return true;
@@ -1006,9 +1010,26 @@ export class ScoringService {
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException('This match can no longer be completed');
       }
+      // Omission is not a request to erase metadata set before completion.
+      const awardId = manOfMatchId ?? match.manOfMatchId;
+      if (awardId) {
+        await tx.execute(sql`SELECT ${players.id} FROM ${players}
+          WHERE ${and(eq(players.id, awardId), eq(players.tenantId, tenantId))} FOR SHARE`);
+        const player = await tx.query.players.findFirst({ where: and(eq(players.id, awardId), eq(players.tenantId, tenantId)) });
+        if (!player || player.id !== awardId || player.tenantId !== tenantId
+          || ![match.teamAId, match.teamBId].includes(player.teamId)) {
+          throw new BadRequestException('Player of the Match must belong to a match team in this league');
+        }
+      }
       await tx.update(matches).set({ status: 'completed', winnerId: winnerId || null,
-        result: result || null, endDate: new Date(), updatedAt: new Date(),
+        result: result || null, manOfMatchId: awardId, endDate: new Date(), updatedAt: new Date(),
       }).where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)));
+      await tx.insert(auditLogs).values({ requestId: randomUUID(), tenantId, actorId,
+        method: 'MATCH_COMPLETE', path: `/scoring/match/${matchId}/complete`, statusCode: '200',
+        payload: { matchId,
+          before: { status: match.status, winnerId: match.winnerId, result: match.result, manOfMatchId: match.manOfMatchId },
+          after: { status: 'completed', winnerId: winnerId || null, result: result || null, manOfMatchId: awardId } },
+      });
       return false;
     }, { isolationLevel: 'read committed' });
 

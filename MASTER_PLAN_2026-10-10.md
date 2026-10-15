@@ -1236,6 +1236,57 @@ Team-manager assignment/removal races, stale-operator CAS, pending assignments,
 fencing, scoped grants and live fan-out remain open. Broad roadmap counts remain
 **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 16: lifecycle authority and member-session guards
+
+#### Implemented
+
+- Synced clean `main` with remote `1ee28e4` before implementation.
+- Member role/status/removal mutations compare the authenticated Clerk subject
+  against the locked current actor account; remapped/unlinked sessions fail even
+  on no-op commands. Role/status transactions explicitly use READ COMMITTED.
+- Toss/start use exact active league resolution and match -> account -> league
+  -> membership -> sorted-team locks. Current owner or assigned primary/backup
+  scorer, active account/session/league/member and exact-league team checks run
+  under lock. Toss validates winner and phase; start cannot reopen ended/break
+  states. Authorized identical retries preserve timestamps without duplicate audit.
+- Changed toss/start commands audit bounded before/after snapshots atomically.
+- End-match writes now go through the canonical completion service, not a second
+  Next.js result writer. Trusted tenant/actor headers, assignment guards and an
+  explicit success/match/status acknowledgement gate UI success. No local fallback.
+- Added optional canonical Player of the Match validation against a locked
+  exact-league player's current match-team association and atomic completion
+  audit. This does not prove historical XI participation. Completed retries do
+  not overwrite result/timestamp/award; omitted legacy award is preserved and a
+  conflicting explicit award requires a future audited correction workflow.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 38 files, **883 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **1,204 passing tests** (+110 over Batch 15) |
+
+Added 89 lifecycle-action, four member-session, eight transport/acknowledgement
+and nine canonical service/controller regressions. Mocks verify call ordering,
+SQL predicates and failure handling, not PostgreSQL locking/rollback, deployed
+cache/event delivery or authenticated browser behavior. Current Drizzle
+PostgreSQL transaction configuration documentation was consulted.
+
+No build, lint, standalone type-check, new migration, remote database operation
+or deployment ran. Five prior migrations remain unapplied and the release gate
+stays default-off. Deploy matching web/service/artifacts after staging checks,
+including audit INSERT grants and real audit-failure rollback. Old service code
+would ignore the optional award field; Next toss/start does not add canonical
+Redis/Kafka/Socket.IO fan-out.
+
+ISO-04 stays open: next repair remaining match metadata CRUD/read/stream and
+dashboard active-league destinations, merged team-pair/resource/date validation
+and safe historical deletion rules. Scoped grants/step-up, pending assignments,
+team-manager assignment races, stale-operator CAS and writer fencing remain open.
+Whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
