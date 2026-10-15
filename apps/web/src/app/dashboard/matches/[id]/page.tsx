@@ -1,3 +1,4 @@
+import React from "react"
 import Link from "next/link"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
@@ -13,7 +14,7 @@ import { ScorerAssign } from "@/components/matches/scorer-assign"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
 import { db, teams, matchInnings, players, venues } from "@mtk/database"
-import { eq, asc, inArray } from "drizzle-orm"
+import { and, eq, asc, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 
@@ -27,9 +28,9 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   }
 
   // Fetch Team A details
-  const [teamA] = await db.select().from(teams).where(eq(teams.id, match.teamAId)).limit(1)
+  const [teamA] = await db.select().from(teams).where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, match.tenantId))).limit(1)
   // Fetch Team B details
-  const [teamB] = await db.select().from(teams).where(eq(teams.id, match.teamBId)).limit(1)
+  const [teamB] = await db.select().from(teams).where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, match.tenantId))).limit(1)
 
   if (!teamA || !teamB) {
     notFound()
@@ -38,7 +39,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   // Fetch Venue details
   let venueName = "TBD Venue"
   if (match.venueId) {
-    const [venue] = await db.select().from(venues).where(eq(venues.id, match.venueId)).limit(1)
+    const [venue] = await db.select().from(venues).where(and(eq(venues.id, match.venueId), eq(venues.tenantId, match.tenantId))).limit(1)
     if (venue) {
       venueName = `${venue.name}, ${venue.city}`
     }
@@ -47,7 +48,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   // Fetch Man of the Match details
   let momName = ""
   if (match.manOfMatchId) {
-    const [momPlayer] = await db.select().from(players).where(eq(players.id, match.manOfMatchId)).limit(1)
+    const [momPlayer] = await db.select().from(players).where(and(eq(players.id, match.manOfMatchId), eq(players.tenantId, match.tenantId))).limit(1)
     if (momPlayer) {
       momName = momPlayer.name
     }
@@ -55,11 +56,11 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
 
   // Players from both teams for Player of the Match selection
   const matchPlayers = await db.select({ id: players.id, name: players.name }).from(players)
-    .where(inArray(players.teamId, [teamA.id, teamB.id]))
+    .where(and(eq(players.tenantId, match.tenantId), inArray(players.teamId, [teamA.id, teamB.id])))
 
   // Fetch Innings details
   const inningsRaw = await db.select().from(matchInnings)
-    .where(eq(matchInnings.matchId, id))
+    .where(and(eq(matchInnings.matchId, id), eq(matchInnings.tenantId, match.tenantId)))
     .orderBy(asc(matchInnings.inningsNumber))
 
   // Fetch scorecard details
@@ -72,17 +73,17 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
 
     // Resolve player names
     const battingWithNames = await Promise.all(battingEntries.map(async (b) => {
-      const [p] = await db.select({ name: players.name }).from(players).where(eq(players.id, b.playerId)).limit(1)
+      const [p] = await db.select({ name: players.name }).from(players).where(and(eq(players.id, b.playerId), eq(players.tenantId, match.tenantId))).limit(1)
       
       // Also get bowler name and fielder name for dismissal text if needed
       let bowlerName = ""
       if (b.bowlerId) {
-        const [bp] = await db.select({ name: players.name }).from(players).where(eq(players.id, b.bowlerId)).limit(1)
+        const [bp] = await db.select({ name: players.name }).from(players).where(and(eq(players.id, b.bowlerId), eq(players.tenantId, match.tenantId))).limit(1)
         bowlerName = bp?.name ?? ""
       }
       let fielderName = ""
       if (b.fielderId) {
-        const [fp] = await db.select({ name: players.name }).from(players).where(eq(players.id, b.fielderId)).limit(1)
+        const [fp] = await db.select({ name: players.name }).from(players).where(and(eq(players.id, b.fielderId), eq(players.tenantId, match.tenantId))).limit(1)
         fielderName = fp?.name ?? ""
       }
 
@@ -113,7 +114,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
     }))
 
     const bowlingWithNames = await Promise.all(bowlingEntries.map(async (b) => {
-      const [p] = await db.select({ name: players.name }).from(players).where(eq(players.id, b.playerId)).limit(1)
+      const [p] = await db.select({ name: players.name }).from(players).where(and(eq(players.id, b.playerId), eq(players.tenantId, match.tenantId))).limit(1)
       return {
         name: p?.name ?? "Unknown Player",
         overs: b.overs ? Number(b.overs).toFixed(1) : "0.0",
@@ -170,7 +171,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
               <ArrowLeft className="h-4 w-4 mr-2" />Back
             </Button>
           </Link>
-          <div className="flex items-center gap-2">
+          {match.status === "scheduled" && <div className="flex items-center gap-2">
             <Link href={`/dashboard/matches/${match.id}/edit`}>
               <Button variant="outline" size="sm">
                 Edit Match
@@ -181,9 +182,10 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
               id={match.id}
               redirectHref="/dashboard/matches"
               entityLabel="match"
+              operation="cancel"
               entityName={`${teamA.name} vs ${teamB.name}`}
             />
-          </div>
+          </div>}
         </div>
       </MotionWrapper>
 

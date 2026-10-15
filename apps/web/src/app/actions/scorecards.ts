@@ -8,6 +8,7 @@ import { eq, asc, and } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
+import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 
 
 // ─── Schemas ──────────────────────────────────────────────────
@@ -121,16 +122,19 @@ export const saveScorecard = withAuth("scorecard:create", async (input: SaveScor
 export const getFullScorecard = withAuth("scorecard:read", async (matchId: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
+  z.string().uuid().parse(matchId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("scorecard:read", tenantId)
   const [batting, bowling, fielding] = await Promise.all([
     db.select().from(battingScorecards)
-      .where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenant.id)))
+      .where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId)))
       .orderBy(asc(battingScorecards.battingPosition)),
     db.select().from(bowlingScorecards)
-      .where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenant.id)))
+      .where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId)))
       .orderBy(asc(bowlingScorecards.bowlingPosition)),
     db.select().from(fieldingScorecards)
-      .where(and(eq(fieldingScorecards.matchId, matchId), eq(fieldingScorecards.tenantId, tenant.id))),
+      .where(and(eq(fieldingScorecards.matchId, matchId), eq(fieldingScorecards.tenantId, tenantId))),
   ])
   return { batting, bowling, fielding }
 })

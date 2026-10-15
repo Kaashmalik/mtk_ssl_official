@@ -352,3 +352,24 @@ staging. Tests are mocked; no actual PostgreSQL behavior is certified here.
 All five prior migrations remain unapplied; the deployment gate remains
 default-off. Broader match CRUD/read/stream context, historical deletion policy,
 team-manager races and reliable lifecycle event fan-out remain open.
+
+## Batch 17 match management and active-league reads (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. Match metadata/cancel/stream commands now use READ
+COMMITTED with existing match -> actor -> league -> membership -> sorted-team
+-> tournament -> venue locks as needed, current owner/session checks and atomic
+audits. Creation inserts a new match, without locking an existing match after
+the actor. Reads/pickers and dashboard auxiliaries are explicitly tenant-scoped.
+
+`deleteMatch` now cancels an unstarted scheduled fixture instead of hard-deleting
+and cascading. It refuses lifecycle/scoring evidence, including legacy manual
+scorecards; the row and assignments are retained. This is not a database-wide
+history guarantee: existing team/player cascades and non-participating manual
+scorecard writers remain to be audited. Reconcile those writers and lock order
+before certifying concurrent edit/cancel/scoring/resource-delete behavior.
+
+All five prior migrations remain unapplied and the release gate stays default-
+off. Verify actual grants, audit INSERT/rollback, schema compatibility, real
+two-session races, history-query performance/indexes and RLS in staging. Mocked
+tests do not establish these database properties or deployed lifecycle fan-out.

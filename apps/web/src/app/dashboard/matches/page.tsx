@@ -1,3 +1,4 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
@@ -7,25 +8,27 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Plus, Clock, CheckCircle2, Inbox } from "lucide-react"
-import { getMyTenant } from "@/app/actions/tenants"
+import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { db, teams, matches, matchInnings } from "@mtk/database"
 import { eq, and, desc } from "drizzle-orm"
 import { unstable_noStore as noStore } from "next/cache"
 
 // ─── Helpers ──────────────────────────────────────────────────
 
-async function getTeamName(teamId: string): Promise<string> {
+async function getTeamName(tenantId: string, teamId: string): Promise<string> {
   try {
-    const [team] = await db.select({ name: teams.name }).from(teams).where(eq(teams.id, teamId)).limit(1)
+    const [team] = await db.select({ name: teams.name }).from(teams)
+      .where(and(eq(teams.id, teamId), eq(teams.tenantId, tenantId))).limit(1)
     return team?.name ?? "TBD"
   } catch {
     return "TBD"
   }
 }
 
-async function getInningsForMatch(matchId: string) {
+async function getInningsForMatch(tenantId: string, matchId: string) {
   try {
-    return await db.select().from(matchInnings).where(eq(matchInnings.matchId, matchId)).orderBy(matchInnings.inningsNumber)
+    return await db.select().from(matchInnings).where(and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId)))
+      .orderBy(matchInnings.inningsNumber)
   } catch {
     return []
   }
@@ -66,9 +69,9 @@ async function getMatchesByStatus(tenantId: string, status: "live" | "scheduled"
     return await Promise.all(
       matchesRaw.map(async (m) => {
         const [teamAName, teamBName, innings] = await Promise.all([
-          getTeamName(m.teamAId),
-          getTeamName(m.teamBId),
-          getInningsForMatch(m.id),
+          getTeamName(tenantId, m.teamAId),
+          getTeamName(tenantId, m.teamBId),
+          getInningsForMatch(tenantId, m.id),
         ])
         const inn1 = innings.find((i) => i.inningsNumber === 1)
         const inn2 = innings.find((i) => i.inningsNumber === 2)
@@ -130,13 +133,14 @@ export default async function MatchesPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) redirect("/dashboard/league/setup")
+  await requirePermissionServer("match:read", tenantId)
 
   const [liveMatches, upcomingMatches, completedMatches] = await Promise.all([
-    getMatchesByStatus(tenant.id, "live"),
-    getMatchesByStatus(tenant.id, "scheduled"),
-    getMatchesByStatus(tenant.id, "completed"),
+    getMatchesByStatus(tenantId, "live"),
+    getMatchesByStatus(tenantId, "scheduled"),
+    getMatchesByStatus(tenantId, "completed"),
   ])
 
   return (

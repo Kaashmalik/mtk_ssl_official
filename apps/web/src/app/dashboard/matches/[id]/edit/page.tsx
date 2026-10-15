@@ -1,6 +1,6 @@
+import React from "react"
 import { notFound, redirect } from "next/navigation"
-import { getMatch } from "@/app/actions/matches"
-import { getTeams } from "@/app/actions/teams"
+import { getMatch, getMatchFormOptions } from "@/app/actions/matches"
 import { EditMatchForm } from "@/components/matches/edit-match-form"
 
 export default async function EditMatchPage({
@@ -11,11 +11,11 @@ export default async function EditMatchPage({
   const { id } = await params
   const match = await getMatch(id)
   if (!match) notFound()
+  if (match.status !== "scheduled") redirect(`/dashboard/matches/${id}`)
 
   let teams: { id: string; name: string }[] = []
   try {
-    const result = await getTeams({ page: 1, pageSize: 100, isActive: true, sortBy: "name", sortOrder: "asc" })
-    teams = result.data.map((t) => ({ id: t.id, name: t.name }))
+    teams = (await getMatchFormOptions("update")).teams
   } catch {
     // Redirect if unauthorized or tenant missing
     redirect("/dashboard/league/setup")

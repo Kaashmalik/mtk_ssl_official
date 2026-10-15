@@ -49,7 +49,7 @@ export function NewMatchForm({ teams, tournaments }: NewMatchFormProps) {
           matchFormat: formData.matchFormat as "t20" | "odi" | "test" | "t10" | "custom",
           matchType: formData.matchType as "group" | "knockout" | "final" | "semi_final" | "quarter_final" | "friendly" | "practice",
           totalOvers: Number(formData.totalOvers),
-          scheduledDate: formData.scheduledDate || null,
+          scheduledDate: formData.scheduledDate ? new Date(formData.scheduledDate).toISOString() : null,
           umpire1: formData.umpire1.trim() || null,
           umpire2: [
             formData.umpire2.trim() || null,

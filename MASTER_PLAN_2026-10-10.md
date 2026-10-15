@@ -1287,6 +1287,66 @@ and safe historical deletion rules. Scoped grants/step-up, pending assignments,
 team-manager assignment races, stale-operator CAS and writer fencing remain open.
 Whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 17: match metadata/read/stream isolation and safe cancellation
+
+#### Implemented
+
+- Synced clean `main` with remote `7220a97` before edits.
+- Match metadata/cancel/stream actions use explicit active-league permission and
+  one READ COMMITTED transaction: existing match -> current actor -> league ->
+  membership -> sorted teams -> tournament -> venue as needed. Creation does
+  not lock an existing match after its actor. Current Clerk/account/league and
+  exact active owner membership are checked after locks, not from global roles.
+- Strict payloads reject assignment/result/status/identity injection. Merged
+  partial team edits cannot create self-matches. Team/venue activation and
+  exact-league references, open tournament phase, bounded valid schedule values
+  and PostgreSQL-safe positive match numbers are checked. Both forms send ISO
+  instants; legacy timezone-less input still uses server-local interpretation.
+- Edits/cancellation require an unstarted scheduled fixture with no lifecycle
+  markers or scoring evidence. History existence checks cover innings, balls,
+  events, projections and manual scorecards, selecting IDs only. `deleteMatch`
+  now cancels instead of cascading, preserves assignments/history and ends any
+  active stream. UI copy says Cancel fixture; progressed matches cannot open
+  metadata editing. No restore/purge/correction workflow was added.
+- Stream-start entitlement uses the locked league plan; ending remains allowed
+  after downgrade/completion with current authority. URLs are bounded, disallow
+  userinfo/unsafe schemes and never appear in the bounded atomic audit. This
+  does not implement or validate real provider playback/RTMP/WebRTC ingest.
+- Detail/list actions, match dashboard and create/edit picker reads use the
+  active league. Auxiliary team/venue/player/innings queries are tenant-scoped.
+  Full-scorecard detail reads share that resolver; remaining scorecard actions
+  are not claimed fixed. Changed commands audit atomically; authorized cancel/
+  identical stream retries and empty metadata patches avoid duplicate writes.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 40 files, **1,138 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **1,459 passing tests** (+255 over Batch 16) |
+
+New suites: 245 management/read and 10 server-page cases. Existing creation/
+edit fixtures now model transaction authorization. Tests mock DB/auth/rendering;
+they do not prove real PostgreSQL lock compatibility, rollback, RLS/grants,
+authenticated browser/device behavior, streaming or deployed event fan-out.
+Current Drizzle transaction docs were consulted; diff whitespace checks passed.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five migrations remain unapplied
+and the release gate stays default-off. Keep real two-session edit/cancel/
+scoring/revocation/resource-delete acceptance and audit rollback as release gates.
+
+ISO-04 stays open. Next source work: remaining manual scorecard writes/innings
+reads and team/player/tournament/venue CRUD, exact active league, canonical
+writer ownership and historical cascade deletion/lock ordering. Existing manual
+scorecard writers do not share the match lock; team/player cascades can still
+affect historical matches. Tournament participation, published visibility,
+history-query performance/index review, league timezone UX, scoped grants,
+step-up, pending assignments, CAS and fencing remain open. Whole-task counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

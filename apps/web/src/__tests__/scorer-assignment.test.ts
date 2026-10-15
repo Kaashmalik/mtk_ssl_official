@@ -6,7 +6,7 @@ import { assignScorer, getScorersForTenant, updateMatch } from "@/app/actions/ma
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), permission: vi.fn(), tenant: vi.fn(), myTenant: vi.fn(),
   where: vi.fn(), limit: vi.fn(), set: vi.fn(), updateWhere: vi.fn(), returning: vi.fn(), context: vi.fn(),
   transaction: vi.fn(), execute: vi.fn(), match: vi.fn(), user: vi.fn(), member: vi.fn(), league: vi.fn(),
-  update: vi.fn(), directUpdate: vi.fn(), insert: vi.fn(), values: vi.fn(), revalidate: vi.fn() }))
+  update: vi.fn(), directUpdate: vi.fn(), insert: vi.fn(), values: vi.fn(), revalidate: vi.fn(), team: vi.fn(), history: vi.fn() }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
 vi.mock("@/lib/rbac-server", () => ({ requirePermissionServer: mocks.permission, resolveActiveTenantId: mocks.tenant }))
@@ -22,7 +22,8 @@ const BACKUP = "00000000-0000-4000-8000-000000000004"
 const TENANT = "00000000-0000-4000-8000-000000000003"
 const OWNER = "00000000-0000-4000-8000-000000000009"
 const dialect = new PgDialect()
-const fixture = { id: MATCH, tenantId: TENANT, scorerId: null, backupScorerId: null }
+const fixture = { id: MATCH, tenantId: TENANT, scorerId: null, backupScorerId: null, status: "scheduled",
+  teamAId: SCORER, teamBId: BACKUP, tournamentId: null, venueId: null }
 const actor = { id: OWNER, clerkId: "clerk", isActive: true }
 const ownerMember = { userId: OWNER, tenantId: TENANT, role: "league_owner", status: "active" }
 beforeEach(() => {
@@ -43,6 +44,8 @@ beforeEach(() => {
   })
   mocks.league.mockResolvedValue({ id: TENANT, isActive: true })
   mocks.execute.mockResolvedValue([])
+  mocks.team.mockImplementation(async ({ where }) => ({ id: dialect.sqlToQuery(where).params[0], tenantId: TENANT, isActive: true }))
+  mocks.history.mockResolvedValue(undefined)
   mocks.update.mockReturnValue({ set: mocks.set })
   mocks.directUpdate.mockReturnValue({ set: mocks.set })
   mocks.set.mockReturnValue({ where: mocks.updateWhere })
@@ -52,7 +55,9 @@ beforeEach(() => {
   mocks.values.mockResolvedValue(undefined)
   mocks.transaction.mockImplementation(async run => run({ execute: mocks.execute,
     query: { matches: { findFirst: mocks.match }, users: { findFirst: mocks.user },
-      tenants: { findFirst: mocks.league }, userTenantRoles: { findFirst: mocks.member } },
+      tenants: { findFirst: mocks.league }, userTenantRoles: { findFirst: mocks.member }, teams: { findFirst: mocks.team },
+      ...Object.fromEntries(["matchInnings", "matchBalls", "scoringEvents", "scorecardProjections", "battingScorecards",
+        "bowlingScorecards", "fieldingScorecards"].map(name => [name, { findFirst: mocks.history }])) },
     update: mocks.update, insert: mocks.insert,
   }))
   mocks.where.mockReturnValue({ limit: mocks.limit })

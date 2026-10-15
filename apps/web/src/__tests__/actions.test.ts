@@ -179,19 +179,25 @@ describe("Server Actions Unit Tests", () => {
 
   describe("Matches Action - createMatch", () => {
     it("should create a match successfully under active tenant context", async () => {
-      const mockTenant = { id: MOCK_TENANT_ID, name: "Test Tenant" };
-      const mockTeamA = { id: MOCK_TEAM_A_ID, name: "Team A", tenantId: MOCK_TENANT_ID };
-      const mockTeamB = { id: MOCK_TEAM_B_ID, name: "Team B", tenantId: MOCK_TENANT_ID };
-      
-      // getMyTenant resolves user + tenant before loading both teams.
-      vi.mocked((db as any).limit)
-        .mockReturnValueOnce([{ id: "mock-db-user-id", isActive: true }] as any)
-        .mockReturnValueOnce([{ tenant: mockTenant }] as any)
-        .mockReturnValueOnce([mockTeamA] as any)
-        .mockReturnValueOnce([mockTeamB] as any);
+      const mockTenant = { id: MOCK_TENANT_ID, name: "Test Tenant", isActive: true };
+      const actor = { id: "da7c0ab5-0810-482a-a92c-886a87754b20", clerkId: "mock-user-123", isActive: true };
+      const mockTeamA = { id: MOCK_TEAM_A_ID, name: "Team A", tenantId: MOCK_TENANT_ID, isActive: true };
+      const mockTeamB = { id: MOCK_TEAM_B_ID, name: "Team B", tenantId: MOCK_TENANT_ID, isActive: true };
+
+      // Match creation now authorizes the current account/membership and reads
+      // locked resources inside its own transaction, without getMyTenant.
+      vi.mocked(db.transaction).mockImplementationOnce(async (callback: any) => callback({
+        ...db, execute: vi.fn().mockResolvedValue([]), query: {
+          users: { findFirst: vi.fn().mockResolvedValue(actor) },
+          tenants: { findFirst: vi.fn().mockResolvedValue(mockTenant) },
+          userTenantRoles: { findFirst: vi.fn().mockResolvedValue({ userId: actor.id,
+            tenantId: MOCK_TENANT_ID, role: "league_owner", status: "active" }) },
+          teams: { findFirst: vi.fn().mockResolvedValueOnce(mockTeamA).mockResolvedValueOnce(mockTeamB) },
+        },
+      }));
 
       const mockNewMatch = { id: "match-123", tenantId: MOCK_TENANT_ID, teamAId: MOCK_TEAM_A_ID, teamBId: MOCK_TEAM_B_ID };
-      vi.mocked(db.insert(null as any).values(null as any).returning).mockReturnValueOnce([mockNewMatch] as any);
+      vi.mocked((db as any).returning).mockReturnValueOnce([mockNewMatch]);
 
       const response = await createMatch({
         teamAId: MOCK_TEAM_A_ID,
@@ -204,6 +210,7 @@ describe("Server Actions Unit Tests", () => {
 
       expect(response.success).toBe(true);
       expect(response.match).toEqual(mockNewMatch);
+      expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" });
     });
   });
 });

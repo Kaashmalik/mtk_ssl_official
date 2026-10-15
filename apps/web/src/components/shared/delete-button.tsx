@@ -39,6 +39,8 @@ interface DeleteButtonProps {
   entityName?: string
   /** Optional button variant (defaults to destructive outline). */
   variant?: "outline" | "destructive" | "ghost"
+  /** Cancellation preserves the row/history; do not describe it as deletion. */
+  operation?: "delete" | "cancel"
 }
 
 export function DeleteButton({
@@ -48,6 +50,7 @@ export function DeleteButton({
   entityLabel = "item",
   entityName,
   variant = "outline",
+  operation = "delete",
 }: DeleteButtonProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -57,12 +60,12 @@ export function DeleteButton({
     startTransition(async () => {
       try {
         await action(id)
-        toast.success(`${entityLabel.charAt(0).toUpperCase() + entityLabel.slice(1)} deleted`)
+        toast.success(`${entityLabel.charAt(0).toUpperCase() + entityLabel.slice(1)} ${operation === "cancel" ? "cancelled" : "deleted"}`)
         setOpen(false)
         router.push(redirectHref)
         router.refresh()
       } catch (err) {
-        const message = err instanceof Error ? err.message : `Failed to delete ${entityLabel}`
+        const message = err instanceof Error ? err.message : `Failed to ${operation} ${entityLabel}`
         toast.error(message)
         setOpen(false)
       }
@@ -74,16 +77,16 @@ export function DeleteButton({
       <DialogTrigger asChild>
         <Button variant={variant} size="sm" className={variant === "outline" ? "text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30" : ""}>
           <Trash2 className="h-4 w-4 mr-1" />
-          Delete
+          {operation === "cancel" ? "Cancel fixture" : "Delete"}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {entityLabel}?</DialogTitle>
+          <DialogTitle>{operation === "cancel" ? "Cancel" : "Delete"} {entityLabel}?</DialogTitle>
           <DialogDescription>
-            Are you sure you want to permanently delete
+            Are you sure you want to {operation === "cancel" ? "cancel" : "permanently delete"}
             {entityName ? <strong className="text-foreground"> {entityName}</strong> : ` this ${entityLabel}`}?
-            This action cannot be undone.
+            {operation === "cancel" ? "Only an unstarted fixture can be cancelled. The record and history are preserved." : "This action cannot be undone."}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
@@ -94,12 +97,12 @@ export function DeleteButton({
             {isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Deleting...
+                {operation === "cancel" ? "Cancelling..." : "Deleting..."}
               </>
             ) : (
               <>
                 <Trash2 className="h-4 w-4 mr-2" />
-                Delete {entityLabel}
+                {operation === "cancel" ? "Cancel" : "Delete"} {entityLabel}
               </>
             )}
           </Button>
