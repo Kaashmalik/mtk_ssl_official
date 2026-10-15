@@ -33,7 +33,7 @@ async function requireActor() {
   if (!userId) throw new Error("Unauthorized")
   const access = await getDashboardContext(userId)
   if (access.status !== "ready") throw new Error("Forbidden: an active league membership is required")
-  return access.context
+  return { ...access.context, clerkId: userId }
 }
 
 async function requireOwner() {
@@ -103,7 +103,7 @@ export async function initiateOwnershipTransfer(input: OwnershipTransferInitiate
     const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
       eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
     ) })
-    if (!actor || actor.id !== context.actorId || actor.isActive !== true
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
       || actorMember.status !== "active" || actorMember.role !== "league_owner"
@@ -134,9 +134,13 @@ export async function initiateOwnershipTransfer(input: OwnershipTransferInitiate
       throw new Error("A transfer is already pending for this league. Cancel it first.")
     }
     if (open) {
-      await tx.update(ownershipTransfers)
+      const [expired] = await tx.update(ownershipTransfers)
         .set({ status: "expired", resolvedAt: new Date(), version: sql`${ownershipTransfers.version} + 1` })
-        .where(and(eq(ownershipTransfers.id, open.id), eq(ownershipTransfers.version, open.version)))
+        .where(and(eq(ownershipTransfers.id, open.id), eq(ownershipTransfers.tenantId, context.tenantId),
+          eq(ownershipTransfers.status, "pending"), eq(ownershipTransfers.version, open.version),
+          sql`${ownershipTransfers.expiresAt} <= clock_timestamp()`))
+        .returning({ id: ownershipTransfers.id })
+      if (!expired) throw new Error("Transfer changed or has not expired. Reload before sending a new one.")
     }
 
     const expiresAt = new Date(Date.now() + TRANSFER_TTL_MS)
@@ -187,19 +191,24 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
       WHERE ${and(eq(userTenantRoles.tenantId, context.tenantId), inArray(userTenantRoles.userId, ids))}
       ORDER BY ${userTenantRoles.id} FOR UPDATE`)
     await tx.execute(sql`SELECT ${ownershipTransfers.id} FROM ${ownershipTransfers}
-      WHERE ${eq(ownershipTransfers.id, parsed.transferId)} FOR UPDATE`)
+      WHERE ${and(eq(ownershipTransfers.id, parsed.transferId), eq(ownershipTransfers.tenantId, context.tenantId))} FOR UPDATE`)
 
-    const transfer = await tx.query.ownershipTransfers.findFirst({ where: eq(ownershipTransfers.id, parsed.transferId) })
+    const transfer = await tx.query.ownershipTransfers.findFirst({ where: and(
+      eq(ownershipTransfers.id, parsed.transferId), eq(ownershipTransfers.tenantId, context.tenantId),
+    ) })
     if (!transfer || transfer.id !== parsed.transferId || transfer.tenantId !== context.tenantId
       || transfer.toUserId !== context.actorId) {
       throw new Error("Transfer not found in this league")
     }
+    // Do not authorize a different party whose account/membership was not locked.
+    if (transfer.fromUserId !== initial.fromUserId || transfer.toUserId !== initial.toUserId
+      || transfer.fromUserId === transfer.toUserId) throw new Error("Transfer parties changed. Reload before accepting.")
+    const demotedRole = z.enum(demotableRoles).parse(transfer.demotedRole)
     if (transfer.status !== "pending") throw new Error("This transfer is no longer pending")
     if (transfer.version !== parsed.expectedVersion) throw new Error("Transfer changed. Reload before accepting.")
     if (transfer.expiresAt.getTime() <= Date.now()) {
-      await tx.update(ownershipTransfers)
-        .set({ status: "expired", resolvedAt: new Date(), version: sql`${ownershipTransfers.version} + 1` })
-        .where(and(eq(ownershipTransfers.id, transfer.id), eq(ownershipTransfers.version, transfer.version)))
+      // Throwing rolls this transaction back. Leave expiry cleanup to the next
+      // authorized issuance rather than pretending an update here would persist.
       throw new Error("This transfer has expired. Ask the owner to send a new one.")
     }
 
@@ -210,13 +219,15 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
     const toMember = await tx.query.userTenantRoles.findFirst({ where: and(
       eq(userTenantRoles.userId, transfer.toUserId), eq(userTenantRoles.tenantId, context.tenantId),
     ) })
+    const fromAccount = await tx.query.users.findFirst({ where: eq(users.id, transfer.fromUserId) })
     const toAccount = await tx.query.users.findFirst({ where: eq(users.id, transfer.toUserId) })
     // The initiator must still be the recorded owner and still hold owner access.
     if (!league || league.id !== context.tenantId || league.isActive !== true
       || league.ownerId !== transfer.fromUserId) {
       throw new Error("Ownership changed since this transfer was created. Reload before accepting.")
     }
-    if (!fromMember || fromMember.userId !== transfer.fromUserId || fromMember.tenantId !== context.tenantId
+    if (!fromAccount || fromAccount.id !== transfer.fromUserId || fromAccount.isActive !== true
+      || !fromMember || fromMember.userId !== transfer.fromUserId || fromMember.tenantId !== context.tenantId
       || fromMember.status !== "active" || fromMember.role !== "league_owner") {
       throw new Error("The current owner's access changed. This transfer is no longer valid.")
     }
@@ -224,8 +235,12 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
       || toMember.status !== "active") {
       throw new Error("Your membership in this league is no longer active")
     }
-    if (!toAccount || toAccount.id !== transfer.toUserId || toAccount.isActive !== true) {
-      throw new Error("Your account is not active")
+    if (!toAccount || toAccount.id !== transfer.toUserId || toAccount.isActive !== true
+      || toAccount.clerkId !== context.clerkId) {
+      throw new Error("Your account or session changed. Sign in again before accepting.")
+    }
+    if (toMember.role === "league_owner" || toMember.role === "super_admin" || toAccount.role === "super_admin") {
+      throw new Error("Ownership cannot be accepted by an owner or platform account")
     }
 
     // Promote the successor first, then demote and re-point ownership. Every
@@ -237,7 +252,7 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
       .returning({ membershipId: userTenantRoles.id, role: userTenantRoles.role,
         status: userTenantRoles.status, version: userTenantRoles.version })
     if (!promoted) throw new Error("Your membership changed. Reload before accepting.")
-    const [demoted] = await tx.update(userTenantRoles).set({ role: transfer.demotedRole, status: "active" })
+    const [demoted] = await tx.update(userTenantRoles).set({ role: demotedRole, status: "active" })
       .where(and(eq(userTenantRoles.id, fromMember.id), eq(userTenantRoles.tenantId, context.tenantId),
         eq(userTenantRoles.version, fromMember.version)))
       .returning({ membershipId: userTenantRoles.id, role: userTenantRoles.role,
@@ -248,11 +263,16 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
       .returning({ id: tenants.id })
     if (!reassigned) throw new Error("Ownership changed since this transfer was created. Reload before accepting.")
     const [resolved] = await tx.update(ownershipTransfers)
-      .set({ status: "accepted", resolvedAt: new Date(), resolvedBy: context.actorId,
+      .set({ status: "accepted", resolvedAt: sql`clock_timestamp()`, resolvedBy: context.actorId,
         version: sql`${ownershipTransfers.version} + 1` })
-      .where(and(eq(ownershipTransfers.id, transfer.id), eq(ownershipTransfers.version, transfer.version)))
+      // PostgreSQL now() is fixed at transaction start. Use the wall clock at
+      // the final claim, so time spent waiting/working cannot extend consent.
+      .where(and(eq(ownershipTransfers.id, transfer.id), eq(ownershipTransfers.tenantId, context.tenantId),
+        eq(ownershipTransfers.fromUserId, transfer.fromUserId), eq(ownershipTransfers.toUserId, context.actorId),
+        eq(ownershipTransfers.status, "pending"), eq(ownershipTransfers.version, transfer.version),
+        sql`${ownershipTransfers.expiresAt} > clock_timestamp()`))
       .returning({ id: ownershipTransfers.id })
-    if (!resolved) throw new Error("Transfer changed. Reload before accepting.")
+    if (!resolved) throw new Error("Transfer changed or expired. Reload before accepting.")
     await tx.insert(auditLogs).values({
       requestId: randomUUID(), tenantId: context.tenantId, actorId: context.actorId,
       actorRole: "league_owner", method: "OWNERSHIP_TRANSFER_ACCEPT", path: "/dashboard", statusCode: "200",
@@ -292,24 +312,46 @@ export async function cancelOwnershipTransfer(input: OwnershipTransferResolve) {
       WHERE ${and(eq(userTenantRoles.tenantId, context.tenantId), inArray(userTenantRoles.userId, ids))}
       ORDER BY ${userTenantRoles.id} FOR UPDATE`)
     await tx.execute(sql`SELECT ${ownershipTransfers.id} FROM ${ownershipTransfers}
-      WHERE ${eq(ownershipTransfers.id, parsed.transferId)} FOR UPDATE`)
+      WHERE ${and(eq(ownershipTransfers.id, parsed.transferId), eq(ownershipTransfers.tenantId, context.tenantId))} FOR UPDATE`)
 
-    const transfer = await tx.query.ownershipTransfers.findFirst({ where: eq(ownershipTransfers.id, parsed.transferId) })
+    const transfer = await tx.query.ownershipTransfers.findFirst({ where: and(
+      eq(ownershipTransfers.id, parsed.transferId), eq(ownershipTransfers.tenantId, context.tenantId),
+    ) })
     if (!transfer || transfer.id !== parsed.transferId || transfer.tenantId !== context.tenantId
       || (transfer.fromUserId !== context.actorId && transfer.toUserId !== context.actorId)) {
       throw new Error("Transfer not found in this league")
     }
+    if (transfer.fromUserId !== initial.fromUserId || transfer.toUserId !== initial.toUserId) {
+      throw new Error("Transfer parties changed. Reload before cancelling.")
+    }
     if (transfer.status !== "pending") throw new Error("This transfer is no longer pending")
     if (transfer.version !== parsed.expectedVersion) throw new Error("Transfer changed. Reload before cancelling.")
+    const actor = await tx.query.users.findFirst({ where: eq(users.id, context.actorId) })
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, context.tenantId) })
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
+    ) })
+    // Withdrawal grants no authority, so the other party need not remain active.
+    // The caller must still have this identity and active league access, and an
+    // initiator must still be the recorded owner (not just a stale owner role).
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
+      || !league || league.id !== context.tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
+      || actorMember.status !== "active"
+      || (context.actorId === transfer.fromUserId && (league.ownerId !== context.actorId || actorMember.role !== "league_owner"))) {
+      throw new Error("Forbidden: your transfer-cancellation access changed")
+    }
     const [cancelled] = await tx.update(ownershipTransfers)
       .set({ status: "cancelled", resolvedAt: new Date(), resolvedBy: context.actorId,
         version: sql`${ownershipTransfers.version} + 1` })
-      .where(and(eq(ownershipTransfers.id, transfer.id), eq(ownershipTransfers.version, transfer.version)))
+      .where(and(eq(ownershipTransfers.id, transfer.id), eq(ownershipTransfers.tenantId, context.tenantId),
+        eq(ownershipTransfers.fromUserId, transfer.fromUserId), eq(ownershipTransfers.toUserId, transfer.toUserId),
+        eq(ownershipTransfers.status, "pending"), eq(ownershipTransfers.version, transfer.version)))
       .returning({ id: ownershipTransfers.id })
     if (!cancelled) throw new Error("Transfer changed. Reload before cancelling.")
     await tx.insert(auditLogs).values({
       requestId: randomUUID(), tenantId: context.tenantId, actorId: context.actorId,
-      actorRole: context.role, method: "OWNERSHIP_TRANSFER_CANCEL", path: "/dashboard/settings/members", statusCode: "200",
+      actorRole: actorMember.role, method: "OWNERSHIP_TRANSFER_CANCEL", path: "/dashboard/settings/members", statusCode: "200",
       payload: { transferId: transfer.id, fromUserId: transfer.fromUserId, toUserId: transfer.toUserId,
         cancelledBy: context.actorId === transfer.fromUserId ? "initiator" : "recipient" },
     })

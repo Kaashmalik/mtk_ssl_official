@@ -35,8 +35,8 @@ const dialect = new PgDialect()
 const ownerMember = { id: OWNER_MEM, userId: OWNER, tenantId: A, role: "league_owner", status: "active", version: 3 }
 const aliMember = { id: ALI_MEM, userId: ALI, tenantId: A, role: "scorer", status: "active", version: 2 }
 const league = { id: A, ownerId: OWNER, isActive: true }
-const ownerAccount = { id: OWNER, isActive: true, role: "player" }
-const aliAccount = { id: ALI, isActive: true, role: "player" }
+const ownerAccount = { id: OWNER, clerkId: "clerk-owner", isActive: true, role: "player" }
+const aliAccount = { id: ALI, clerkId: "clerk-ali", isActive: true, role: "player" }
 const pendingTransfer = {
   id: TRANSFER, tenantId: A, fromUserId: OWNER, toUserId: ALI, demotedRole: "team_manager",
   status: "pending", version: 0, expiresAt: LATER,
@@ -57,7 +57,7 @@ function txObject() {
 
 beforeEach(() => {
   vi.resetAllMocks()
-  mocks.auth.mockResolvedValue({ userId: "clerk" })
+  mocks.auth.mockResolvedValue({ userId: "clerk-owner" })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: OWNER, role: "league_owner" } })
   mocks.execute.mockResolvedValue([])
   mocks.insert.mockReturnValue({ values: mocks.values })
@@ -78,6 +78,9 @@ beforeEach(() => {
   mocks.where.mockReturnValue({ limit: mocks.limit })
   mocks.limit.mockResolvedValue([])
   mocks.transaction.mockImplementation(async fn => fn(txObject()))
+  mocks.user.mockResolvedValue(ownerAccount)
+  mocks.league.mockResolvedValue(league)
+  mocks.member.mockResolvedValue(ownerMember)
 })
 
 /** Owner initiating a handover to Ali. */
@@ -90,17 +93,239 @@ function setupInitiate() {
 
 /** Ali accepting a handover from the owner. */
 function setupAccept(transfer = pendingTransfer) {
+  mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: ALI, role: "team_manager" } })
   mocks.transfer.mockResolvedValueOnce(transfer).mockResolvedValueOnce(transfer)
   mocks.league.mockResolvedValue(league)
   mocks.member.mockResolvedValueOnce(ownerMember).mockResolvedValueOnce(aliMember)
-  mocks.user.mockResolvedValueOnce(aliAccount)
+  mocks.user.mockResolvedValueOnce(ownerAccount).mockResolvedValueOnce(aliAccount)
   mocks.updateReturning
     .mockResolvedValueOnce([{ membershipId: ALI_MEM, role: "league_owner", status: "active", version: 3 }])
     .mockResolvedValueOnce([{ membershipId: OWNER_MEM, role: "team_manager", status: "active", version: 4 }])
     .mockResolvedValueOnce([{ id: A }])
     .mockResolvedValueOnce([{ id: TRANSFER }])
 }
+
+const resolveKey = { tenantId: A, transferId: TRANSFER, expectedVersion: 0 }
+const offer = { tenantId: A, recipientMembershipId: ALI_MEM, demotedRole: "team_manager" } as const
+
+function setupCancel(recipient = false) {
+  if (recipient) {
+    mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
+    mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: ALI, role: "scorer" } })
+    mocks.user.mockResolvedValue(aliAccount)
+    mocks.member.mockResolvedValue(aliMember)
+  }
+  mocks.transfer.mockResolvedValue(pendingTransfer)
+  mocks.updateReturning.mockResolvedValue([{ id: TRANSFER }])
+}
+
+function expectNoWrites() {
+  expect(mocks.update).not.toHaveBeenCalled()
+  expect(mocks.insert).not.toHaveBeenCalled()
+  expect(mocks.revalidate).not.toHaveBeenCalled()
+}
+
+describe("Ownership transfer under-lock authorization regressions", () => {
+  it.each([null, "another-clerk"])("initiation rejects a remapped session %s", async clerkId => {
+    setupInitiate()
+    mocks.user.mockReset().mockResolvedValueOnce({ ...ownerAccount, clerkId }).mockResolvedValueOnce(aliAccount)
+    await expect(initiateOwnershipTransfer(offer)).rejects.toThrow("recorded league owner")
+    expectNoWrites()
+  })
+
+  it.each([undefined, { ...ownerAccount, isActive: false }, { ...ownerAccount, id: ALI }])(
+    "acceptance rejects a missing, disabled or mismatched outgoing account %s", async account => {
+      setupAccept()
+      mocks.user.mockReset().mockResolvedValueOnce(account).mockResolvedValueOnce(aliAccount)
+      await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow("no longer valid")
+      expectNoWrites()
+    },
+  )
+
+  it.each([undefined, { ...aliAccount, isActive: false }, { ...aliAccount, id: OWNER },
+    { ...aliAccount, clerkId: null }, { ...aliAccount, clerkId: "another-clerk" }])(
+    "acceptance rejects an invalid current recipient account/session %s", async account => {
+      setupAccept()
+      mocks.user.mockReset().mockResolvedValueOnce(ownerAccount).mockResolvedValueOnce(account)
+      await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow("account or session changed")
+      expectNoWrites()
+    },
+  )
+
+  it.each(["league_owner", "super_admin"])("acceptance rejects newly privileged membership %s", async role => {
+    setupAccept()
+    mocks.member.mockReset().mockResolvedValueOnce(ownerMember).mockResolvedValueOnce({ ...aliMember, role })
+    await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow("owner or platform")
+    expectNoWrites()
+  })
+
+  it("acceptance rejects a newly privileged platform account despite an ordinary league role", async () => {
+    setupAccept()
+    mocks.user.mockReset().mockResolvedValueOnce(ownerAccount).mockResolvedValueOnce({ ...aliAccount, role: "super_admin" })
+    await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow("owner or platform")
+    expectNoWrites()
+  })
+
+  it.each([undefined, { ...aliMember, tenantId: OWNER }, { ...aliMember, userId: OWNER }, { ...aliMember, status: "pending" }])(
+    "acceptance rejects missing, foreign or inactive recipient membership %s", async member => {
+      setupAccept()
+      mocks.member.mockReset().mockResolvedValueOnce(ownerMember).mockResolvedValueOnce(member)
+      await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow("no longer active")
+      expectNoWrites()
+    },
+  )
+
+  it.each([undefined, { ...league, isActive: false }, { ...league, id: OWNER }])(
+    "acceptance rejects a missing, disabled or foreign league %s", async currentLeague => {
+      setupAccept()
+      mocks.league.mockResolvedValue(currentLeague)
+      await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow("Ownership changed")
+      expectNoWrites()
+    },
+  )
+
+  it.each(["accept", "cancel"])("%s rejects changed parties after locking the original accounts", async operation => {
+    if (operation === "accept") setupAccept()
+    else setupCancel(true)
+    mocks.transfer.mockReset().mockResolvedValueOnce(pendingTransfer)
+      .mockResolvedValueOnce({ ...pendingTransfer, fromUserId: TRANSFER })
+    await expect(operation === "accept" ? acceptOwnershipTransfer(resolveKey) : cancelOwnershipTransfer(resolveKey))
+      .rejects.toThrow("parties changed")
+    expectNoWrites()
+  })
+
+  it.each(["league_owner", "super_admin", "not-a-role"])("acceptance rejects unsafe persisted demotion %s", async demotedRole => {
+    setupAccept({ ...pendingTransfer, demotedRole })
+    await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow()
+    expectNoWrites()
+  })
+
+  it("requires a fresh database wall-clock expiry predicate at the final acceptance claim", async () => {
+    setupAccept()
+    await acceptOwnershipTransfer(resolveKey)
+    const finalClaim = dialect.sqlToQuery(mocks.updateWhere.mock.calls[3][0])
+    expect(finalClaim.params).toEqual([TRANSFER, A, OWNER, ALI, "pending", 0])
+    expect(finalClaim.sql).toContain('"expires_at" > clock_timestamp()')
+    expect(dialect.sqlToQuery(mocks.set.mock.calls[3][0].resolvedAt).sql).toBe("clock_timestamp()")
+    const lockedRead = dialect.sqlToQuery(mocks.transfer.mock.calls[1][0].where)
+    expect(lockedRead.params).toEqual([TRANSFER, A])
+    // Fresh accounts/memberships must be read after all four ordered locks.
+    expect(mocks.user.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[3])
+    expect(mocks.member.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[3])
+  })
+
+  it.each([1, 2, 3, 4])("rejects lost conditional acceptance write %s without audit or cache invalidation", async lostWrite => {
+    setupAccept()
+    mocks.updateReturning.mockReset()
+    for (let i = 1; i < lostWrite; i++) mocks.updateReturning.mockResolvedValueOnce([{ id: "updated" }])
+    mocks.updateReturning.mockResolvedValueOnce([])
+    await expect(acceptOwnershipTransfer(resolveKey)).rejects.toThrow(/changed|expired/)
+    expect(mocks.update).toHaveBeenCalledTimes(lostWrite)
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+
+  it("rejects a lost expiry sweep instead of issuing another pending offer", async () => {
+    setupInitiate()
+    mocks.txLimit.mockResolvedValue([{ id: TRANSFER, expiresAt: PAST, version: 0 }])
+    await expect(initiateOwnershipTransfer(offer)).rejects.toThrow("changed or has not expired")
+    const sweep = dialect.sqlToQuery(mocks.updateWhere.mock.calls[0][0])
+    expect(sweep.params).toEqual([TRANSFER, A, "pending", 0])
+    expect(sweep.sql).toContain('"expires_at" <= clock_timestamp()')
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("cancellation rechecks caller account/session (recipient=%s)", async recipient => {
+    setupCancel(recipient)
+    const account = recipient ? aliAccount : ownerAccount
+    mocks.user.mockResolvedValue({ ...account, clerkId: "remapped-clerk" })
+    await expect(cancelOwnershipTransfer(resolveKey)).rejects.toThrow("cancellation access changed")
+    expectNoWrites()
+  })
+
+  it.each([undefined, { ...ownerAccount, isActive: false }, { ...ownerAccount, id: ALI }])(
+    "cancellation rejects missing, disabled or wrong account %s", async account => {
+      setupCancel()
+      mocks.user.mockResolvedValue(account)
+      await expect(cancelOwnershipTransfer(resolveKey)).rejects.toThrow("cancellation access changed")
+      expectNoWrites()
+    },
+  )
+
+  it.each([false, true])("cancellation rejects suspended membership despite stale context (recipient=%s)", async recipient => {
+    setupCancel(recipient)
+    mocks.member.mockResolvedValue({ ...(recipient ? aliMember : ownerMember), status: "suspended" })
+    await expect(cancelOwnershipTransfer(resolveKey)).rejects.toThrow("cancellation access changed")
+    expectNoWrites()
+  })
+
+  it.each([undefined, { ...ownerMember, tenantId: OWNER }, { ...ownerMember, userId: ALI }, { ...ownerMember, role: "scorer" }])(
+    "initiator cancellation rejects stale owner membership %s", async member => {
+      setupCancel()
+      mocks.member.mockResolvedValue(member)
+      await expect(cancelOwnershipTransfer(resolveKey)).rejects.toThrow("cancellation access changed")
+      expectNoWrites()
+    },
+  )
+
+  it.each([undefined, { ...league, isActive: false }, { ...league, ownerId: ALI }, { ...league, id: OWNER }])(
+    "initiator cancellation rejects changed league access %s", async currentLeague => {
+      setupCancel()
+      mocks.league.mockResolvedValue(currentLeague)
+      await expect(cancelOwnershipTransfer(resolveKey)).rejects.toThrow("cancellation access changed")
+      expectNoWrites()
+    },
+  )
+
+  it("records the current under-lock role, not the stale context role, when declining", async () => {
+    setupCancel(true)
+    mocks.member.mockResolvedValue({ ...aliMember, role: "coach" })
+    await cancelOwnershipTransfer(resolveKey)
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ actorRole: "coach" }))
+    const locks = mocks.execute.mock.calls.map(([query]) => dialect.sqlToQuery(query))
+    expect(locks[0].params).toEqual([OWNER, ALI].sort())
+    expect(locks[1].sql).toContain("FOR SHARE")
+    expect(locks[2].params).toEqual([A, ...[OWNER, ALI].sort()])
+    expect(locks[3].params).toEqual([TRANSFER, A])
+    expect(mocks.user.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[3])
+    expect(mocks.member.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[3])
+    expect(dialect.sqlToQuery(mocks.updateWhere.mock.calls[0][0]).params)
+      .toEqual([TRANSFER, A, OWNER, ALI, "pending", 0])
+  })
+
+  it("allows the active recipient to withdraw a lapsed offer without requiring the other account", async () => {
+    setupCancel(true)
+    mocks.transfer.mockResolvedValue({ ...pendingTransfer, expiresAt: PAST })
+    await expect(cancelOwnershipTransfer(resolveKey)).resolves.toMatchObject({ success: true })
+    // No authority is granted and no other account needs to be authorized.
+    expect(mocks.user).toHaveBeenCalledTimes(1)
+    expect(dialect.sqlToQuery(mocks.user.mock.calls[0][0].where).params).toEqual([ALI])
+  })
+
+  it("rejects a lost cancellation write without auditing success", async () => {
+    setupCancel()
+    mocks.updateReturning.mockResolvedValue([])
+    await expect(cancelOwnershipTransfer(resolveKey)).rejects.toThrow("Transfer changed")
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+
+  it.each(["initiate", "accept", "cancel"])("%s propagates audit failure without returning success", async operation => {
+    if (operation === "initiate") setupInitiate()
+    else if (operation === "accept") setupAccept()
+    else setupCancel()
+    mocks.values.mockImplementationOnce(() => {
+      if (operation !== "initiate") throw new Error("Audit unavailable")
+      return Object.assign(Promise.resolve(undefined), { returning: mocks.insertReturning })
+    })
+    if (operation === "initiate") mocks.values.mockImplementationOnce(() => { throw new Error("Audit unavailable") })
+    await expect(operation === "initiate" ? initiateOwnershipTransfer(offer)
+      : operation === "accept" ? acceptOwnershipTransfer(resolveKey) : cancelOwnershipTransfer(resolveKey))
+      .rejects.toThrow("Audit unavailable")
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+})
 
 describe("Ownership transfer initiation (first party: the recorded owner)", () => {
   it("creates a pending request with an atomic audit and never moves ownership on its own", async () => {
@@ -221,7 +446,7 @@ describe("Ownership transfer acceptance (second party: the recipient)", () => {
     expect(locks[1].params).toEqual([A])
     expect(locks[1].sql).toContain("FOR UPDATE")
     expect(locks[2].params).toEqual([A, ...[OWNER, ALI].sort()])
-    expect(locks[3].params).toEqual([TRANSFER])
+    expect(locks[3].params).toEqual([TRANSFER, A])
   })
 
   it("refuses acceptance by anyone other than the named recipient", async () => {
@@ -255,12 +480,12 @@ describe("Ownership transfer acceptance (second party: the recipient)", () => {
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
-  it("marks an expired request expired and refuses to complete it", async () => {
+  it("refuses an expired request without a rolled-back attempt to persist expiry", async () => {
     setupAccept({ ...pendingTransfer, expiresAt: PAST })
     mocks.updateReturning.mockReset().mockResolvedValueOnce([{ id: TRANSFER }])
     await expect(acceptOwnershipTransfer({ tenantId: A, transferId: TRANSFER, expectedVersion: 0 }))
       .rejects.toThrow("expired")
-    expect(mocks.set).toHaveBeenCalledWith(expect.objectContaining({ status: "expired" }))
+    expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.values).not.toHaveBeenCalled()
   })
 
@@ -279,7 +504,7 @@ describe("Ownership transfer acceptance (second party: the recipient)", () => {
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
-  it("rolls back and reports a lost conditional promotion without audit or success", async () => {
+  it("reports a lost conditional promotion without audit or success", async () => {
     setupAccept()
     mocks.updateReturning.mockReset().mockResolvedValueOnce([])
     await expect(acceptOwnershipTransfer({ tenantId: A, transferId: TRANSFER, expectedVersion: 0 }))
@@ -307,7 +532,10 @@ describe("Ownership transfer cancellation", () => {
   })
 
   it("lets the named recipient decline the offer", async () => {
+    mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
     mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: ALI, role: "scorer" } })
+    mocks.user.mockResolvedValue(aliAccount)
+    mocks.member.mockResolvedValue(aliMember)
     mocks.transfer.mockResolvedValueOnce(pendingTransfer).mockResolvedValueOnce(pendingTransfer)
     mocks.updateReturning.mockResolvedValueOnce([{ id: TRANSFER }])
     await cancelOwnershipTransfer({ tenantId: A, transferId: TRANSFER, expectedVersion: 0 })

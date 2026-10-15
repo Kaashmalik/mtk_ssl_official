@@ -1147,6 +1147,50 @@ real PostgreSQL locking/rollback, live provider journeys or writer fencing.
 - Broader IAM-03/04/05/06/07 tasks retain scoped-grant/lifecycle/provider/concurrency
   gates; source slices alone must not be labeled full task completion.
 
+### 2026-10-15 — Batch 14: ownership-transfer resolution authorization
+
+#### Implemented
+
+- Synced clean local `main` with remote `a481601` before edits.
+- Preserve the authenticated Clerk subject and compare the current caller's
+  locked account mapping on initiation, acceptance and cancellation.
+- Acceptance checks both active global accounts, current recorded ownership and
+  owner membership, plus recipient membership and owner/platform privilege drift.
+  Locked transfer rereads are exact-tenant, reject party drift and validate the
+  persisted demotion role. Existing global accounts/roles remain unchanged.
+- Final acceptance requires pending status, expected version, exact parties/
+  tenant and `expires_at > clock_timestamp()` at the database write. Failed
+  writes throw inside the transaction; no successful audit/cache invalidation.
+- Cancellation reauthorizes the caller's account/session/league/membership under
+  lock, requires initiators to remain recorded owners and audits the current
+  membership role. The active recipient can decline a lapsed pending request
+  without requiring the other party to remain active; no access is granted.
+- Removed expiry-update-then-throw behavior (the update could never persist).
+  Next authorized issuance conditionally sweeps lapsed pending offers and checks
+  the returned row, including a database-clock expiry predicate.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 36 files, **734 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **184 tests** |
+| Combined | **1,046 passing tests** (+52 over Batch 13) |
+
+Ownership action coverage is **86 tests**. New regressions cover stale identity,
+disabled/missing accounts, newly privileged recipients, current cancellation
+access, lock/read ordering, tenant/party/status/version/clock SQL predicates,
+lost conditional writes and audit failures. These mocks do **not** prove real
+transaction rollback, wall-clock enforcement, deadlock freedom or RLS.
+
+No build, lint, standalone type-check, new migration, remote database operation
+or deployment performed. Five prior local migrations remain unapplied and the
+release gate remains default-off. Assignment/removal concurrency and atomic
+assignment auditing are next; real PostgreSQL/browser ownership acceptance,
+privileged step-up and scoped grants remain open. Whole-task roadmap counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

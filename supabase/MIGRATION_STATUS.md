@@ -299,3 +299,18 @@ workspace artifacts, web and scoring service together after actual schema/grant
 and staging verification. Assignment/removal races, real writer handover/fencing
 and ownership-resolution authorization findings recorded in the Batch 13 roadmap
 entry remain open; no remote state was inspected or certified by this batch.
+
+## Batch 14 ownership authorization (15 October 2026)
+
+No new migration, remote database inspection or database write occurred. The
+Batch 12 application transaction now rechecks current account/session mappings,
+both active acceptance accounts and recipient privilege drift under ordered
+locks; cancellation reauthorizes the caller's current access. Exact-tenant
+conditional resolution writes include status/version/party predicates. Final
+acceptance uses `expires_at > clock_timestamp()` so transaction-start time does
+not extend consent; issuance expiry cleanup also checks the database wall clock.
+
+The Batch 13 ownership source findings have fixes, but real PostgreSQL lock,
+clock, rollback, accept/cancel races and RLS acceptance remain unverified. All
+five previous migrations remain unapplied here; the deployment gate stays
+default-off. Assignment/removal concurrency and writer fencing remain open.

@@ -4,11 +4,11 @@
 
 | Field | Value |
 | --- | --- |
-| Created / last reviewed | **13 October 2026 (2026-10-13)** |
+| Created / last reviewed | **13 October 2026 / 15 October 2026** |
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 13: backup-scorer canonical enforcement, dashboard integration and removal protection; Batches 7–12 source status reconciled; no remote database writes or deployment |
+| Current implementation | Batch 14: ownership-transfer account/session/privilege reauthorization, cancellation guards and database-clock expiry checks; no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -80,11 +80,12 @@ This is a professional living plan covering known requirements and failure cases
 | 10 | `daff4f9` | Primary/backup match scorer assignment with tenant-scoped, membership-validated slots; canonical backup enforcement/dashboard/removal gaps repaired in Batch 13 |
 | 11 | `f4861ae` | Signature-verified invitation delivery webhook recording delivered/bounced/complained; local migration, no remote database writes or deployment |
 | 12 | `85d95b0`, migration timestamp `190d710`, evidence `3e55bde` | Two-party league ownership transfer: recorded-owner initiation, recipient-only acceptance, either-party cancellation, 7-day expiry and an atomic promote/demote/owner-id change; local migration, no remote database writes or deployment |
-| 13 | Current batch; see Git history | Canonical backup write authorization, backup dashboard summaries/shortcuts and backup member-removal guard; no new migration or remote database writes |
+| 13 | `a481601` | Canonical backup write authorization, backup dashboard summaries/shortcuts and backup member-removal guard; no new migration or remote database writes |
+| 14 | Current batch; see Git history | Ownership-transfer under-lock account/session/privilege checks, cancellation reauthorization and final database-clock expiry predicate; no new migration or remote database writes |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
-Batch 13 verification and rollout boundaries are recorded in section 17. The
+Batch 14 verification and rollout boundaries are recorded in section 17. The
 615-test result remains historical evidence, not the current suite count.
 
 ### 3.2 Existing foundations are not complete new features
@@ -571,9 +572,9 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 
 ## 16. Phased Implementation Checklists: Built and Remaining
 
-**Batches 1–13 have recorded source implementations. No full phase below is production-complete.** Top-level checkboxes represent their complete stated scope, not just one implemented slice. The source-completion register below identifies completed portions of open tasks; unfinished functionality and release acceptance remain explicitly separate. IDs and historical evidence are preserved.
+**Batches 1–14 have recorded source implementations. No full phase below is production-complete.** Top-level checkboxes represent their complete stated scope, not just one implemented slice. The source-completion register below identifies completed portions of open tasks; unfinished functionality and release acceptance remain explicitly separate. IDs and historical evidence are preserved.
 
-### Source-completion register — reviewed from Batch 7 (13 October 2026)
+### Source-completion register — reviewed from Batch 7 (updated 15 October 2026)
 
 | Task | Implemented source slice | Still open before the whole task is complete |
 | --- | --- | --- |
@@ -583,7 +584,7 @@ Each case requires positive and negative assertions plus evidence. The matrix is
 | IAM-04 | Batches 8/9/11: honest persisted dispatch outcomes, signed delivery/bounce/complaint events and manual resend | Durable queued sends, automatic retries, operational provider proof |
 | IAM-05 | Batches 7/9: role/status changes, versioned removal, revoke/resend/token rotation, audit | Full command idempotency and complete lifecycle/staging acceptance |
 | IAM-06 | Batches 10/13: primary/backup slots, web and canonical write checks, dashboard and removal integration | Pending-membership assignment and writer handover/fencing |
-| IAM-07 | Batches 7/12: ordinary owner-edit protection and two-party handover source | Delegated resource grants, fresh privilege/account checks on every resolution and real DB acceptance |
+| IAM-07 | Batches 7/12/14: ordinary owner-edit protection, two-party handover, under-lock resolution authorization and database-clock acceptance expiry | Delegated resource grants, privileged fresh-auth/step-up (IAM-08) and real DB acceptance |
 
 **Counts:** 79 stable task IDs, 19 checked, 60 open. Open composite tasks above
 are partially implemented, not untouched. Source completion is not production
@@ -772,7 +773,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 13:** implemented slices are listed above; complete `IAM-03/04/05/06/07` tasks are not all source-complete. The Batch 10 web/canonical mismatch is repaired. Next prioritize transaction-safe assignment/removal concurrency and ownership-resolution authorization before adding delegated grants/MFA or calling these release-ready. Then finish `BASE-04/05/06` and membership rollout/real-DB acceptance, remaining `ISO-04/05/06`, pending-membership assignments, durable email queue/retries and writer fencing. Provider email-code UI exists, but real OTP journeys remain unverified.
+**Updated after Batch 14:** implemented slices are listed above; complete `IAM-03/04/05/06/07` tasks are not all source-complete. The Batch 10 web/canonical mismatch and the recorded ownership-resolution authorization gaps have source fixes. Next prioritize transaction-safe assignment/removal concurrency with a reviewed lock protocol shared by assignment and membership commands; do not introduce match/user lock inversion against the canonical writer. Real-DB acceptance of these fixes remains open. Then finish `BASE-04/05/06` and membership rollout, remaining `ISO-04/05/06`, scoped grants/privileged step-up, pending-membership assignments, durable email queue/retries and writer fencing. Provider email-code UI exists, but real OTP journeys remain unverified.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -1042,6 +1043,53 @@ The current ownership cancel path acquires locks but does not reread the actor's
 account/membership under those locks. These remain review findings, not fixes
 silently implied by the successful unit suites. Resource-scoped grants,
 privileged step-up, durable sends, pending assignments and writer fencing follow.
+
+### 2026-10-15 — Batch 14: ownership-transfer authorization hardening
+
+Synced clean `main` with remote `a481601` before implementation. This batch
+closes the ownership-resolution source findings recorded in Batch 13; it does
+not claim assignment/removal concurrency or the whole IAM-07 scope is complete.
+
+**Implemented (`apps/web/src/app/actions/ownership.ts`):**
+
+- Preserve the authenticated Clerk subject in the server-only actor context.
+  Initiation, acceptance and cancellation compare it to the current caller's
+  locked account mapping, rejecting remapped/unlinked sessions.
+- Acceptance rereads both global accounts after ordered users -> league ->
+  memberships -> transfer locks. The outgoing owner must still be active and
+  the recorded owner with active owner membership. The recipient must still
+  have active league/account access and must not have become an owner or
+  platform account since the offer. Global roles/accounts are never rewritten.
+- Lock and reread the exact league/transfer; reject party drift so an unlocked
+  replacement party cannot be authorized. Validate persisted demotion against
+  the same restricted role set used during initiation.
+- The final conditional acceptance write requires exact tenant, parties,
+  pending status, version and `expires_at > clock_timestamp()`. Database wall
+  clock, not transaction-start `now()`, governs that claim; rejection throws
+  inside the transaction before audit/success. Real rollback proof is still open.
+- Cancellation rechecks the caller's account/session, active league and exact
+  active membership under lock. Initiator withdrawal additionally requires
+  current recorded ownership and owner membership. An active named recipient
+  may decline without the other party remaining active, even after expiry:
+  withdrawal grants no authority. Audit uses the current locked membership role.
+- Failed expiry acceptance makes no misleading expiry update that would roll
+  back with its error. The next authorized issuance conditionally sweeps a
+  lapsed pending row using tenant/status/version/database-clock predicates and
+  requires a returned row before issuing another offer.
+
+**Fresh verification:** web **734 tests / 36 files**, database **128 / 8 files**,
+scoring service **184 / 8 suites**; **1,046 passing tests**, +52 over Batch 13.
+Ownership action coverage is now **86 tests**, including stale session/account,
+recipient privilege drift, cancellation authorization, lock/read order,
+SQL predicates, rejected conditional writes and audit-failure propagation.
+Mocks establish call ordering and failure handling, not PostgreSQL rollback,
+clock behavior, RLS or concurrent accept/cancel/account-disable correctness.
+
+No new migration, database inspection/write, deployment, build, lint or
+standalone type-check ran. The five prior local migrations remain unapplied;
+the coordinated-release gate stays default-off. **Next batch:** assignment/
+removal concurrency and atomic assignment audit. Privileged step-up, delegated
+grants and real authenticated ownership/browser acceptance remain open.
 
 ### Decisions still requiring explicit review
 
