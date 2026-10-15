@@ -2393,6 +2393,47 @@ Next source work: `users-invites.ts` (12 direct-db sites, includes the
 invite-accept transaction flow), `matches.ts` (7), then the remaining admin
 APIs. Whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 39 — users-invites flows become pure delegates (15 October 2026)
+
+`app/actions/users-invites.ts` no longer touches `db` directly. Its entire
+database surface — the four locked transactional flows and all reads — moved to
+the new `lib/invite-records.ts` (`issueInviteInLeague`, `revokePendingInvite`,
+`rotateInviteToken`, `claimInvite`, plus `readLeagueInvites`, `findUserByClerkId`,
+`findInviteByTokenHash`, `findPendingInvitePreview`, `recordEmailAttempt` and the
+private `lockInvitationAuthority` / `auditInvite` helpers). The action keeps only
+the `requireManager` authority gate, zod validation, token crypto (`randomBytes`
++ SHA-256 `hashToken`), the Resend dispatch (`sendInviteEmail` — intentionally
+outside the transactions, preserving the no-network-under-locks design), the TTL
+constant and response shaping.
+
+Every ordering-sensitive property transferred verbatim: the FOR UPDATE lock
+ordering (users → tenants → memberships, sorted-id deadlock avoidance, issuance
+FOR UPDATE vs read FOR SHARE), the second-look re-verification under lock, the
+`UNIQUE`-safe claim predicate on the invite UPDATE, the membership-role
+no-promotion check, the single-management-team rule, insert order
+(userTenantRoles → auditLogs → notifications), and audit payloads.
+
+Deliberate type upgrade: `issueInviteInLeague` takes `InvitableRole`
+(`"team_manager" | "coach" | "scorer"`), matching the now-real enum column on
+`user_invites` (post-rebuild Drizzle enums reject bare `string` comparisons) and
+the zod-narrowed input, so the compiler enforces what the policy asserted.
+
+Remaining allowlist after removal: `tenants.ts`/`users.ts` bootstrap;
+`matches.ts` (7 direct-db sites); `scoring.ts` (tenant-scoped authz reads).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **72** files, **2,121 tests** |
+| Focused: guard + membership-invites | PASS - 124 tests (105 invite regressions unchanged) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (invite files clean) |
+| `git diff --check` | Clean |
+
+Next source work: `matches.ts` (7 direct-db sites, includes the
+`withTenantContext` transaction for create/update), then the remaining admin
+APIs. Whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
