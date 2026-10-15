@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 28: settings, billing, invoices and white-label destinations now resolve the exact active league via `requireActiveLeagueContext` + scoped read helpers in `lib/league-settings-reads.ts` (was `getMyTenant` primary-league fallback and, for white-label, a fallback-plan write); tournament create/update are locked, audited exact-league writes (Batch 27); registration open/close locked lifecycle (Batch 26); tournament/stats/scoring dashboard reads (Batches 24–25); fan-follow isolation (Batch 23); venue writers, `dashboard-context`/notifications/stripe-checkout/league-setup destinations, public/anon follow and real-DB acceptance remain open; no remote database writes or deployment |
+| Current implementation | Batch 29: the tournament-detail page resolves `tournament:read` for the exact active league and gates every mutation control (edit, archive, registration open/close, self-service registration) on the viewer's precise permissions, 404ing a foreign-league row; Batch 28 scoped the settings/billing/invoices/white-label destinations through the shared fail-closed `requireActiveLeagueContext` gate and `lib/league-settings-reads.ts`; tournament create/update are locked, audited exact-league writes (Batch 27); registration open/close locked lifecycle (Batch 26); tournament/stats/scoring dashboard reads (Batches 24–25); fan-follow isolation (Batch 23); venue writers, the registrations/new swallow-and-redirect, `dashboard-context`/notifications/league-setup destinations, public/anon follow and real-DB acceptance remain open; no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -638,7 +638,7 @@ Exit: repeatable baseline and a verified staging environment; old unit-test coun
   Batch 16 adds under-lock session mapping checks for member role/status/removal commands and fixes exact-active-league toss/start/completion authority. Match metadata CRUD/read/stream actions and dashboard pages still require separate active-league and transactional authorization review; this whole task stays open.
   Batch 17 implements that match-actions/dashboard slice, including exact-league form pickers and full-scorecard detail reads, under-lock owner reauthorization, merged fixture validation and cancellation without hard deletes. Other scorecard actions, team/player/tournament/venue writers and their cascading-delete/lock interactions, remaining pages/admin APIs, public visibility, private sockets and exports are not certified; ISO-04 remains open.
   Batch 18 disables the unused `saveScorecard` alternate writer, scopes both scorecard read actions through the current league/match/innings hierarchy, and replaces only `deleteTeam`/`deletePlayer` with audited archival. Other team/player CRUD, roster writes and dashboard read paths still use legacy ownership/context assumptions and need review; no database-wide cascade prevention or full ISO-04 completion is claimed.
-  Batch 19 replaces the six team/player create/update/add/remove writers with exact-active-league transactions, locked owner/assigned-manager checks, atomic minimal audits, shared roster capacity/eligibility checks and serialized create quotas. Batch 20 replaces core team/player read actions and list/detail/new/edit/roster dashboard routes with exact-active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Batch 21 replaces the registration create/approve/reject/confirm-fee writers and adds withdraw with exact-active-league locked review transitions and scoped bounded review reads. Batch 22 replaces the destructive tournament hard-delete with a locked, audited cancel/archival that never cascades and preserves registration, team and match links. Batch 23 scopes fan-follow mutations/reads to the exact active league with the `fan:follow` membership check and the account UUID (fixing a Clerk-vs-UUID bug that made team/player follow state always false). Batch 24 scopes the stats, stats/compare and scoring dashboard reads to the exact active league with explicit `stats:read`/`match:read` membership checks, league-scoped child (player/team/scorecard) joins, bounded reads and failure propagation, removing the primary-membership fallback and the silent empty-leaderboard/empty-console catches. Batch 25 scopes the tournament dashboard list and creator to the exact active league (`tournament:read`/`tournament:create`), replacing the whole-league N+1 counts with league-scoped aggregated queries, bounding the list and propagating failures instead of returning a fake empty list. Batch 26 replaces the registration open/close writers with locked, audited exact-active-league transitions that recheck the owner, refuse an archived tournament and refuse to open registration outside the draft/registration phase. Batch 27 replaces the tournament create/update repository writes with locked, audited exact-active-league transactions (owner recheck under lock, per-league unique-slug pre-check plus unique-violation mapping). Batch 28 replaces the settings/billing/invoices/white-label destinations' `getMyTenant` primary-league fallback with `requireActiveLeagueContext` plus scoped readers in `lib/league-settings-reads.ts`, and makes the white-label writer resolve the same exact active league and plan. Remaining venue writers, the `dashboard-context`/notifications/stripe-checkout/league-setup destinations, remaining admin APIs, public/anonymous follow and publication writers still require review. This does not implement a purge/refund/slot-release or waitlist lifecycle, immutable playing XI, scoped multiple grants, stale-operator CAS, database-wide quota constraints or full ISO-04 acceptance.
+  Batch 19 replaces the six team/player create/update/add/remove writers with exact-active-league transactions, locked owner/assigned-manager checks, atomic minimal audits, shared roster capacity/eligibility checks and serialized create quotas. Batch 20 replaces core team/player read actions and list/detail/new/edit/roster dashboard routes with exact-active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Batch 21 replaces the registration create/approve/reject/confirm-fee writers and adds withdraw with exact-active-league locked review transitions and scoped bounded review reads. Batch 22 replaces the destructive tournament hard-delete with a locked, audited cancel/archival that never cascades and preserves registration, team and match links. Batch 23 scopes fan-follow mutations/reads to the exact active league with the `fan:follow` membership check and the account UUID (fixing a Clerk-vs-UUID bug that made team/player follow state always false). Batch 24 scopes the stats, stats/compare and scoring dashboard reads to the exact active league with explicit `stats:read`/`match:read` membership checks, league-scoped child (player/team/scorecard) joins, bounded reads and failure propagation, removing the primary-membership fallback and the silent empty-leaderboard/empty-console catches. Batch 25 scopes the tournament dashboard list and creator to the exact active league (`tournament:read`/`tournament:create`), replacing the whole-league N+1 counts with league-scoped aggregated queries, bounding the list and propagating failures instead of returning a fake empty list. Batch 26 replaces the registration open/close writers with locked, audited exact-active-league transitions that recheck the owner, refuse an archived tournament and refuse to open registration outside the draft/registration phase. Batch 27 replaces the tournament create/update repository writes with locked, audited exact-active-league transactions (owner recheck under lock, per-league unique-slug pre-check plus unique-violation mapping). Batch 28 replaces the settings/billing/invoices/white-label destinations' page-level `getMyTenant` + silent-redirect/`SELECT *`/empty-list handling with the shared fail-closed `requireActiveLeagueContext` gate plus scoped, projected, bounded readers in `lib/league-settings-reads.ts` (`getMyTenant` was already membership-verified, so this is a protocol/fail-closed/projection change, not a cross-tenant fix), sharing one active-league resolution with the white-label writer. Batch 29 replaces the tournament-detail page's unconditional mutation controls with exact-active-league permission gating: the page resolves `tournament:read` through `requireActiveLeagueContext`, 404s a row whose `tenantId` is not the resolved league, and renders edit/archive/registration controls and the self-service registration CTA only for the roles that actually hold `tournament:update`/`tournament:delete`/`tournament:manage_registrations`/`registration:create`. Remaining venue writers, the registrations/new swallow-and-redirect, the `dashboard-context`/notifications/league-setup destinations, remaining admin APIs, public/anonymous follow and publication writers still require review. This does not implement a purge/refund/slot-release or waitlist lifecycle, immutable playing XI, scoped multiple grants, stale-operator CAS, database-wide quota constraints or full ISO-04 acceptance.
 - [ ] **ISO-05:** Add authoritative league membership status/expiry and resource-scoped grant design; separate platform roles.
   Local active/suspended status and version are implemented; expiry, scoped multiple grants and platform-grant redesign remain open.
 - [ ] **ISO-06:** Reconcile and safely retire legacy `users.role` / `tenantIds` authorization fallback.
@@ -789,7 +789,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 28:** team/player create/update and add/remove roster writers use exact-active-league transactions, locked authority, shared capacity/eligibility checks and serialized create quotas. Core list/detail/new/edit/roster dashboard routes use the same active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Registration create/approve/reject/withdraw/confirm-fee writers now use exact-active-league locked review transitions with capacity/squad checks and atomic minimal audits, and registration review reads are scoped and bounded. Tournament removal is now a locked, audited cancel/archival that never hard-deletes or cascades, and registration open/close is a locked, audited transition that refuses archived or non-registration-phase tournaments. Tournament create/update are now locked, audited exact-active-league writes with a post-wait owner recheck and per-league unique-slug handling (both a pre-check and a unique-violation mapping) instead of repository `insert`/`updateWithLock` with no audit or duplicate-slug error. The settings, billing, invoices and invoice-detail destinations now resolve the exact active league (`settings:manage`) and read the league identity/branding, invoice history and white-label requests only inside that league through `lib/league-settings-reads.ts`, and the white-label request writer resolves the same active league and plan, instead of the account's primary/owned league via `getMyTenant`. Fan-follow write/read paths now resolve the exact active league, check `fan:follow`, store and match the account UUID (not the Clerk identity), assert the same-league target and scope counts/lists by tenant. Stats, stats/compare and scoring dashboard routes now resolve the exact active league, require `stats:read`/`match:read` on an active membership and read leaderboards, comparison scorecards and console matches only inside that league with bounded reads and propagated failures. The tournament dashboard list and creator now resolve the exact active league (`tournament:read`/`tournament:create`), aggregate team/match counts with tenant-scoped queries, bound the list and propagate failures. Full `ISO-04` and `IAM-03/04/05/06/07` remain incomplete. `BASE-04/05/06` schema/grant reconciliation and real PostgreSQL two-session acceptance remain the release priority. Next source work: the remaining `dashboard-context`/notifications/stripe-checkout/league-setup destinations and venue writers, then public/anonymous follow, publication and notification paths. Review private contact-field exposure and archived-row behavior rather than treating a scoped writer as proof of safe reads. Archive/cancel is not a quota-release, refund, slot-release or restore workflow. Historical import/correction needs an explicit canonical audited design, not re-enabling direct inserts. Public visibility/private sockets/exports, scoped grants/step-up, pending assignments, stale-operator CAS, durable email retries, lifecycle fan-out and writer fencing stay open.
+**Updated after Batch 29:** team/player create/update and add/remove roster writers use exact-active-league transactions, locked authority, shared capacity/eligibility checks and serialized create quotas. Core list/detail/new/edit/roster dashboard routes use the same active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Registration create/approve/reject/withdraw/confirm-fee writers now use exact-active-league locked review transitions with capacity/squad checks and atomic minimal audits, and registration review reads are scoped and bounded. Tournament removal is now a locked, audited cancel/archival that never hard-deletes or cascades, and registration open/close is a locked, audited transition that refuses archived or non-registration-phase tournaments. Tournament create/update are now locked, audited exact-active-league writes with a post-wait owner recheck and per-league unique-slug handling (both a pre-check and a unique-violation mapping) instead of repository `insert`/`updateWithLock` with no audit or duplicate-slug error. The settings, billing, invoices and invoice-detail destinations now resolve the active league through the shared fail-closed `requireActiveLeagueContext("settings:manage")` gate and read the league identity/branding, invoice history and white-label requests only inside that league through `lib/league-settings-reads.ts` with explicit projections and bounds, replacing page-level `getMyTenant` calls that silently redirected to the dashboard on denial and `SELECT *`/empty-list reads; the white-label writer shares the same active-league resolution and the redundant unscoped read action is removed. The tournament-detail page now resolves `tournament:read` through `requireActiveLeagueContext`, 404s a row whose `tenantId` is not the resolved league, and renders the edit link, archive button, registration open/close toggle and the self-service registration CTA only for roles that actually hold `tournament:update`, `tournament:delete`, `tournament:manage_registrations` or `registration:create` (was unconditional). Fan-follow write/read paths now resolve the exact active league, check `fan:follow`, store and match the account UUID (not the Clerk identity), assert the same-league target and scope counts/lists by tenant. Stats, stats/compare and scoring dashboard routes now resolve the exact active league, require `stats:read`/`match:read` on an active membership and read leaderboards, comparison scorecards and console matches only inside that league with bounded reads and propagated failures. The tournament dashboard list and creator now resolve the exact active league (`tournament:read`/`tournament:create`), aggregate team/match counts with tenant-scoped queries, bound the list and propagate failures. Full `ISO-04` and `IAM-03/04/05/06/07` remain incomplete. `BASE-04/05/06` schema/grant reconciliation and real PostgreSQL two-session acceptance remain the release priority. Next source work: the remaining venue writers and the registrations/new swallow-and-redirect, then public/anonymous follow, publication and notification paths. Review private contact-field exposure and archived-row behavior rather than treating a scoped writer as proof of safe reads. Archive/cancel is not a quota-release, refund, slot-release or restore workflow. Historical import/correction needs an explicit canonical audited design, not re-enabling direct inserts. Public visibility/private sockets/exports, scoped grants/step-up, pending assignments, stale-operator CAS, durable email retries, lifecycle fan-out and writer fencing stay open.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -1839,17 +1839,20 @@ boundaries are not repaired here.
 - New `lib/league-settings-reads.ts` reads the active league's identity/branding,
   bounded invoice history, a single invoice and bounded white-label requests, each
   predicated on the caller's resolved `tenantId` and returning explicit projections
-  (no private tenant/contact fields are serialized to the client). It never falls
-  back to the account's primary/owned league.
-- The settings, billing, invoices and invoice-detail pages now resolve the exact
-  active league with `requireActiveLeagueContext("settings:manage")` instead of
-  `getMyTenant`; a missing league or insufficient role throws to the error boundary
-  rather than redirecting to league setup or rendering fake empty settings. The
-  billing client and upgrade modal receive a minimal `LeagueIdentity` rather than the
-  whole `Tenant` row, and the invoice page 404s a foreign invoice.
+  (no private tenant/contact fields are serialized to the client). It takes an
+  explicit `tenantId` and never resolves one itself, so it cannot re-point at another
+  league.
+- The settings, billing, invoices and invoice-detail pages now resolve the active
+  league with `requireActiveLeagueContext("settings:manage")` instead of page-level
+  `getMyTenant` + `getUserRoleForTenant`; a missing league or insufficient role
+  throws to the error boundary rather than silently redirecting to the dashboard (or
+  league setup, for billing) or rendering fake empty settings. Reads go through the
+  scoped, projected, bounded helpers above rather than `SELECT *`. The billing client
+  and upgrade modal receive a minimal `LeagueIdentity` rather than the whole `Tenant`
+  row, and the invoice page 404s a foreign invoice.
 - `lib/invoices.ts` (whose `getMyInvoices` returned `[]` when no tenant was found) is
-  removed. The white-label writer now resolves the exact active league and plan via
-  `resolveActiveTenantId` + a scoped tenant read, and the unused
+  removed. The white-label writer shares the same active-league/plan resolution
+  (previously `getMyTenant`, which was already membership-verified) and the now-unused
   `getMyWhiteLabelRequests` action is removed in favour of the scoped reader.
 
 **Fresh verification:** web **1,974 / 56 files**, database **128 / 8 files**,
@@ -1860,18 +1863,57 @@ bounded invoice/white-label limits, uuid validation, foreign-invoice null),
 `settings-pages.test.tsx` (15 — each page resolves `settings:manage` and reads only
 the resolved league, propagates denial/failure without a setup redirect, redirects
 anonymous visits, 404s a foreign invoice) and `white-label-actions.test.ts` (4 — the
-writer resolves the active league and never the primary league, fails closed without
-an active league, enforces plan limits on the resolved plan, refuses a duplicate
-pending request). Mocked readers are not PostgreSQL RLS or grant proof.
+writer resolves the active league through the shared resolver and never `getMyTenant`,
+fails closed without an active league, enforces plan limits on the resolved plan,
+refuses a duplicate pending request). Mocked readers are not PostgreSQL RLS or grant
+proof.
 
 **Boundaries / next:** no build, lint, schema change, migration application, remote
 database operation or deployment ran. A standalone `tsc --noEmit` still reports only
 its pre-existing unrelated errors; none reference the changed files. All five prior
 migrations remain unapplied; the release gate stays default-off. Next source work:
-the remaining `dashboard-context`/notifications/stripe-checkout/league-setup
-destinations and venue writers, then public/anonymous follow, publication and
-notification paths. No browser acceptance or full `ISO-04` certification is claimed.
+tournament-detail mutation-control gating and the remaining venue writers, then
+public/anonymous follow, publication and notification paths. No browser acceptance or
+full `ISO-04` certification is claimed.
 Whole-task roadmap counts stay **19 checked / 60 open / 79 IDs**.
+
+### 2026-10-15 — Batch 29: permission-gated tournament-detail controls
+
+Synced clean `main` with remote `3dd6152`. This is a bounded tournament-detail
+(`ISO-04`) slice; the registrations/new page, venue writers, `dashboard-context`,
+notifications/league-setup destinations and public/anonymous follow are not repaired
+here. It also corrects the Batch 28 notes: `getMyTenant` was already
+membership-verified and request-tenant-first, so Batch 28 was a
+protocol/fail-closed/projection change, not a cross-tenant fix.
+
+**Implemented:**
+
+- `dashboard/tournaments/[id]/page.tsx` now resolves the exact active league with
+  `requireActiveLeagueContext("tournament:read")` and 404s a tournament whose
+  `tenantId` is not that league, then gates each mutation control on the viewer's
+  precise permission: the edit link on `tournament:update`, the archive button on
+  `tournament:delete`, the registration open/close toggle on
+  `tournament:manage_registrations`, and the self-service registration CTA on
+  `registration:create`. Previously every control rendered for every viewer whose role
+  held `tournament:read` (fan/player/coach/scorer included), so a click failed only at
+  the action. The actions themselves are unchanged and still re-check on write.
+
+**Fresh verification:** web **1,984 / 57 files**, database **128 / 8 files**, scoring
+service **193 / 8 suites**; **2,305 passing tests**, +10 over Batch 28. New regression
+`tournament-detail-page.test.tsx` (10 — resolves `tournament:read` for the exact
+league, shows every control to a league owner, shows a team manager only the
+registration CTA, hides all four controls from scorer/coach/player/fan, propagates a
+denied context before the read, and 404s a missing or foreign-league row). Rendering a
+page with mocked context/actions is not authenticated-browser proof.
+
+**Boundaries / next:** no build, lint, schema change, migration application, remote
+database operation or deployment ran. A standalone `tsc --noEmit` still reports only
+its pre-existing unrelated errors; none reference the changed files. All five prior
+migrations remain unapplied; the release gate stays default-off. Next source work: the
+remaining venue writers and the registrations/new swallow-and-redirect, then
+public/anonymous follow, publication and notification paths. No browser acceptance or
+full `ISO-04` certification is claimed. Whole-task roadmap counts stay **19 checked /
+60 open / 79 IDs**.
 
 ### Decisions still requiring explicit review
 

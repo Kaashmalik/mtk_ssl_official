@@ -601,16 +601,18 @@ then public/anonymous follow, publication and notification boundaries.
 
 No schema change, migration application, remote database inspection/write or
 deployment occurred. The settings, billing, invoices and invoice-detail pages no
-longer use `getMyTenant` (the account's primary/owned league); they resolve the exact
-active league with `requireActiveLeagueContext("settings:manage")` and read through
-new `lib/league-settings-reads.ts`, which predicates every query on the resolved
+longer resolve the league inline with `getMyTenant` + `getUserRoleForTenant` and
+silently redirect to the dashboard on denial; they use the shared fail-closed
+`requireActiveLeagueContext("settings:manage")` gate and read through new
+`lib/league-settings-reads.ts`, which predicates every query on the resolved
 `tenantId` and returns explicit projections (identity/branding, bounded invoice
 history, a single invoice, bounded white-label requests). A missing/inactive league
-or an insufficient role throws to the error boundary rather than redirecting to
-league setup. `lib/invoices.ts` is removed (its `getMyInvoices` returned `[]` when no
-tenant was found); the white-label writer resolves the exact active league and plan
-instead of the primary league, and its unused read action is replaced by the scoped
-reader.
+or an insufficient role throws to the error boundary rather than redirecting.
+`lib/invoices.ts` is removed (its `getMyInvoices` returned `[]` when no tenant was
+found); the white-label writer shares the same active-league resolution and its
+unused read action is replaced by the scoped reader. Note `getMyTenant` was already
+membership-verified and request-tenant-first, so this is a protocol/fail-closed/
+projection change rather than a cross-tenant fix.
 
 This tightens `TEN-*`/`ISO-04` application-level scoping but does not change any RLS
 policy or grant: these reads run as the application connection, so real isolation
@@ -619,6 +621,30 @@ still depends on the deployed policies and grants in the five unapplied migratio
 remain unapplied; release gate stays default-off. Before rollout, verify real
 per-tenant `tenant_branding`, `invoices` and `white_label_requests` visibility under
 RLS and grants, and cross-league denial for a multi-league account; mocked readers do
-not prove those database properties. Next source slice: the remaining
-`dashboard-context`/notifications/stripe-checkout/league-setup destinations and venue
-writers, then public/anonymous follow, publication and notification boundaries.
+not prove those database properties. Next source slice: tournament-detail
+mutation-control gating and the remaining venue writers, then public/anonymous follow,
+publication and notification boundaries.
+
+## Batch 29 — permission-gated tournament-detail controls (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. `dashboard/tournaments/[id]/page.tsx` now resolves the exact
+active league with `requireActiveLeagueContext("tournament:read")`, 404s a tournament
+whose `tenantId` is not that league, and renders each mutation control only for a role
+that holds its permission: edit (`tournament:update`), archive (`tournament:delete`),
+registration open/close (`tournament:manage_registrations`) and the self-service
+registration CTA (`registration:create`). The controls were previously rendered for
+every viewer whose role held `tournament:read`, so a fan/player/coach/scorer (and a
+team manager, for the league-administration controls) saw buttons whose actions then
+denied. The underlying actions are unchanged and still re-check on write. This entry
+also corrects the Batch 28 notes: `getMyTenant` was already membership-verified and
+request-tenant-first, so Batch 28 was a protocol/fail-closed/projection change rather
+than a cross-tenant fix.
+
+This is application-level control-visibility alignment; it does not change any RLS
+policy or grant, and per-role page rendering under a mocked context is not proof of
+authenticated-browser or database-level authorization. All five prior migrations remain
+unapplied; release gate stays default-off. Before rollout, verify page rendering and
+action denial for each role against the deployed policies and grants. Next source
+slice: the remaining venue writers and the registrations/new swallow-and-redirect, then
+public/anonymous follow, publication and notification boundaries.

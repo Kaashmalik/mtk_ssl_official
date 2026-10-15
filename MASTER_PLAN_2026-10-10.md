@@ -1865,20 +1865,24 @@ checked / 60 open / 79 IDs**.
 #### Implemented
 
 - Synced clean `main` with remote `905891b`. Scope is the settings/billing/invoices/
-  white-label destinations; `dashboard-context`, notifications, Stripe-checkout,
-  league-setup, venue writers and public/anonymous follow stay open.
+  white-label destinations. (`getMyTenant` is already membership-verified and
+  request-tenant-first, so this is a protocol/fail-closed/projection change; the
+  already-verified notifications, Stripe-checkout, `dashboard-context` and league-setup
+  sites, venue writers and public/anonymous follow stay open.)
 - New `lib/league-settings-reads.ts` reads the active league's identity/branding,
   bounded invoice history, one invoice and bounded white-label requests, each
-  predicated on the resolved `tenantId` with explicit projections. No
-  primary/owned-league fallback.
-- The settings, billing, invoices and invoice-detail pages resolve the exact active
-  league with `requireActiveLeagueContext("settings:manage")` (was `getMyTenant`);
-  failures propagate instead of redirecting to league setup or rendering fake empty
-  settings. The billing client/upgrade modal take a minimal `LeagueIdentity`, and a
-  foreign invoice 404s.
-- `lib/invoices.ts` is removed; the white-label writer resolves the exact active
-  league and plan, and the unused `getMyWhiteLabelRequests` action is removed in
-  favour of the scoped reader.
+  predicated on the resolved `tenantId` with explicit projections; the reader takes an
+  explicit `tenantId` and never resolves one itself.
+- The settings, billing, invoices and invoice-detail pages resolve the active league
+  with the shared fail-closed `requireActiveLeagueContext("settings:manage")` gate
+  instead of page-level `getMyTenant` + `getUserRoleForTenant`; failures propagate
+  instead of silently redirecting to the dashboard/league setup or rendering fake
+  empty settings, and reads are projected and bounded rather than `SELECT *`. The
+  billing client/upgrade modal take a minimal `LeagueIdentity`, and a foreign invoice
+  404s.
+- `lib/invoices.ts` is removed; the white-label writer shares the same active-league
+  resolution (`getMyTenant` was already membership-verified) and the unused
+  `getMyWhiteLabelRequests` action is removed in favour of the scoped reader.
 
 #### Verification recorded
 
@@ -1896,10 +1900,52 @@ proof.
 No build, lint, schema change, migration application, remote database operation or
 deployment ran. `tsc --noEmit` still reports only its pre-existing unrelated errors.
 Five prior migrations remain unapplied and the release gate stays default-off. Next
-source work: the remaining `dashboard-context`/notifications/stripe-checkout/
-league-setup destinations and venue writers, then public/anonymous follow, publication
-and notification paths. No full ISO-04 or authenticated browser claim; whole-task
-roadmap counts remain **19 checked / 60 open / 79 IDs**.
+source work: tournament-detail mutation-control gating and the remaining venue
+writers, then public/anonymous follow, publication and notification paths. No full
+ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19 checked /
+60 open / 79 IDs**.
+
+### 2026-10-15 — Batch 29: permission-gated tournament-detail controls
+
+#### Implemented
+
+- Synced clean `main` with remote `3dd6152`. Scope is the tournament-detail page's
+  mutation controls; venue writers, registrations/new, `dashboard-context`/notifications/
+  league-setup and public/anonymous follow stay open. It also corrects the Batch 28
+  notes: `getMyTenant` is already membership-verified and request-tenant-first, so
+  Batch 28 was a protocol/fail-closed/projection change, not a cross-tenant fix.
+- `dashboard/tournaments/[id]/page.tsx` resolves the exact active league with
+  `requireActiveLeagueContext("tournament:read")`, 404s a row whose `tenantId` is not
+  that league, and gates each control on the viewer's precise permission: the edit link
+  on `tournament:update`, the archive button on `tournament:delete`, the registration
+  open/close toggle on `tournament:manage_registrations`, and the self-service
+  registration CTA on `registration:create`. Previously all controls rendered for any
+  viewer whose role held `tournament:read` (fan/player/coach/scorer included). The
+  actions themselves are unchanged and still re-check on write.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 57 files, **1,984 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,305 passing tests** (+10 over Batch 28) |
+
+New regression `tournament-detail-page.test.tsx` (10 tests): resolves
+`tournament:read` for the exact league, shows every control to a league owner, shows a
+team manager only the registration CTA, hides all four controls from
+scorer/coach/player/fan, propagates a denied context before the read, and 404s a
+missing or foreign-league row. Rendering a page with mocked context/actions is not
+authenticated-browser proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its pre-existing unrelated errors.
+Five prior migrations remain unapplied and the release gate stays default-off. Next
+source work: the remaining venue writers and the registrations/new
+swallow-and-redirect, then public/anonymous follow, publication and notification paths.
+No full ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19
+checked / 60 open / 79 IDs**.
 
 ### Definition of done for each batch
 

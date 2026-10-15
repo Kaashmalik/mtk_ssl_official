@@ -1,3 +1,4 @@
+import React from "react"
 import Link from "next/link"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
@@ -15,6 +16,8 @@ import { eq, asc, and } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { TournamentSettingsSummary } from "@/components/tournaments/tournament-settings-summary"
+import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { hasPermission } from "@/lib/rbac"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -42,11 +45,20 @@ const FORMAT_LABELS: Record<string, string> = {
 export default async function TournamentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   noStore()
   const { id } = await params
-  
+
+  // The exact active league and the viewer's role. Control visibility uses the same
+  // league the read is scoped to; every action still re-checks on write.
+  const context = await requireActiveLeagueContext("tournament:read")
+
   const tournament = await getTournament(id)
-  if (!tournament) {
+  if (!tournament || tournament.tenantId !== context.tenantId) {
     notFound()
   }
+
+  const canEdit = hasPermission(context.role, "tournament:update")
+  const canDelete = hasPermission(context.role, "tournament:delete")
+  const canManageRegistrations = hasPermission(context.role, "tournament:manage_registrations")
+  const canRegister = hasPermission(context.role, "registration:create")
 
   const followingState = await isFollowing("tournament", id)
   const followersCount = await getFollowerCount("tournament", id)
@@ -230,23 +242,29 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                   initialIsFollowing={followingState}
                   initialFollowerCount={followersCount}
                 />
-                <Link href={`/dashboard/tournaments/${id}/edit`}>
-                  <Button variant="outline" size="sm" className="bg-white/10 text-white border-white/30 hover:bg-white/20">
-                    <Edit className="h-4 w-4 mr-1" />Edit
-                  </Button>
-                </Link>
-                <RegistrationToggle
-                  tournamentId={id}
-                  registrationOpen={Boolean(tournament.registrationOpen)}
-                />
-                <DeleteButton
-                  action={deleteTournament}
-                  id={id}
-                  redirectHref="/dashboard/tournaments"
-                  entityLabel="tournament"
-                  entityName={tournament.name}
-                  operation="archive"
-                />
+                {canEdit && (
+                  <Link href={`/dashboard/tournaments/${id}/edit`}>
+                    <Button variant="outline" size="sm" className="bg-white/10 text-white border-white/30 hover:bg-white/20">
+                      <Edit className="h-4 w-4 mr-1" />Edit
+                    </Button>
+                  </Link>
+                )}
+                {canManageRegistrations && (
+                  <RegistrationToggle
+                    tournamentId={id}
+                    registrationOpen={Boolean(tournament.registrationOpen)}
+                  />
+                )}
+                {canDelete && (
+                  <DeleteButton
+                    action={deleteTournament}
+                    id={id}
+                    redirectHref="/dashboard/tournaments"
+                    entityLabel="tournament"
+                    entityName={tournament.name}
+                    operation="archive"
+                  />
+                )}
               </div>
             </div>
           </CardContent>
@@ -305,7 +323,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                   </div>
                 )}
 
-                {tournament.registrationOpen && (
+                {tournament.registrationOpen && canRegister && (
                   <div className="border-t pt-4 flex justify-end">
                     <Link href={`/dashboard/registrations/new?tournamentId=${id}`}>
                       <Button variant="gradient-shine">
