@@ -25,6 +25,32 @@ export async function requireRegistrationReadContext(permission: Permission): Pr
   return { tenantId, actorId: actor.id, clerkId, role: membership.role }
 }
 
+/**
+ * Access decision for the league registration review queue. Returns the review
+ * context when the viewer holds `registration:manage` in the exact active league,
+ * or `null` when they are simply not a league owner: no active league, no active
+ * membership, a `super_admin`-only membership, or a missing permission. Tenant,
+ * actor, membership and league lookups are not swallowed here, so an
+ * infrastructure failure throws and the page's error boundary reports it instead
+ * of showing a redirect that would look like an ordinary non-owner visit.
+ */
+export async function resolveRegistrationReviewAccess(): Promise<RegistrationReadContext | null> {
+  const { userId: clerkId } = await auth()
+  if (!clerkId) throw new Error("Unauthorized")
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) return null
+  const actor = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
+  if (!actor || actor.clerkId !== clerkId || actor.isActive !== true) return null
+  const membership = await db.query.userTenantRoles.findFirst({ where: and(
+    eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId)) })
+  const league = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
+  if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
+    || membership.status !== "active" || membership.role === "super_admin"
+    || !hasPermission(membership.role, "registration:manage")
+    || !league || league.id !== tenantId || league.isActive !== true) return null
+  return { tenantId, actorId: actor.id, clerkId, role: membership.role }
+}
+
 export function canWithdrawRegistration(context: RegistrationReadContext, team: { isActive: boolean; managerId: string | null; captainId: string | null }) {
   return team.isActive && (context.role === "league_owner" || (context.role === "team_manager"
     && (team.managerId === context.actorId || team.captainId === context.actorId)))

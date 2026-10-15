@@ -2040,6 +2040,45 @@ the remaining catch-redirect cleanups, then public/anonymous follow, publication
 notification paths. No full ISO-04 or authenticated browser claim; whole-task roadmap
 counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 32: registration review queue reports failures instead of hiding them
+
+#### Implemented
+
+- Synced clean `main` with remote `ed2b086`. Scope is the league registration review queue's
+  access decision; public/anonymous follow, publication boundaries, refunds and notification
+  fan-out stay open.
+- `lib/registration-reads.ts` gains `resolveRegistrationReviewAccess()` — a non-throwing
+  access decision that returns the review context only when the viewer holds
+  `registration:manage` in the exact active league, and `null` when they are simply not a
+  league owner (no active league, no active membership, a `super_admin`-only membership, or a
+  missing permission). Tenant, actor, membership and league lookups are not swallowed, so an
+  infrastructure failure throws.
+- `dashboard/registrations/page.tsx` replaces its
+  `try { requireRegistrationReadContext("registration:manage") } catch { redirect("/dashboard") }`
+  — which turned every tenant/membership/database failure into a benign-looking bounce — with
+  `const context = await resolveRegistrationReviewAccess(); if (!context) redirect("/dashboard")`.
+  A genuine non-owner is still sent to the dashboard; any other failure now propagates to the
+  route's `error.tsx`. The queue read was already uncaught and stays that way.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 64 files, **2,037 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,358 passing tests** (+6 over Batch 31) |
+
+New regressions: `registration-review-page.test.tsx` (6 — exact-league read; non-owner
+redirect without a read; propagated access and read failures with no `/dashboard` redirect;
+the anonymous bounce). Mocked readers are **not** authenticated-browser or database proof.
+
+No build, lint, schema change, migration application, remote database operation or deployment
+ran. `tsc --noEmit` still reports only its pre-existing unrelated errors. Five prior
+migrations remain unapplied and the release gate stays default-off. Next source work:
+public/anonymous follow, publication and notification paths. No full ISO-04 or authenticated
+browser claim; whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

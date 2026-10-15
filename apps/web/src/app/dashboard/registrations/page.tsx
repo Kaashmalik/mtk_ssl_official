@@ -6,7 +6,7 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Plus } from "lucide-react"
 import { RegistrationList } from "@/components/registrations/registration-list"
-import { requireRegistrationReadContext, readRegistrations, type RegistrationReadContext } from "@/lib/registration-reads"
+import { resolveRegistrationReviewAccess, readRegistrations } from "@/lib/registration-reads"
 import { unstable_noStore as noStore } from "next/cache"
 
 export default async function RegistrationsPage() {
@@ -15,14 +15,12 @@ export default async function RegistrationsPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  // Only league owners (registration:manage) reach the review queue; others are
-  // sent back to the dashboard rather than seeing a foreign league's entries.
-  let context: RegistrationReadContext
-  try {
-    context = await requireRegistrationReadContext("registration:manage")
-  } catch {
-    redirect("/dashboard")
-  }
+  // Only league owners (registration:manage) reach the review queue; other members
+  // are sent back to the dashboard rather than seeing another league's entries. A
+  // tenant/membership/read failure is not a non-owner visit, so it is left to
+  // propagate to this route's error boundary instead of a blanket redirect.
+  const context = await resolveRegistrationReviewAccess()
+  if (!context) redirect("/dashboard")
 
   const { data } = await readRegistrations(context.tenantId, { pageSize: 100 })
   const resolvedRegistrations = data.map((reg) => ({

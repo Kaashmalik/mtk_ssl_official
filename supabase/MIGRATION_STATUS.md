@@ -697,3 +697,27 @@ compare-and-set and duplicate-name mapping against real PostgreSQL. Next source 
 remaining catch-redirect cleanups, then public/anonymous follow, publication and notification
 boundaries.
 
+## Batch 32 — registration review queue reports access/read failures (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or deployment
+occurred. `app/dashboard/registrations/page.tsx` previously wrapped
+`requireRegistrationReadContext("registration:manage")` in a `try/catch` that redirected to
+`/dashboard` on **any** error, so a tenant/membership/database failure looked like an ordinary
+non-owner visit. It now calls the new non-throwing `resolveRegistrationReviewAccess()` in
+`lib/registration-reads.ts`: this returns the review context only when the viewer holds
+`registration:manage` in the exact active league, and `null` when they are not a league owner
+(no active league, no active membership, a `super_admin`-only membership, or a missing
+permission). Tenant, actor, membership and league lookups are not swallowed, so an
+infrastructure failure throws and reaches the route's `error.tsx`. The queue read
+(`readRegistrations`) was already uncaught.
+
+This is an application-level failure-propagation change; it does not change any RLS policy or
+grant, and a mocked reader/database is not proof of authenticated-browser or database-level
+authorization. All five prior migrations remain unapplied; release gate stays default-off.
+
+**Verification:** web 2,037 / 64 files, database 128 / 8 files, scoring service 193 / 8
+suites; 2,358 passing tests (+6 over Batch 31). `tsc --noEmit` still reports only its
+pre-existing unrelated errors. Before rollout, verify the review-queue access decision and its
+error boundary against real PostgreSQL and an authenticated browser. Next source slice:
+public/anonymous follow, publication and notification boundaries.
+
