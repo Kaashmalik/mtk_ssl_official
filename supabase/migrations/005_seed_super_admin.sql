@@ -2,7 +2,7 @@
 -- Migration 004: Seed Super Admin (Muhammad Kashif)
 -- ============================================================================
 -- This migration creates the super admin user for Muhammad Kashif
--- Email: kashif@maliktech.pk
+-- Email: kaash0542@gmail.com
 
 -- Insert super admin user
 -- Note: In production, this user should be created through your auth system (Clerk)
@@ -17,7 +17,7 @@ INSERT INTO users (
   updated_at
 ) VALUES (
   uuid_generate_v7(),
-  'kashif@maliktech.pk',
+  'kaash0542@gmail.com',
   ARRAY[]::uuid[], -- Super admin doesn't need tenant_ids, they can access all
   'super_admin',
   true,
@@ -54,7 +54,7 @@ SELECT
   now(),
   now()
 FROM users u
-WHERE u.email = 'kashif@maliktech.pk'
+WHERE u.email = 'kaash0542@gmail.com'
 ON CONFLICT (slug) DO NOTHING;
 
 -- Create branding for SSL tenant
@@ -92,5 +92,5 @@ SET
     SELECT t.id FROM tenants t WHERE t.slug = 'ssl'
   )::uuid[],
   updated_at = now()
-WHERE email = 'kashif@maliktech.pk';
+WHERE email = 'kaash0542@gmail.com';
 

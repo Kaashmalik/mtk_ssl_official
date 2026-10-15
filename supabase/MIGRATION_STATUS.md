@@ -3,10 +3,100 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-> **12 October 2026 update:** the inventory below is a historical October 6–7
-> snapshot, not a live schema certification. The new
-> `20261012100136_league_membership_controls.sql` is **local and unapplied**;
-> follow the Batch 7 rollout gates below before releasing its dependent code.
+> **15 October 2026 (evening) — FULL REBUILD & RECONCILIATION COMPLETE.**
+> The database was wiped from the SQL editor (schema and data dropped, migration
+> history left stale), then **rebuilt from the repository's canonical chain**:
+> all migrations `001` → `20261013180000` were applied in filename order, plus
+> two new reconciliation migrations created by this pass (see below). The
+> sections below the horizontal rule are historical and describe the era **before**
+> this rebuild; their "unapplied" statements no longer hold.
+
+### Rebuild summary (15 October 2026)
+
+| Check | Result |
+|---|---|
+| Migrations applied (all, in order) | 45 = 43 repo files + `025`, `026` below |
+| Drizzle tables defined | 50 |
+| Tables present in `public` | **50 — exact match** |
+| Missing tables / columns / enums vs Drizzle | **0 / 0 / 0** |
+| RLS enabled | 56 policies-checked tables → **all** public tables enabled |
+| Legacy DB-only tables | **0** — the 6 documented tables were dropped (no code readers, no view deps, empty) |
+| Advisors (security / performance) | **0 findings** |
+| Recorded migration history | rewritten to exactly the 45 repo filename prefixes — `db push` now reports **no drift** |
+| Super admin | `kaash0542@gmail.com` (`role='super_admin'`, active) — DB row and `005_seed_super_admin.sql` both updated |
+| `auth.users` | **empty** — create the Supabase Auth user `kaash0542@gmail.com` (invite) so login works; `is_super_admin()`/`current_tenant_id()` match by email fallback |
+
+### Bugs fixed in repository migrations during the rebuild
+
+1. **`001_enable_uuid_v7_and_helpers.sql` — `uuid_generate_v7()` was doubly
+   broken**: `integer & bit` (bit-string literals `x'0F'` etc.) aborted every
+   `INSERT`, and the `decode()` input used the 16-char zero-padded timestamp
+   (36 hex = 18 bytes) instead of the 12-char `unix_ts_ms`, so `::uuid` would
+   also fail. Rewritten: 12-hex 48-bit ms timestamp + integer masks, producing
+   valid, time-ordered v7 UUIDs. (`all_migrations_combined.sql` patched too.)
+2. `009_fantasy_cricket.sql` — default `fantasy_points_rules` rows referenced a
+   phantom all-zero tenant (FK violation on a fresh DB). Now seeded only when
+   that tenant exists. The app never reads this table.
+3. `018_create_impersonation_sessions.sql` — grants assumed a custom `ssl` role
+   (existed only on the pre-wipe project). A guarded `CREATE ROLE ssl NOLOGIN`
+   block now runs before first use (used by 8 later migrations).
+4. `022_add_starter_plan_and_payment_tables.sql` — `ALTER TYPE tenant_plan` ran
+   unconditionally (type is a fresh-install legacy artifact; now guarded), and
+   two policies referenced `users.clerk_id` (Clerk era). They now use
+   `users.id = auth.uid()`, matching the Supabase-Auth design of `001`'s helpers.
+5. `024_revoke_sensitive_table_grants.sql` — hardening ran before
+   `20260623_add_user_tenant_roles.sql` creates the table; `REVOKE`/`GRANT`/
+   `COMMENT`/`DROP POLICY ... ON user_tenant_roles` and the policy-creation
+   block are now `to_regclass`-guarded, and the file is re-applied at the end of
+   the chain (final hardening pass).
+6. `20260623_add_user_tenant_roles.sql` — backfill joined
+   `users.clerk_id = tenants.owner_id::text`; now joins `users.id = owner_id`.
+
+### New migrations created by this pass
+
+- **`025_sync_drizzle_schema.sql`** — adds application columns no earlier
+  migration creates: `users(clerk_id, display_name, avatar_url, last_login_at)`,
+  `teams(short_name, description, city, banner_url, primary_color,
+  secondary_color, founded_year, max_squad_size, created_by)`,
+  `matches(total_overs, man_of_match_id, umpire_1, umpire_2, third_umpire,
+  match_referee, created_by)`, with `users_clerk_id_key` unique index. Idempotent.
+- **`026_align_app_types.sql`** — creates the 11 enums the 001–024 chain never
+  created (`user_role`, `tenant_plan`, `match_format`, `match_type`,
+  `match_status`, `toss_decision`, `wicket_type`, `innings_status`,
+  `tournament_format`, `tournament_status`, `ground_type`; `stream_source`/
+  `stream_status` stay owned by `20261004090000`), drops legacy text CHECK
+  constraints (the enums now own those domains — e.g. the old
+  `users_role_check` permitted only `user/admin/super_admin`, not even `fan`),
+  and converts the live columns to the Drizzle-declared enum types
+  (`users.role`, `tenants.plan`, `matches.{match_format,match_type,status,
+  toss_decision}`, `match_innings.status`, `match_balls.wicket_type`,
+  `tournaments.{format,status}`, `venues.ground_type`), recreating the two
+  super-admin policies on `subscription_requests` around the `users.role` change.
+
+### Bookkeeping notes
+
+- `all_migrations_combined.sql` was **regenerated** from the 45 migration files
+  (the previous copy dated 2026-05-25 predated 18 migrations and carried the
+  broken `uuid_generate_v7()` body).
+- `combined_pending_migrations.sql` was **removed** — it was a stale generated
+  bundle of not-yet-applied migrations; nothing is pending anymore.
+- Recorded history rows were rewritten with `created_by = 'mcp'` and no
+  `statements` payload, so the CLI matches by version prefix; re-running
+  `supabase db push` is expected to be a no-op.
+- `seed.sql` was **not** applied (batch environment kept the database clean of
+  fixture rows; run it deliberately when fixture data is wanted — it is
+  idempotent, uses `.invalid` emails, per the historical notes below).
+
+### Still true (unchanged)
+
+- **No edge functions exist in the repository** (`supabase/functions` is
+  absent); there is nothing to deploy on that front.
+- `LEAGUE_MEMBERSHIP_CONTROLS_READY` stays unset/false until the *real-DB
+  acceptance* gates are exercised (two-session races, RLS, grants, staging
+  acceptance). The rebuild proves the schema was applied; it does **not**
+  certify runtime behavior. Gates below still stand as written.
+
+---
 
 ## Historical verdict (October 6–7): schema was in sync
 

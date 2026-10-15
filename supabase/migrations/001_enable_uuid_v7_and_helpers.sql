@@ -13,32 +13,23 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE OR REPLACE FUNCTION uuid_generate_v7()
 RETURNS uuid AS $$
 DECLARE
-  unix_ts_ms bytea;
+  uuid_hex text;
   uuid_bytes bytea;
 BEGIN
-  -- Get current timestamp in milliseconds
-  unix_ts_ms := substring(
-    lpad(to_hex(
-      (extract(epoch from clock_timestamp()) * 1000)::bigint
-    ), 16, '0') from 1 for 12
-  );
-
-  -- Generate random bytes for the rest
-  uuid_bytes := decode(
-    lpad(to_hex(
-      (extract(epoch from clock_timestamp()) * 1000)::bigint
-    ), 16, '0') ||
+  -- 48-bit big-endian millisecond timestamp (12 hex chars)
+  uuid_hex :=
+    lpad(to_hex((extract(epoch from clock_timestamp()) * 1000)::bigint), 12, '0') ||
     lpad(to_hex((random() * 9223372036854775807)::bigint), 12, '0') ||
-    lpad(to_hex((random() * 9223372036854775807)::bigint), 8, '0'),
-    'hex'
-  );
+    lpad(to_hex((random() * 9223372036854775807)::bigint), 8, '0');
 
-  -- Set version (7) and variant bits
-  uuid_bytes := set_byte(uuid_bytes, 6, 
-    (get_byte(uuid_bytes, 6) & x'0F')::int | x'70'::int
+  uuid_bytes := decode(uuid_hex, 'hex');
+
+  -- Set version (7) and RFC 4122 variant bits
+  uuid_bytes := set_byte(uuid_bytes, 6,
+    (get_byte(uuid_bytes, 6) & 15) | 112
   );
   uuid_bytes := set_byte(uuid_bytes, 8,
-    (get_byte(uuid_bytes, 8) & x'3F')::int | x'80'::int
+    (get_byte(uuid_bytes, 8) & 63) | 128
   );
 
   RETURN encode(uuid_bytes, 'hex')::uuid;

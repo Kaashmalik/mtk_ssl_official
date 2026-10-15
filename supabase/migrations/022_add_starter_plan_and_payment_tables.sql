@@ -16,7 +16,12 @@
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  -- The tenant_plan enum is a legacy artifact; fresh installs type plan as
+  -- text in the application schema. Only extend it where it exists.
+  IF EXISTS (
+    SELECT 1 FROM pg_type t
+    WHERE t.typname = 'tenant_plan' AND t.typtype = 'e'
+  ) AND NOT EXISTS (
     SELECT 1 FROM pg_enum e
     JOIN pg_type t ON e.enumtypid = t.oid
     WHERE t.typname = 'tenant_plan' AND e.enumlabel = 'starter'
@@ -77,7 +82,7 @@ CREATE POLICY "super_admin_read_all_subscription_requests"
   ON subscription_requests
   FOR SELECT
   USING (
-    EXISTS (SELECT 1 FROM users WHERE clerk_id = auth.uid() AND role = 'super_admin')
+    EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'super_admin')
   );
 
 -- Super admins can update subscription requests (approve/reject)
@@ -85,7 +90,7 @@ CREATE POLICY "super_admin_update_subscription_requests"
   ON subscription_requests
   FOR UPDATE
   USING (
-    EXISTS (SELECT 1 FROM users WHERE clerk_id = auth.uid() AND role = 'super_admin')
+    EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'super_admin')
   );
 
 -- ─── 6. Auto-expire pending requests after 7 days ────────────────────────

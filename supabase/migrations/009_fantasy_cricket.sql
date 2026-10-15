@@ -84,15 +84,25 @@ CREATE POLICY tenant_isolation_fantasy_teams ON fantasy_teams USING (tenant_id =
 CREATE POLICY tenant_isolation_fantasy_players ON fantasy_team_players USING (tenant_id = current_setting('app.current_tenant')::UUID);
 
 -- Default scoring rules
-INSERT INTO fantasy_points_rules (tenant_id, event, points, multiplier, description) VALUES
-  ('00000000-0000-0000-0000-000000000000', 'run', 1, 1.0, 'Every run scored'),
-  ('00000000-0000-0000-0000-000000000000', 'four', 1, 1.0, 'Bonus for hitting a four'),
-  ('00000000-0000-0000-0000-000000000000', 'six', 2, 1.0, 'Bonus for hitting a six'),
-  ('00000000-0000-0000-0000-000000000000', 'wicket', 25, 1.0, 'Wicket taken (bowler)'),
-  ('00000000-0000-0000-0000-000000000000', 'catch', 10, 1.0, 'Catch taken'),
-  ('00000000-0000-0000-0000-000000000000', 'stumping', 15, 1.0, 'Stumping'),
-  ('00000000-0000-0000-0000-000000000000', 'run_out', 10, 1.0, 'Direct run out'),
-  ('00000000-0000-0000-0000-000000000000', 'duck', -5, 1.0, 'Out for zero'),
-  ('00000000-0000-0000-0000-000000000000', 'maidens', 10, 1.0, 'Maiden over bowled'),
-  ('00000000-0000-0000-0000-000000000000', 'fifty', 10, 1.0, 'Half century'),
-  ('00000000-0000-0000-0000-000000000000', 'century', 25, 1.0, 'Century');
+-- These defaults belong to a legacy system tenant that no longer exists on a
+-- fresh install. Seed them only when that tenant is present so a fresh
+-- database does not violate fantasy_points_rules_tenant_id_fkey. The
+-- application never reads this table today; per-tenant defaults live in code.
+INSERT INTO fantasy_points_rules (tenant_id, event, points, multiplier, description)
+SELECT v.tenant_id, v.event, v.points, v.multiplier, v.description
+FROM (VALUES
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'run', 1, 1.0::numeric, 'Every run scored'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'four', 1, 1.0::numeric, 'Bonus for hitting a four'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'six', 2, 1.0::numeric, 'Bonus for hitting a six'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'wicket', 25, 1.0::numeric, 'Wicket taken (bowler)'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'catch', 10, 1.0::numeric, 'Catch taken'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'stumping', 15, 1.0::numeric, 'Stumping'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'run_out', 10, 1.0::numeric, 'Direct run out'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'duck', -5, 1.0::numeric, 'Out for zero'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'maidens', 10, 1.0::numeric, 'Maiden over bowled'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'fifty', 10, 1.0::numeric, 'Half century'),
+  ('00000000-0000-0000-0000-000000000000'::uuid, 'century', 25, 1.0::numeric, 'Century')
+) AS v(tenant_id, event, points, multiplier, description)
+WHERE EXISTS (
+  SELECT 1 FROM tenants WHERE id = '00000000-0000-0000-0000-000000000000'::uuid
+);

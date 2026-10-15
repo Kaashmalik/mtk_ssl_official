@@ -15,29 +15,40 @@
 ALTER TABLE IF EXISTS public.user_tenant_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.user_tenant_roles FORCE ROW LEVEL SECURITY;
 
-REVOKE ALL ON TABLE public.user_tenant_roles FROM PUBLIC;
-REVOKE ALL ON TABLE public.user_tenant_roles FROM anon;
-REVOKE ALL ON TABLE public.user_tenant_roles FROM authenticated;
+-- This chain creates user_tenant_roles in 20260623_add_user_tenant_roles.sql,
+-- AFTER this file runs. Keep 024 order-safe by hardening the table only when
+-- it already exists (guarded block below).
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_tenant_roles TO service_role;
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ssl') THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_tenant_roles TO ssl;
+  IF to_regclass('public.user_tenant_roles') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON TABLE public.user_tenant_roles FROM PUBLIC';
+    EXECUTE 'REVOKE ALL ON TABLE public.user_tenant_roles FROM anon';
+    EXECUTE 'REVOKE ALL ON TABLE public.user_tenant_roles FROM authenticated';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_tenant_roles TO service_role';
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ssl') THEN
+      EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_tenant_roles TO ssl';
+    END IF;
   END IF;
 END $$;
 
-DROP POLICY IF EXISTS "deny_all_user_tenant_roles" ON public.user_tenant_roles;
 -- No permissive policies for anon/authenticated. service_role bypasses RLS.
 -- Optional policy keeps super-admin JWT paths usable if ever wired through PostgREST.
-DROP POLICY IF EXISTS "super_admin_all_user_tenant_roles" ON public.user_tenant_roles;
+-- DROP POLICY IF EXISTS still requires the table to exist, so guard both drops.
+DO $$
+BEGIN
+  IF to_regclass('public.user_tenant_roles') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "deny_all_user_tenant_roles" ON public.user_tenant_roles';
+    EXECUTE 'DROP POLICY IF EXISTS "super_admin_all_user_tenant_roles" ON public.user_tenant_roles';
+  END IF;
+END $$;
 DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND p.proname = 'is_super_admin'
-  ) THEN
+  ) AND to_regclass('public.user_tenant_roles') IS NOT NULL THEN
     EXECUTE $pol$
       CREATE POLICY "super_admin_all_user_tenant_roles"
         ON public.user_tenant_roles
@@ -85,7 +96,12 @@ BEGIN
   END IF;
 END $$;
 
-COMMENT ON TABLE public.user_tenant_roles IS
-  'Per-tenant roles. PostgREST anon/authenticated have no grants; RLS forced.';
+DO $$
+BEGIN
+  IF to_regclass('public.user_tenant_roles') IS NOT NULL THEN
+    EXECUTE 'COMMENT ON TABLE public.user_tenant_roles IS ''Per-tenant roles. PostgREST anon/authenticated have no grants; RLS forced.''';
+  END IF;
+END $$;
+
 COMMENT ON TABLE public.impersonation_sessions IS
   'Super-admin impersonation sessions. PostgREST anon/authenticated have no grants; RLS forced.';

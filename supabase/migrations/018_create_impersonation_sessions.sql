@@ -13,6 +13,16 @@
 --  * All impersonation activity is also mirrored into audit_logs for
 --    defense-in-depth reporting.
 
+-- Environment role used by later GRANT/REVOKE statements. It does not exist on
+-- every Supabase project, so create it (NOLOGIN, no privileges) if missing.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ssl') THEN
+    CREATE ROLE ssl NOLOGIN;
+  END IF;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS public.impersonation_sessions (
   id            uuid        PRIMARY KEY DEFAULT uuid_generate_v7(),
   jti           text        NOT NULL,

@@ -42,7 +42,7 @@ SELECT
   'league_owner'::user_role,
   true
 FROM tenants t
-JOIN users u ON u.clerk_id = t.owner_id::text
+JOIN users u ON u.id = t.owner_id
 WHERE NOT EXISTS (
   SELECT 1 FROM user_tenant_roles utr 
   WHERE utr.user_id = u.id AND utr.tenant_id = t.id
