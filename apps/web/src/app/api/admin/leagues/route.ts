@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { db } from "@mtk/database"
-import { tenants } from "@mtk/database"
-import { desc } from "drizzle-orm"
 import { isSuperAdmin } from "@/lib/super-admin"
+import { listAllLeaguesForAdmin } from "@/lib/admin-reads"
 
 export async function GET() {
   try {
@@ -17,18 +15,7 @@ export async function GET() {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    const leagues = await db
-      .select({
-        id: tenants.id,
-        name: tenants.name,
-        slug: tenants.slug,
-        plan: tenants.plan,
-        customDomain: tenants.customDomain,
-        isActive: tenants.isActive,
-        createdAt: tenants.createdAt,
-      })
-      .from(tenants)
-      .orderBy(desc(tenants.createdAt))
+    const leagues = await listAllLeaguesForAdmin()
 
     return NextResponse.json({ leagues })
   } catch (error) {

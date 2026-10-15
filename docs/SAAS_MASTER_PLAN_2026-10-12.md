@@ -2296,6 +2296,23 @@ lines; `git diff --check` clean. The allowlist sweep (Batches 37–41) is comple
 source work is the remaining admin-API audit items. Roadmap counts stay
 **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 42: admin leagues API — lib reader + first gate regressions
+
+- `GET /api/admin/leagues` now reads through the new `lib/admin-reads.ts`
+  (`listAllLeaguesForAdmin`, 500-row bound, same 7-field projection and ordering); the
+  route keeps only the auth→`isSuperAdmin` gate and error mapping. Previously untested
+  and unbounded; the consumer (`branding-settings`) takes the newest-first list, so the
+  bound preserves the contract.
+- New regressions: `admin-leagues-route.test.ts` (401/403/200/500 gate contract,
+  projection, bound) and `super-admin.test.ts` (active-`super_admin`-row-only grant,
+  fail-closed on DB error, dev-only `SUPER_ADMIN_EMAIL` fallback pinned: non-production,
+  missing-row-only, case-insensitive).
+
+**Fresh verification:** web **2,136 / 72** (+15); `tsc --noEmit` at its **19
+pre-existing** lines; `git diff --check` clean. Next: continue the admin-API tier audit
+(impersonation, `settings/branding`, `cron/subscription-renewal`, `billing/stripe`).
+Roadmap counts stay **19 checked / 60 open / 79 IDs**.
+
 ### Decisions still requiring explicit review
 
 Identity migration/linking; membership/grant schema and fallback retirement; MFA/recovery policy; invite/OTP defaults; league onboarding policy; official independent approvals; supported cricket laws/formats; currency/payment providers; visibility/minor consent; product limits/grace; feed/media rights; recovery/performance load targets. Record decisions rather than guessing business/legal rules in code.

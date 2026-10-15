@@ -2517,6 +2517,45 @@ Next source work: the remaining admin-API audit items from the master plan; the
 allowlist sweep is complete. Roadmap counts remain **19 checked / 60 open /
 79 IDs**.
 
+### Batch 42 — admin leagues API: lib reader, gate regressions (15 October 2026)
+
+First pass over the remaining admin-API surface (`app/api/**`, previously the
+only untested tier). `GET /api/admin/leagues` — the super-admin platform
+league list consumed by `branding-settings` — was extracted: the read moved to
+the new `lib/admin-reads.ts` (`listAllLeaguesForAdmin` +
+`adminLeagueListLimit = 500`, identical field projection and newest-first
+ordering); the route now holds only the auth→`isSuperAdmin` gate, the read and
+its error mapping. The query is no longer unbounded (was `select … order by`
+with no limit).
+
+New regressions, previously absent for this tier:
+
+- `admin-leagues-route.test.ts` (5): 401 before any role check, 403 without a
+  read, super-admin 200 with the exact 7-field projection, logged 500 on a
+  read failure, and the documented list bound/newest-first order.
+- `super-admin.test.ts` (10): the platform-role gate grants only an *active*
+  `super_admin` row, denies any other role or inactive account, denies on
+  database failure (fail closed), denies unauthenticated sessions before any
+  query, and pins the `SUPER_ADMIN_EMAIL` fallback to **non-production only**
+  and to the case where no account row exists (a live row always decides).
+
+Cross-tenant here is by design — the boundary is the `isSuperAdmin` gate, not a
+tenant predicate; that is exactly why its fail-closed behavior now has
+regressions.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **72** files, **2,136 tests** (+15) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (admin files clean) |
+| `git diff --check` | Clean |
+
+Next source work: continue the admin-API tier audit (impersonation session/exit,
+`settings/branding`, `cron/subscription-renewal` writes, `billing/stripe`
+checkout reads — all still direct-db with no tests). Roadmap counts remain
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
