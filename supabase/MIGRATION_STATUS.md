@@ -697,21 +697,3 @@ compare-and-set and duplicate-name mapping against real PostgreSQL. Next source 
 remaining catch-redirect cleanups, then public/anonymous follow, publication and notification
 boundaries.
 
-## Batch 31 — league venue (grounds/facilities) management (15 October 2026)
-
-No schema change, migration application, remote database inspection/write or deployment
-occurred. The existing `venues` table (already in place, with `UNIQUE(tenantId, name)` and
-`matches.venueId ... ON DELETE SET NULL`) is now written through `lib/venue-writes.ts`
-(`createVenueRecord`/`updateVenueRecord`/`setVenueActive`) and read through
-`lib/venue-reads.ts`. Each write runs in one `read committed` transaction that locks account
-→ league → membership → venue row and rechecks the current authority after the wait, and it
-writes its audit row in the same transaction. Venues are archived/restored by an `isActive`
-compare-and-set and are never hard-deleted, so historical match links survive.
-
-This is an application-level scoping change; it does not change any RLS policy or grant, and
-a mocked `db.transaction` is not proof of PostgreSQL locking, unique-constraint enforcement,
-RLS or authenticated-browser authorization. All five prior migrations remain unapplied; the
-release gate stays default-off. Before rollout, verify the venue lock ordering, the `23505`
-duplicate mapping and the `isActive` compare-and-set against the deployed policies, grants
-and indexes. Next source slice: the remaining catch-redirect cleanups, then public/anonymous
-follow, publication and notification boundaries.
