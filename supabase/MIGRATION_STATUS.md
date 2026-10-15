@@ -648,3 +648,22 @@ unapplied; release gate stays default-off. Before rollout, verify page rendering
 action denial for each role against the deployed policies and grants. Next source
 slice: the remaining venue writers and the registrations/new swallow-and-redirect, then
 public/anonymous follow, publication and notification boundaries.
+
+## Batch 30 — self-service registration form resolves the active league (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or deployment
+occurred. `dashboard/registrations/new/page.tsx` no longer wraps the team, tournament and
+player list actions in a `try/catch` that redirected to `/dashboard/league/setup` (even on
+an authorization denial) and rendered empty pickers; it now resolves the exact active
+league with `requireRegistrationReadContext("registration:create")` and reads bounded,
+tenant-scoped pickers through the new `readRegistrationFormOptions(tenantId)` in
+`lib/registration-reads.ts` (over-fetch 101/101/201, truncate to 100/100/200; teams
+narrowed to `isActive`). An anonymous visit goes to `/`, and read or authorization
+failures propagate to the error boundary instead of a silent redirect or an empty form.
+
+This is an application-level read-scoping change; it does not change any RLS policy or
+grant, and a mocked reader/database is not proof of authenticated-browser or
+database-level authorization. All five prior migrations remain unapplied; release gate
+stays default-off. Before rollout, verify each picker returns only the active league's
+rows under the deployed policies and grants. Next source slice: the remaining venue
+writers, then public/anonymous follow, publication and notification boundaries.

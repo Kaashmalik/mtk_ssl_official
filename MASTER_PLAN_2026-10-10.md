@@ -1947,6 +1947,44 @@ swallow-and-redirect, then public/anonymous follow, publication and notification
 No full ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19
 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 30: self-service registration form resolves the active league
+
+#### Implemented
+
+- Synced clean `main` with remote `e25485b`. Scope is the registration `new` page and its
+  picker reader; venue writers, the registrations review-queue catch-redirect,
+  `dashboard-context`/notifications/league-setup and public/anonymous follow stay open.
+- `lib/registration-reads.ts` gains `readRegistrationFormOptions(tenantId)` — a bounded,
+  tenant-scoped reader for the self-service registration form's team, tournament and
+  player pickers (over-fetch 101/101/201, truncate to 100/100/200; teams narrowed to
+  `isActive`, tournaments carrying `registrationOpen`).
+- `dashboard/registrations/new/page.tsx` resolves the exact active league with
+  `requireRegistrationReadContext("registration:create")` and reads the pickers through
+  that reader. It previously wrapped `getTeams`/`getTournaments`/`getPlayers` in a
+  `try/catch` that redirected to `/dashboard/league/setup` — including on an authorization
+  denial — and rendered fake empty pickers. Anonymous visits now go to `/`, and read or
+  authorization failures propagate to the Next error boundary instead of a silent
+  redirect or an empty form.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 59 files, **1,993 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,314 passing tests** (+9 over Batch 29) |
+
+New regressions: `registration-form-options.test.ts` (3) and
+`registration-new-page.test.tsx` (6). Mocked readers are not PostgreSQL or browser proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its pre-existing unrelated errors.
+Five prior migrations remain unapplied and the release gate stays default-off. Next source
+work: the remaining venue writers, then public/anonymous follow, publication and
+notification paths. No full ISO-04 or authenticated browser claim; whole-task roadmap
+counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

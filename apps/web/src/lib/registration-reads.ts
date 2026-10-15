@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server"
-import { db, users, userTenantRoles, tenants, leagueRegistrations, teams, tournaments } from "@mtk/database"
-import { and, eq, desc, count } from "drizzle-orm"
+import { db, users, userTenantRoles, tenants, leagueRegistrations, teams, tournaments, players } from "@mtk/database"
+import { and, eq, asc, desc, count } from "drizzle-orm"
 import { z } from "zod"
 import { resolveActiveTenantId, requirePermissionServer } from "./rbac-server"
 import { hasPermission, type Permission, type UserRole } from "./rbac"
@@ -98,4 +98,36 @@ export async function readRegistrationTournamentOptions(tenantId: string) {
     .where(and(eq(tournaments.tenantId, tenantId), eq(tournaments.registrationOpen, true)))
     .orderBy(desc(tournaments.createdAt), desc(tournaments.id)).limit(101)
   return { tournaments: rows.slice(0, 100), truncated: rows.length > 100 }
+}
+
+export type RegistrationFormOptions = {
+  teams: { id: string; name: string }[]
+  tournaments: { id: string; name: string; registrationOpen: boolean }[]
+  players: { id: string; name: string; teamId: string | null }[]
+}
+
+/**
+ * Bounded, tenant-scoped pickers for the self-service registration form. Every query
+ * is predicated on the caller's resolved tenantId, so the form can only ever offer
+ * teams, tournaments and players from the exact active league. Each picker is
+ * over-fetched by one row and truncated to the bound, so a caller can detect overflow
+ * without an unbounded read.
+ */
+export async function readRegistrationFormOptions(tenantId: string): Promise<RegistrationFormOptions> {
+  const [teamRows, tournamentRows, playerRows] = await Promise.all([
+    db.select({ id: teams.id, name: teams.name }).from(teams)
+      .where(and(eq(teams.tenantId, tenantId), eq(teams.isActive, true)))
+      .orderBy(asc(teams.name), asc(teams.id)).limit(101),
+    db.select({ id: tournaments.id, name: tournaments.name, registrationOpen: tournaments.registrationOpen })
+      .from(tournaments).where(eq(tournaments.tenantId, tenantId))
+      .orderBy(asc(tournaments.name), asc(tournaments.id)).limit(101),
+    db.select({ id: players.id, name: players.name, teamId: players.teamId }).from(players)
+      .where(eq(players.tenantId, tenantId))
+      .orderBy(asc(players.name), asc(players.id)).limit(201),
+  ])
+  return {
+    teams: teamRows.slice(0, 100),
+    tournaments: tournamentRows.slice(0, 100),
+    players: playerRows.slice(0, 200),
+  }
 }
