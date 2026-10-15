@@ -54,12 +54,13 @@ export function rosterHistoricalSide(matchId: string, cards: { matchId: string; 
   return sides.length === 1 ? sides[0] : null
 }
 
-// Dashboard reads only. Existing follow mutations/publication need separate review.
-export async function readRosterFollowState(tenantId: string, clerkId: string, kind: "team" | "player", id: string) {
+// Dashboard reads only. Follow mutations now live in lib/fan-follows with the
+// exact active league and the account UUID (never the Clerk identity).
+export async function readRosterFollowState(tenantId: string, actorId: string, kind: "team" | "player", id: string) {
   const scope = and(eq(fanFollows.tenantId, tenantId), eq(fanFollows.followableType, kind), eq(fanFollows.followableId, id))
   const [[total], [mine]] = await Promise.all([
     db.select({ total: count() }).from(fanFollows).where(scope),
-    db.select({ total: count() }).from(fanFollows).where(and(scope, eq(fanFollows.userId, clerkId))),
+    db.select({ total: count() }).from(fanFollows).where(and(scope, eq(fanFollows.userId, actorId))),
   ])
   return { following: Number(mine.total) > 0, followers: Number(total.total) }
 }

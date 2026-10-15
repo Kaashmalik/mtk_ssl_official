@@ -1629,6 +1629,50 @@ venue/admin writers, then follow/publication and notification paths. No full
 ISO-04 or authenticated browser claim; whole-task roadmap counts remain
 **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 23: isolated fan-follow identity and league scoping
+
+#### Implemented
+
+- Synced clean `main` with remote `c29c96a`. Scope is the follow write/read paths;
+  remaining tournament lifecycle writers, venue/admin writers and public/
+  anonymous follow stay open.
+- Follow mutations/reads resolve the exact active league, require the `fan:follow`
+  permission on an active membership, map Clerk identity → account UUID and assert
+  the target exists in that league. The client tenant must equal the active league;
+  a global role or tenant array never grants access.
+- Fixed a Clerk-vs-UUID bug: `fan_follows.user_id` is a `users.id` UUID but the code
+  stored/matched the Clerk string, so team/player follow state was always false.
+  Writes now store the account UUID, reads match on it, and inserts are idempotent
+  via `onConflictDoNothing`. `readRosterFollowState` and its detail callers pass
+  `context.actorId`, and counts/state/list are tenant-scoped.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 49 files, **1,888 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,209 passing tests** (+18 over Batch 22) |
+
+Added 18 follow cases: exact-league/account writes, tenant mismatch, membership/
+permission/league denial, foreign-target refusal, idempotent duplicates, invalid
+input before SQL, account-UUID (not Clerk) scoping for delete/count/state/list and
+read resilience. Mocked SQL/call-order tests and in-memory predicates are not
+PostgreSQL RLS, constraint or concurrency proof.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five prior migrations remain
+unapplied and the release gate stays default-off. Follows are not yet a public/
+anonymous or cross-league experience and have no owner-review audit, rate limit or
+notification fan-out. Real RLS, the unique constraint, grants, indexes and
+two-session follow races remain release acceptance work.
+
+Next source work: the remaining tournament lifecycle/list/detail writers and
+venue/admin writers, then public/anonymous follow, publication and notification
+paths. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -55,7 +55,7 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
   const canManage = context.role === "league_owner" && player.isActive
   const privateProfile = context.role === "league_owner" ? await readEditableRosterPlayer(context, id) : null
   const canEdit = canManage && privateProfile && (!privateProfile.teamId || player.teamIsActive === true)
-  const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.clerkId, "player", id)
+  const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.actorId, "player", id)
   const teamName = player.teamName ?? "Unassigned / unavailable"
 
   // Issued league ID card (if any)

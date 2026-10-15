@@ -438,10 +438,11 @@ All five prior migrations remain unapplied; release gate stays default-off.
 Before rollout, verify real RLS/grants, scoped query plans/indexes, picker/list
 performance and concurrent read/write behavior. Inspect actual constraints and
 RLS; mocked SQL/projection/call-order tests do not prove these properties. Team
-analytics, player ID-card list/detail and follow/publication paths were scoped in
-the Batch 20 follow-up; the tournament delete path is now an archival (Batch 22);
+analytics, player ID-card list/detail paths were scoped in the Batch 20 follow-up;
+the tournament delete path is now an archival (Batch 22) and fan-follow
+mutations/reads are scoped to the exact active league and account UUID (Batch 23);
 remaining tournament lifecycle/list/detail writers, venue/admin writers and
-follow/publication paths remain the next source slice.
+public/anonymous follow/publication paths remain the next source slice.
 
 Registration review writers (create/approve/reject/withdraw/confirm-fee) now use
 exact-active-league READ COMMITTED transactions with current account/Clerk/
@@ -471,3 +472,14 @@ create/approve capacity races, tournament/registration and tournament/archive
 lock ordering, cascade absence, fee/status CAS and audit-failure rollback, plus
 actual grants, query plans and RLS; mocked call-order tests do not prove these
 properties.
+
+Fan-follow writes/reads now resolve the exact active league, require the
+`fan:follow` permission on an active membership, map the Clerk identity to the
+account UUID and assert the target entity exists in that league; the client tenant
+must equal the active league. This fixes a bug where the Clerk string was stored/
+matched against the `fan_follows.user_id` UUID column, so team/player follow state
+always read false. Inserts are idempotent via the `(userId, type, id)` unique index
+(`onConflictDoNothing`); counts/state/list are tenant-scoped. This is not yet a
+public/anonymous or cross-league follow experience and adds no owner-review audit,
+rate limit or notification fan-out. Verify real RLS, the unique constraint, grants,
+indexes and two-session follow races.

@@ -37,7 +37,7 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
 
   const canManage = canManageRosterTeam(context, team)
   const canArchive = team.isActive && context.role === "league_owner"
-  const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.clerkId, "team", id)
+  const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.actorId, "team", id)
   const playersResult = canManage ? await readRosterPlayers(context.tenantId, { pageSize: 100, unassigned: true, isActive: true, status: "active" }) : null
   const availablePlayers = (playersResult?.data ?? []).map(p => ({ id: p.id, name: p.name, teamId: p.teamId }))
   const { fixtures: teamMatches, names, innings: allInnings } = await readRosterTeamHistory(context.tenantId, id)

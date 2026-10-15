@@ -11,6 +11,7 @@ const OPPONENT = "00000000-0000-4000-8000-000000000003"
 const PLAYER = "00000000-0000-4000-8000-000000000004"
 const MATCH = "00000000-0000-4000-8000-000000000005"
 const TOURNAMENT = "00000000-0000-4000-8000-000000000006"
+const ACTOR = "00000000-0000-4000-8000-000000000007"
 const dialect = new PgDialect()
 beforeEach(() => {
   vi.resetAllMocks()
@@ -92,12 +93,12 @@ describe("Authorized roster parent auxiliary reads (mocked SQL, not database exe
     expect(mocks.queries).toHaveLength(3)
   })
   it("correlates both follower count and current-user state to the same league/entity", async () => {
-    await expect(readRosterFollowState(TENANT, "clerk", "player", PLAYER)).resolves.toEqual({ following: true, followers: 2 })
+    await expect(readRosterFollowState(TENANT, ACTOR, "player", PLAYER)).resolves.toEqual({ following: true, followers: 2 })
     expect(mocks.queries[0].params).toEqual([TENANT, "player", PLAYER])
-    expect(mocks.queries[1].params).toEqual([TENANT, "player", PLAYER, "clerk"])
+    expect(mocks.queries[1].params).toEqual([TENANT, "player", PLAYER, ACTOR])
   })
   it.each([() => readRosterTeamHistory(TENANT, TEAM), () => readRosterPlayerHistory(TENANT, PLAYER),
-    () => readRosterFollowState(TENANT, "clerk", "team", TEAM)])("propagates database failures instead of fake DNB/empty/count success", async read => {
+    () => readRosterFollowState(TENANT, ACTOR, "team", TEAM)])("propagates database failures instead of fake DNB/empty/count success", async read => {
     mocks.failure = new Error("Database unavailable")
     await expect(read()).rejects.toThrow("Database unavailable")
   })

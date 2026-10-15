@@ -8,7 +8,7 @@
 | Repository | https://github.com/Kaashmalik/mtk_ssl_official |
 | Pre-Batch 7 baseline | `main` at `9ac8702abd10e86408e8467c5015b145752787ed`; earlier six code batches end at `3d7e3fd` |
 | Document purpose | Execution roadmap, end-to-end flows, acceptance cases, and built/remaining checklists |
-| Current implementation | Batch 22: tournament destruction replaced with a locked, audited cancel/archival (`deleteTournament` no longer hard-deletes) that preserves registration/team/match links; registration review writers/reads from Batch 21; venues/admin writers, public visibility and real-DB acceptance remain open; no remote database writes or deployment |
+| Current implementation | Batch 23: fan-follow mutations/reads isolated to the exact active league with the `fan:follow` membership check, real account UUID and same-league target assertion — fixing a Clerk-vs-UUID bug that made team/player follow state always false; tournament archival from Batch 22; venues/admin writers, public/anon follow and real-DB acceptance remain open; no remote database writes or deployment |
 | Future-roadmap precedence | This plan sets the new delivery order; the [10 October plan](../MASTER_PLAN_2026-10-10.md) remains the historical findings and batch-evidence register |
 | Architecture precedence | Preserve the accepted [hybrid backend decision](architecture/BACKEND_UNIFICATION_DECISION.md) |
 
@@ -89,7 +89,8 @@ This is a professional living plan covering known requirements and failure cases
 | 19 | `0b330bb` | Locked active-league team/player create/update and roster commands, current owner/assigned-manager authority, shared capacity/eligibility checks and serialized create quotas; reads/dashboard and real-DB acceptance remain open |
 | 20 | `2fa43ec` | Active-league roster read actions and core dashboard routes with scoped joins, private-field separation, bounded pickers and current-authority controls; team analytics/ID-card/follow paths scoped in the follow-up commit |
 | 21 | `bcbdca6` | Locked active-league registration review writers and scoped bounded review reads; tournament/venue/admin writers, public visibility and real-DB acceptance remain open |
-| 22 | Current batch; see Git history | Tournament hard-delete replaced with a locked, audited cancel/archival that preserves registration/team/match links; venue/public visibility/real-DB acceptance remain open |
+| 22 | `c29c96a` | Tournament hard-delete replaced with a locked, audited cancel/archival that preserves registration/team/match links; venue/public visibility/real-DB acceptance remain open |
+| 23 | Current batch; see Git history | Fan-follow mutations/reads scoped to the exact active league and account UUID, fixing a Clerk-vs-UUID follow-state bug; venues/admin writers, public/anon follow and real-DB acceptance remain open |
 
 Latest **previously recorded** test baseline: web **357 tests / 26 files**, database **103 / 5**, scoring service **155 / 8**; **615 passing tests** in total. These are mocked-boundary automated checks recorded by Batch 6, not a fresh test run or production verification for this document.
 
@@ -637,7 +638,7 @@ Exit: repeatable baseline and a verified staging environment; old unit-test coun
   Batch 16 adds under-lock session mapping checks for member role/status/removal commands and fixes exact-active-league toss/start/completion authority. Match metadata CRUD/read/stream actions and dashboard pages still require separate active-league and transactional authorization review; this whole task stays open.
   Batch 17 implements that match-actions/dashboard slice, including exact-league form pickers and full-scorecard detail reads, under-lock owner reauthorization, merged fixture validation and cancellation without hard deletes. Other scorecard actions, team/player/tournament/venue writers and their cascading-delete/lock interactions, remaining pages/admin APIs, public visibility, private sockets and exports are not certified; ISO-04 remains open.
   Batch 18 disables the unused `saveScorecard` alternate writer, scopes both scorecard read actions through the current league/match/innings hierarchy, and replaces only `deleteTeam`/`deletePlayer` with audited archival. Other team/player CRUD, roster writes and dashboard read paths still use legacy ownership/context assumptions and need review; no database-wide cascade prevention or full ISO-04 completion is claimed.
-  Batch 19 replaces the six team/player create/update/add/remove writers with exact-active-league transactions, locked owner/assigned-manager checks, atomic minimal audits, shared roster capacity/eligibility checks and serialized create quotas. Batch 20 replaces core team/player read actions and list/detail/new/edit/roster dashboard routes with exact-active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Batch 21 replaces the registration create/approve/reject/confirm-fee writers and adds withdraw with exact-active-league locked review transitions and scoped bounded review reads. Batch 22 replaces the destructive tournament hard-delete with a locked, audited cancel/archival that never cascades and preserves registration, team and match links. Tournament list/detail lifecycle writers, venue/admin writers, remaining admin APIs, follow/publication and other/admin writers still require review. This does not implement a purge/refund/slot-release or waitlist lifecycle, immutable playing XI, scoped multiple grants, stale-operator CAS, database-wide quota constraints or full ISO-04 acceptance.
+  Batch 19 replaces the six team/player create/update/add/remove writers with exact-active-league transactions, locked owner/assigned-manager checks, atomic minimal audits, shared roster capacity/eligibility checks and serialized create quotas. Batch 20 replaces core team/player read actions and list/detail/new/edit/roster dashboard routes with exact-active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Batch 21 replaces the registration create/approve/reject/confirm-fee writers and adds withdraw with exact-active-league locked review transitions and scoped bounded review reads. Batch 22 replaces the destructive tournament hard-delete with a locked, audited cancel/archival that never cascades and preserves registration, team and match links. Batch 23 scopes fan-follow mutations/reads to the exact active league with the `fan:follow` membership check and the account UUID (fixing a Clerk-vs-UUID bug that made team/player follow state always false). Tournament list/detail lifecycle writers, venue/admin writers, remaining admin APIs, public/anonymous follow, publication and other/admin writers still require review. This does not implement a purge/refund/slot-release or waitlist lifecycle, immutable playing XI, scoped multiple grants, stale-operator CAS, database-wide quota constraints or full ISO-04 acceptance.
 - [ ] **ISO-05:** Add authoritative league membership status/expiry and resource-scoped grant design; separate platform roles.
   Local active/suspended status and version are implemented; expiry, scoped multiple grants and platform-grant redesign remain open.
 - [ ] **ISO-06:** Reconcile and safely retire legacy `users.role` / `tenantIds` authorization fallback.
@@ -788,7 +789,7 @@ Exit: measured staging evidence and an approved rollout. Unit success or a plan 
 
 ### Next implementation batch
 
-**Updated after Batch 22:** team/player create/update and add/remove roster writers use exact-active-league transactions, locked authority, shared capacity/eligibility checks and serialized create quotas. Core list/detail/new/edit/roster dashboard routes use the same active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Registration create/approve/reject/withdraw/confirm-fee writers now use exact-active-league locked review transitions with capacity/squad checks and atomic minimal audits, and registration review reads are scoped and bounded. Tournament removal is now a locked, audited cancel/archival that never hard-deletes or cascades. Full `ISO-04` and `IAM-03/04/05/06/07` remain incomplete. `BASE-04/05/06` schema/grant reconciliation and real PostgreSQL two-session acceptance remain the release priority. Next source work: remaining tournament lifecycle/list/detail writers and venue/admin writers, then follow/publication and notification paths. Review private contact-field exposure and archived-row behavior rather than treating a scoped writer as proof of safe reads. Archive/cancel is not a quota-release, refund, slot-release or restore workflow. Historical import/correction needs an explicit canonical audited design, not re-enabling direct inserts. Public visibility/private sockets/exports, scoped grants/step-up, pending assignments, stale-operator CAS, durable email retries, lifecycle fan-out and writer fencing stay open.
+**Updated after Batch 23:** team/player create/update and add/remove roster writers use exact-active-league transactions, locked authority, shared capacity/eligibility checks and serialized create quotas. Core list/detail/new/edit/roster dashboard routes use the same active-league context, scoped joins, explicit field projections, bounded pickers and current-authority controls. Registration create/approve/reject/withdraw/confirm-fee writers now use exact-active-league locked review transitions with capacity/squad checks and atomic minimal audits, and registration review reads are scoped and bounded. Tournament removal is now a locked, audited cancel/archival that never hard-deletes or cascades. Fan-follow write/read paths now resolve the exact active league, check `fan:follow`, store and match the account UUID (not the Clerk identity), assert the same-league target and scope counts/lists by tenant. Full `ISO-04` and `IAM-03/04/05/06/07` remain incomplete. `BASE-04/05/06` schema/grant reconciliation and real PostgreSQL two-session acceptance remain the release priority. Next source work: remaining tournament lifecycle/list/detail writers and venue/admin writers, then public/anonymous follow, publication and notification paths. Review private contact-field exposure and archived-row behavior rather than treating a scoped writer as proof of safe reads. Archive/cancel is not a quota-release, refund, slot-release or restore workflow. Historical import/correction needs an explicit canonical audited design, not re-enabling direct inserts. Public visibility/private sockets/exports, scoped grants/step-up, pending assignments, stale-operator CAS, durable email retries, lifecycle fan-out and writer fencing stay open.
 
 - Inspect current membership data/schema and all user-management readers/writers.
 - Define platform-account versus league-member authority and scoped audit requirements.
@@ -1593,6 +1594,52 @@ remaining tournament lifecycle/list/detail writers and venue/admin writers, then
 follow/publication and notification paths. No browser acceptance or full `ISO-04`
 certification is claimed. Whole-task roadmap counts stay **19 checked / 60 open /
 79 IDs**.
+
+### 2026-10-15 — Batch 23: isolated fan-follow identity and league scoping
+
+Synced clean `main` with remote `c29c96a`. This is a bounded `ISO-04`/`ISO-05`
+follow-path slice; remaining tournament lifecycle writers, venue/admin writers,
+public/anonymous follow and publication boundaries are not repaired here.
+
+**Implemented:**
+
+- `followEntity`, `unfollowEntity`, `isFollowing` and `getFollowerCount` no longer
+  trust a client-supplied tenant or the Clerk identity. They resolve the exact
+  active league, require the `fan:follow` permission on an active membership
+  (never a global role or tenant array), map the Clerk identity to the account
+  UUID and assert the target team/player/tournament exists in that league. The
+  client tenant must equal the resolved active league.
+- Fixed a correctness bug: `fan_follows.user_id` is a `users.id` UUID, but the
+  previous code inserted and matched the Clerk string, so team/player follow state
+  read as always false. Writes now store the account UUID and reads match on it;
+  inserts are idempotent under the `(userId, type, id)` unique index via
+  `onConflictDoNothing`.
+- `readRosterFollowState` and its team/player detail callers now pass the account
+  UUID (`context.actorId`) rather than `context.clerkId`; the follow-state and
+  follower-count queries stay correlated to the same active league and entity.
+- Follow reads are scoped by the active league: follower counts and current-user
+  state include the tenant predicate, and `getMyFollowing` uses the
+  server-resolved tenant and account instead of a client parameter. Invalid ids
+  read as false/zero rather than throwing during render.
+
+**Fresh verification:** web **1,888 / 49 files**, database **128 / 8 files**,
+scoring service **193 / 8 suites**; **2,209 passing tests**, +18 over Batch 22. The
+new `fan-follows.test.ts` adds 18 cases: exact-league/account writes, tenant
+mismatch, membership/permission/league denial, foreign-target refusal, idempotent
+duplicates, invalid input before SQL, account-UUID (not Clerk) scoping for
+delete/count/state/list, and read resilience. Mocked SQL/call-order tests and
+in-memory predicates are not PostgreSQL RLS, constraint or concurrency proof.
+
+**Boundaries / next:** no build, lint, standalone type-check, schema change,
+migration application, remote database operation or deployment ran. All five prior
+migrations remain unapplied; the release gate stays default-off. Follows are not a
+public/anonymous or cross-league experience yet, and there is no owner-review
+audit, rate limit or notification fan-out. Prove real RLS, the unique constraint,
+grants, indexes and two-session follow races. Next source work: remaining
+tournament lifecycle/list/detail writers and venue/admin writers, then
+public/anonymous follow, publication and notification paths. No browser acceptance
+or full `ISO-04` certification is claimed. Whole-task roadmap counts stay **19
+checked / 60 open / 79 IDs**.
 
 ### Decisions still requiring explicit review
 
