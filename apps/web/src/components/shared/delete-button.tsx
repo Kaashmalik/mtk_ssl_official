@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import React, { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@mtk/ui/components/ui/button"
@@ -39,8 +39,8 @@ interface DeleteButtonProps {
   entityName?: string
   /** Optional button variant (defaults to destructive outline). */
   variant?: "outline" | "destructive" | "ghost"
-  /** Cancellation preserves the row/history; do not describe it as deletion. */
-  operation?: "delete" | "cancel"
+  /** Non-destructive commands must not be described as permanent deletion. */
+  operation?: "delete" | "cancel" | "archive"
 }
 
 export function DeleteButton({
@@ -55,12 +55,20 @@ export function DeleteButton({
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const wording = {
+    delete: { verb: "Delete", past: "deleted", progress: "Deleting...", trigger: "Delete",
+      detail: "This action cannot be undone." },
+    cancel: { verb: "Cancel", past: "cancelled", progress: "Cancelling...", trigger: "Cancel fixture",
+      detail: "Only an unstarted fixture can be cancelled. The record and history are preserved." },
+    archive: { verb: "Archive", past: "archived", progress: "Archiving...", trigger: "Archive",
+      detail: "The record and history are preserved. Finish or cancel unfinished fixtures first. Archived records remain available for historical reference." },
+  }[operation]
 
   const handleDelete = () => {
     startTransition(async () => {
       try {
         await action(id)
-        toast.success(`${entityLabel.charAt(0).toUpperCase() + entityLabel.slice(1)} ${operation === "cancel" ? "cancelled" : "deleted"}`)
+        toast.success(`${entityLabel.charAt(0).toUpperCase() + entityLabel.slice(1)} ${wording.past}`)
         setOpen(false)
         router.push(redirectHref)
         router.refresh()
@@ -77,16 +85,16 @@ export function DeleteButton({
       <DialogTrigger asChild>
         <Button variant={variant} size="sm" className={variant === "outline" ? "text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30" : ""}>
           <Trash2 className="h-4 w-4 mr-1" />
-          {operation === "cancel" ? "Cancel fixture" : "Delete"}
+          {wording.trigger}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{operation === "cancel" ? "Cancel" : "Delete"} {entityLabel}?</DialogTitle>
+          <DialogTitle>{wording.verb} {entityLabel}?</DialogTitle>
           <DialogDescription>
-            Are you sure you want to {operation === "cancel" ? "cancel" : "permanently delete"}
+            Are you sure you want to {operation === "delete" ? "permanently delete" : operation}
             {entityName ? <strong className="text-foreground"> {entityName}</strong> : ` this ${entityLabel}`}?
-            {operation === "cancel" ? "Only an unstarted fixture can be cancelled. The record and history are preserved." : "This action cannot be undone."}
+            {" "}{wording.detail}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
@@ -97,12 +105,12 @@ export function DeleteButton({
             {isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                {operation === "cancel" ? "Cancelling..." : "Deleting..."}
+                {wording.progress}
               </>
             ) : (
               <>
                 <Trash2 className="h-4 w-4 mr-2" />
-                {operation === "cancel" ? "Cancel" : "Delete"} {entityLabel}
+                {wording.verb} {entityLabel}
               </>
             )}
           </Button>

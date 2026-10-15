@@ -1347,6 +1347,62 @@ history-query performance/index review, league timezone UX, scoped grants,
 step-up, pending assignments, CAS and fencing remain open. Whole-task counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 18: scorecard boundaries and safe team/player archival
+
+#### Implemented
+
+- Synced clean `main` with remote `ccd0199` before edits.
+- Confirmed no repository TS/TSX call sites for `saveScorecard` outside its
+  declaration. Replaced its competing direct-insert implementation with an
+  authenticated active-league denial stub; preserve export/input type, never
+  write or claim success. Existing rows remain. Manual historical import/
+  correction and canonical individual-scorecard materialization are not added.
+- Full scorecards validate the exact-league parent match and correlate batting/
+  bowling innings to that same match/tenant. Innings-only reads validate current
+  league innings and parent match, then filter every child by all three keys.
+- `deleteTeam`/`deletePlayer` now archive instead of deleting/cascading. Explicit
+  active-league permission plus READ COMMITTED current owner/session checks use
+  account -> league -> membership -> team -> player locks. Player team-link
+  drift is rejected after locking, without chasing a new reverse-order lock.
+- Archival refuses unfinished team fixtures through non-locking reads after
+  resource locks. No match locks are acquired after account/team/player locks.
+  Team becomes inactive; player becomes inactive with status inactive. Keep
+  identity/profile/membership/roster/history links and existing score data.
+- Changed flags and bounded before/after audit share a transaction. Authorized
+  archived retries do not rewrite/audit; failures have no false cache success.
+  Confirmation copy says Archive, separate from Cancel fixture/permanent Delete;
+  detail badges identify archived records. Lists/quotas may retain these rows.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 43 files, **1,256 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **1,577 passing tests** (+118 over Batch 17) |
+
+Added 82 archival, 32 scorecard-boundary and four confirmation-copy regressions.
+Updated existing full-scorecard tests for parent/innings SQL correlation. Mocks
+check SQL predicates/parentheses, call ordering and failure handling; simulated
+lock-wait completion is not PostgreSQL concurrency proof. Dialog rendering is
+mocked and is not authenticated UI/device acceptance. Current Drizzle
+transaction/operator docs and lock-order guidance were consulted.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five prior migrations remain
+unapplied; release gate stays default-off. Staging still needs grants/RLS,
+actual hierarchy filtering/query performance, two-session archive/create/
+scoring/revocation behavior and audit-failure rollback tests.
+
+ISO-04 remains open. Next source work is the remaining team/player create/
+update/read/roster and dashboard active-league paths, payload/reference checks,
+locked current authority and serialized quotas. These two archival wrappers
+do not close other/admin cascade-delete paths or unsafe non-participating
+writers. Archive adds no restore, purge, quota release, CAS or writer fencing.
+Historical import/correction requires an explicit canonical design. Whole-task
+roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

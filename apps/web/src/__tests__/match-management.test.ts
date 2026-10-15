@@ -16,7 +16,8 @@ vi.mock("@/lib/rbac-server", () => ({ resolveActiveTenantId: mocks.tenant, requi
 vi.mock("@/app/actions/tenants", () => ({ getMyTenant: mocks.fallback }))
 vi.mock("@mtk/database", async original => ({ ...await original<typeof import("@mtk/database")>(),
   checkPlanFeature: mocks.plan, withTenantContext: mocks.context,
-  db: { transaction: mocks.transaction, select: mocks.select, update: mocks.directUpdate, delete: mocks.del } }))
+  db: { transaction: mocks.transaction, select: mocks.select, update: mocks.directUpdate, delete: mocks.del,
+    query: { matches: { findFirst: mocks.match } } } }))
 const TENANT = "00000000-0000-4000-8000-000000000001"
 const MATCH = "00000000-0000-4000-8000-000000000002"
 const ACTOR = "00000000-0000-4000-8000-000000000003"
@@ -392,7 +393,11 @@ describe("Active-league match read and picker boundaries", () => {
     await getFullScorecard(MATCH)
     expect(mocks.permission).toHaveBeenCalledWith("scorecard:read", TENANT)
     expect(mocks.readWhere).toHaveBeenCalledTimes(3)
-    for (const [query] of mocks.readWhere.mock.calls) expect(dialect.sqlToQuery(query).params).toEqual([MATCH, TENANT])
+    const queries = mocks.readWhere.mock.calls.map(([query]) => dialect.sqlToQuery(query))
+    expect(queries[0].params).toEqual([MATCH, TENANT, MATCH, TENANT])
+    expect(queries[1].params).toEqual([MATCH, TENANT, MATCH, TENANT])
+    expect(queries[2].params).toEqual([MATCH, TENANT])
+    expect(mocks.match).toHaveBeenCalledOnce()
     expect(mocks.fallback).not.toHaveBeenCalled()
   })
   it.each([() => getMatch(MATCH), () => getMatches({} as never), () => getMatchFormOptions("create"),

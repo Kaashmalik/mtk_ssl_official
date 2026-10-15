@@ -9,6 +9,8 @@ import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
 import { checkPlanLimit, type PlanKey } from "@mtk/database"
+import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
+import { archiveRosterResource } from "@/lib/archive-roster-resource"
 
 
 // ─── Validation Schemas ───────────────────────────────────────
@@ -130,18 +132,13 @@ export const updatePlayer = withAuth("player:update", async (id: string, input: 
 export const deletePlayer = withAuth("player:delete", async (id: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  const deleted = await withTenantContext({ userId, tenantId }, () =>
-    playerRepo.deleteById(id)
-  )
-
-  if (!deleted) throw new Error("Player not found")
-
-  revalidatePath("/dashboard/players")
-  revalidatePath("/dashboard")
-  return { success: true }
+  z.string().uuid().parse(id)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("player:delete", tenantId)
+  const result = await archiveRosterResource(userId, tenantId, "player", id)
+  revalidatePath("/dashboard", "layout")
+  return result
 })
 
 export const getPlayer = withAuth("player:read", async (id: string) => {

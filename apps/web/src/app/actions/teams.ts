@@ -9,6 +9,8 @@ import { eq, and, ilike, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
+import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
+import { archiveRosterResource } from "@/lib/archive-roster-resource"
 
 // ─── Validation Schemas ───────────────────────────────────────
 
@@ -154,18 +156,14 @@ export const updateTeam = withAuth("team:update", async (id: string, input: Upda
 export const deleteTeam = withAuth("team:delete", async (id: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const tenantId = tenant.id
-
-  const deleted = await withTenantContext({ userId, tenantId }, () =>
-    teamRepo.deleteById(id)
-  )
-
-  if (!deleted) throw new Error("Team not found")
-
-  revalidatePath("/dashboard/teams")
-  revalidatePath("/dashboard")
-  return { success: true }
+  z.string().uuid().parse(id)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("team:delete", tenantId)
+  // Compatibility action name. Never cascade-delete match/scorecard history.
+  const result = await archiveRosterResource(userId, tenantId, "team", id)
+  revalidatePath("/dashboard", "layout")
+  return result
 })
 
 export const getTeam = withAuth("team:read", async (id: string) => {

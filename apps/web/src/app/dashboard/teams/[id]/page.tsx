@@ -137,6 +137,7 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
               </div>
               <div className="flex-1">
                 <h1 className="text-3xl font-bold tracking-tight text-white">{team.name}</h1>
+                {team.isActive === false && <Badge variant="outline">Archived</Badge>}
                 <div className="flex items-center gap-3 text-sm text-white/70 font-medium mt-2">
                   <span className="flex items-center gap-1">
                     <MapPin className="h-4 w-4 text-white/50" />{city}
@@ -170,6 +171,7 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
                   id={id}
                   redirectHref="/dashboard/teams"
                   entityLabel="team"
+                  operation="archive"
                   entityName={team.name}
                 />
               </div>

@@ -214,7 +214,7 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-2xl font-bold">{player.name}</h1>
                   <Badge variant="outline" className="text-xs">#{player.jerseyNumber !== null ? player.jerseyNumber : "—"}</Badge>
-                  <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/20 capitalize">{player.status}</Badge>
+                  <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/20 capitalize">{player.isActive === false ? "Archived" : player.status}</Badge>
                 </div>
                 <p className="text-muted-foreground text-sm mt-1">{teamName} · {player.city || "TBD City"}, {player.nationality || "TBD Nationality"}</p>
               </div>
@@ -237,6 +237,7 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
                   id={id}
                   redirectHref="/dashboard/players"
                   entityLabel="player"
+                  operation="archive"
                   entityName={player.name}
                 />
               </div>

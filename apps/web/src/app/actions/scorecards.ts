@@ -1,17 +1,16 @@
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
-import { revalidatePath } from "next/cache"
 import { db } from "@mtk/database"
-import { battingScorecards, bowlingScorecards, fieldingScorecards, matches } from "@mtk/database"
-import { eq, asc, and } from "drizzle-orm"
+import { battingScorecards, bowlingScorecards, fieldingScorecards, matches, matchInnings } from "@mtk/database"
+import { eq, asc, and, exists, sql } from "drizzle-orm"
 import { z } from "zod"
-import { getMyTenant } from "@/app/actions/tenants"
 import { withAuth } from "./action-guard"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 
 
-// ─── Schemas ──────────────────────────────────────────────────
+// Legacy input shape retained for source compatibility only. There is no
+// supported manual-import/correction command; the old writer is disabled below.
 
 const battingEntrySchema = z.object({
   playerId: z.string().uuid(),
@@ -55,83 +54,54 @@ const saveScorecardSchema = z.object({
 
 export type SaveScorecardInput = z.infer<typeof saveScorecardSchema>
 
-async function requireTenant() {
-  const tenant = await getMyTenant()
-  if (!tenant) throw new Error("Tenant not found")
-  return tenant
+async function requireScorecardTenant(permission: "scorecard:read" | "scorecard:create") {
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer(permission, tenantId)
+  return tenantId
+}
+
+async function requireScorecardMatch(matchId: string, tenantId: string) {
+  const match = await db.query.matches.findFirst({ columns: { id: true, tenantId: true },
+    where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)) })
+  if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
+}
+
+function scopedInnings(column: typeof battingScorecards.inningsId | typeof bowlingScorecards.inningsId,
+  matchId: string, tenantId: string) {
+  // Defend against legacy rows whose child matchId/tenantId disagree with the
+  // referenced innings. A match UUID alone is not proof of the full hierarchy.
+  return exists(sql`(SELECT 1 FROM ${matchInnings} WHERE ${and(eq(matchInnings.id, column),
+    eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId))})`)
 }
 
 // ─── Actions ──────────────────────────────────────────────────
 
-export const saveScorecard = withAuth("scorecard:create", async (input: SaveScorecardInput) => {
+/** @deprecated Record deliveries through scoring-service. A historical import
+ * needs an explicit audited/idempotent canonical workflow, not direct inserts.
+ * Keep this exported denial stub so old clients cannot revive a second writer.
+ */
+export const saveScorecard = withAuth("scorecard:create", async (_input: SaveScorecardInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
-  const validated = saveScorecardSchema.parse({
-    ...input,
-    tenantId: input.tenantId ?? tenant.id,
-  })
-  if (validated.tenantId !== tenant.id) throw new Error("Invalid tenant")
-  const { tenantId, matchId, inningsId, batting, bowling } = validated
-
-  const [match] = await db.select().from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-    .limit(1)
-  if (!match) throw new Error("Match not found")
-
-  // Insert batting entries with calculated strike rate
-  if (batting.length > 0) {
-    const battingValues = batting.map((b) => ({
-      tenantId, matchId, inningsId,
-      playerId: b.playerId, teamId: b.teamId,
-      battingPosition: b.battingPosition,
-      runs: b.runs, ballsFaced: b.ballsFaced,
-      fours: b.fours, sixes: b.sixes,
-      strikeRate: b.ballsFaced > 0 ? ((b.runs / b.ballsFaced) * 100).toFixed(2) : "0",
-      dismissalType: b.dismissalType,
-      bowlerId: b.bowlerId ?? null, fielderId: b.fielderId ?? null,
-      dismissalText: b.dismissalText ?? null,
-      dotBalls: b.dotBalls,
-    }))
-    await db.insert(battingScorecards).values(battingValues)
-  }
-
-  // Insert bowling entries with calculated economy & overs
-  if (bowling.length > 0) {
-    const bowlingValues = bowling.map((b) => {
-      const overs = Math.floor(b.ballsBowled / 6) + (b.ballsBowled % 6) / 10
-      const economy = b.ballsBowled > 0 ? ((b.runsConceded / b.ballsBowled) * 6).toFixed(2) : "0"
-      return {
-        tenantId, matchId, inningsId,
-        playerId: b.playerId, teamId: b.teamId,
-        bowlingPosition: b.bowlingPosition,
-        overs: overs.toFixed(1), ballsBowled: b.ballsBowled,
-        maidens: b.maidens, runsConceded: b.runsConceded,
-        wickets: b.wickets, economyRate: economy,
-        wides: b.wides, noBalls: b.noBalls,
-        dotBalls: b.dotBalls, fours: 0, sixes: 0,
-      }
-    })
-    await db.insert(bowlingScorecards).values(bowlingValues)
-  }
-
-  revalidatePath(`/dashboard/matches/${matchId}`)
-  return { success: true }
+  await requireScorecardTenant("scorecard:create")
+  throw new Error("Manual scorecard writes are disabled. Record deliveries through the scoring service; historical corrections require a canonical audited workflow.")
 })
 
 export const getFullScorecard = withAuth("scorecard:read", async (matchId: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   z.string().uuid().parse(matchId)
-  const tenantId = await resolveActiveTenantId()
-  if (!tenantId) throw new Error("Tenant not found")
-  await requirePermissionServer("scorecard:read", tenantId)
+  const tenantId = await requireScorecardTenant("scorecard:read")
+  await requireScorecardMatch(matchId, tenantId)
   const [batting, bowling, fielding] = await Promise.all([
     db.select().from(battingScorecards)
-      .where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId)))
+      .where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId),
+        scopedInnings(battingScorecards.inningsId, matchId, tenantId)))
       .orderBy(asc(battingScorecards.battingPosition)),
     db.select().from(bowlingScorecards)
-      .where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId)))
+      .where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId),
+        scopedInnings(bowlingScorecards.inningsId, matchId, tenantId)))
       .orderBy(asc(bowlingScorecards.bowlingPosition)),
     db.select().from(fieldingScorecards)
       .where(and(eq(fieldingScorecards.matchId, matchId), eq(fieldingScorecards.tenantId, tenantId))),
@@ -142,13 +112,20 @@ export const getFullScorecard = withAuth("scorecard:read", async (matchId: strin
 export const getInningsScorecard = withAuth("scorecard:read", async (inningsId: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await requireTenant()
+  z.string().uuid().parse(inningsId)
+  const tenantId = await requireScorecardTenant("scorecard:read")
+  const innings = await db.query.matchInnings.findFirst({ columns: { id: true, tenantId: true, matchId: true },
+    where: and(eq(matchInnings.id, inningsId), eq(matchInnings.tenantId, tenantId)) })
+  if (!innings || innings.id !== inningsId || innings.tenantId !== tenantId) throw new Error("Innings not found")
+  await requireScorecardMatch(innings.matchId, tenantId)
   const [batting, bowling] = await Promise.all([
     db.select().from(battingScorecards)
-      .where(and(eq(battingScorecards.inningsId, inningsId), eq(battingScorecards.tenantId, tenant.id)))
+      .where(and(eq(battingScorecards.inningsId, inningsId), eq(battingScorecards.matchId, innings.matchId),
+        eq(battingScorecards.tenantId, tenantId)))
       .orderBy(asc(battingScorecards.battingPosition)),
     db.select().from(bowlingScorecards)
-      .where(and(eq(bowlingScorecards.inningsId, inningsId), eq(bowlingScorecards.tenantId, tenant.id)))
+      .where(and(eq(bowlingScorecards.inningsId, inningsId), eq(bowlingScorecards.matchId, innings.matchId),
+        eq(bowlingScorecards.tenantId, tenantId)))
       .orderBy(asc(bowlingScorecards.bowlingPosition)),
   ])
   return { batting, bowling }

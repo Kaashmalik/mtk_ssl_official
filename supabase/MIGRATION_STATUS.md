@@ -373,3 +373,27 @@ All five prior migrations remain unapplied and the release gate stays default-
 off. Verify actual grants, audit INSERT/rollback, schema compatibility, real
 two-session races, history-query performance/indexes and RLS in staging. Mocked
 tests do not establish these database properties or deployed lifecycle fan-out.
+
+## Batch 18 scorecard hierarchy and roster archival (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. The unused manual `saveScorecard` action is now a denied
+compatibility stub, not a second direct scorecard writer. Existing rows remain;
+there is no replacement manual import/correction endpoint. Full/innings scorecard
+reads validate the current league and parent hierarchy, including correlated
+innings scope for full batting/bowling reads.
+
+Team/player deletion wrappers now perform owner-authorized archival using
+READ COMMITTED and account -> league -> membership -> team -> player locks.
+Player team-link drift is rejected after locks. Unfinished fixtures are checked
+with plain reads after resources, never match locks that would reverse the
+canonical scoring order. Team/player flags and archive audits are atomic;
+identities, roster links and historical score data are not deleted. Other/admin
+deletion paths and non-participating writers remain outside this guarantee.
+
+All five prior migrations remain unapplied and the release gate stays default-
+off. Verify real grants/audit rollback/RLS, hierarchy query execution/indexes,
+and two-session archive/create/scoring/revocation acceptance before rollout.
+Mocked call-order/SQL/render tests do not establish those database properties.
+Archive is not a restore/purge/quota-release workflow; existing lists/quotas can
+retain archived records. No broader team/player CRUD certification is claimed.
