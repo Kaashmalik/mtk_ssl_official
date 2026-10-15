@@ -38,6 +38,9 @@ vi.mock("@mtk/database", async (importOriginal) => {
     values: vi.fn().mockReturnThis(),
     onConflictDoNothing: vi.fn().mockReturnThis(),
     returning: vi.fn().mockImplementation(() => []),
+    // `tx.execute` runs the FOR UPDATE row locks inside transactions (e.g. the
+    // serialized one-league cap in createTenant).
+    execute: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     transaction: vi.fn(async (callback: (tx: any) => Promise<unknown>) => callback(mockDb)),

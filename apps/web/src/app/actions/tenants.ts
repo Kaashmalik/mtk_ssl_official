@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { db, getPlanLimits, type PlanKey } from "@mtk/database"
 import { tenants, tenantBranding, subscriptions, users, userTenantRoles } from "@mtk/database"
-import { and, desc, eq, ne } from "drizzle-orm"
+import { and, desc, eq, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 import { getTenantFromRequest } from "@/lib/tenant"
@@ -18,6 +18,13 @@ const createTenantSchema = z.object({
     .max(60, "Slug must be 60 characters or fewer")
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers, and hyphens only"),
 })
+
+/** PostgreSQL unique_violation: `tenants.slug` is globally unique. */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "23505"
+}
+
+const DUPLICATE_SLUG = "This league URL is already taken. Please choose another."
 
 export type CreateTenantInput = z.infer<typeof createTenantSchema>
 
@@ -63,6 +70,35 @@ export async function getMyTenant() {
     .limit(1)
 
   return membership?.tenant ?? null
+}
+
+/**
+ * The league this account OWNS, or null.
+ *
+ * The league-setup page must bounce only owners: `createTenant` caps *ownership*
+ * (one league per account), not membership, so an account that is a fan/scorer
+ * of an existing league still has no league of its own and must reach the
+ * create form. `getMyTenant()` — any active membership — was incorrectly used
+ * there and walled that flow off.
+ */
+export async function getMyOwnedTenant() {
+  const { userId } = await auth()
+  if (!userId) return null
+
+  // `tenants.owner_id` is a UUID referencing `users.id`, not Clerk's string ID.
+  const [user] = await db
+    .select({ id: users.id, isActive: users.isActive })
+    .from(users)
+    .where(eq(users.clerkId, userId))
+    .limit(1)
+  if (!user || user.isActive !== true) return null
+
+  const [owned] = await db
+    .select({ id: tenants.id, name: tenants.name, slug: tenants.slug })
+    .from(tenants)
+    .where(eq(tenants.ownerId, user.id))
+    .limit(1)
+  return owned ?? null
 }
 
 /**
@@ -123,48 +159,69 @@ export async function createTenant(input: CreateTenantInput) {
   periodEnd.setMonth(periodEnd.getMonth() + 1)
 
   const tenant = await db.transaction(async (tx) => {
-    const [createdTenant] = await tx
-      .insert(tenants)
-      .values({
-        name: parsed.name,
-        slug: parsed.slug,
-        customDomain: null,
-        ownerId: dbUser.id,
+    // Serialize per-account creation and re-check the one-league cap inside the
+    // transaction: the pre-check above is racy and `tenants.owner_id` has no
+    // unique constraint, so two parallel submissions could otherwise both pass
+    // it and each create a league.
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${eq(users.id, dbUser.id)} FOR UPDATE`)
+    const [alreadyOwned] = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.ownerId, dbUser.id))
+      .limit(1)
+    if (alreadyOwned) {
+      throw new Error("You already have a league. Contact support to create another.")
+    }
+
+    try {
+      const [createdTenant] = await tx
+        .insert(tenants)
+        .values({
+          name: parsed.name,
+          slug: parsed.slug,
+          customDomain: null,
+          ownerId: dbUser.id,
+          plan: "free",
+          isActive: true,
+        })
+        .returning()
+
+      await tx.insert(subscriptions).values({
+        tenantId: createdTenant.id,
         plan: "free",
-        isActive: true,
+        status: "active",
+        monthlyAmount: "0",
+        currency: "PKR",
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
       })
-      .returning()
 
-    await tx.insert(subscriptions).values({
-      tenantId: createdTenant.id,
-      plan: "free",
-      status: "active",
-      monthlyAmount: "0",
-      currency: "PKR",
-      currentPeriodStart: now,
-      currentPeriodEnd: periodEnd,
-    })
-
-    await tx.insert(userTenantRoles).values({
-      userId: dbUser.id,
-      tenantId: createdTenant.id,
-      role: "league_owner",
-      isPrimary: true,
-    }).onConflictDoNothing({
-      target: [userTenantRoles.userId, userTenantRoles.tenantId],
-    })
-
-    // Keep the legacy membership array synchronized until all consumers have
-    // moved to user_tenant_roles. Do not set the user's global role here.
-    await tx
-      .update(users)
-      .set({
-        tenantIds: [...(Array.isArray(dbUser.tenantIds) ? dbUser.tenantIds : []), createdTenant.id],
-        updatedAt: now,
+      await tx.insert(userTenantRoles).values({
+        userId: dbUser.id,
+        tenantId: createdTenant.id,
+        role: "league_owner",
+        isPrimary: true,
+      }).onConflictDoNothing({
+        target: [userTenantRoles.userId, userTenantRoles.tenantId],
       })
-      .where(eq(users.id, dbUser.id))
 
-    return createdTenant
+      // Keep the legacy membership array synchronized until all consumers have
+      // moved to user_tenant_roles. Do not set the user's global role here.
+      await tx
+        .update(users)
+        .set({
+          tenantIds: [...(Array.isArray(dbUser.tenantIds) ? dbUser.tenantIds : []), createdTenant.id],
+          updatedAt: now,
+        })
+        .where(eq(users.id, dbUser.id))
+
+      return createdTenant
+    } catch (error) {
+      // The slug pre-check above is also racy: the row-level unique index is the
+      // authority, so surface a duplicate URL as the same friendly error.
+      if (isUniqueViolation(error)) throw new Error(DUPLICATE_SLUG)
+      throw error
+    }
   })
 
   revalidatePath("/dashboard")

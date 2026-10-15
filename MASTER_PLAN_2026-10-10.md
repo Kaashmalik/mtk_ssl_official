@@ -2206,6 +2206,67 @@ private contact fields, exports or sockets. Next source work: the
 follow. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 35: league-setup ownership gate + serialized league-create cap
+
+#### Implemented
+
+- Synced clean `main` with remote `f2f27ba`. Scope is the remaining
+  `dashboard-context`/league-setup `getMyTenant` consumers named as the next
+  source work, and the league-creation writer behind that page.
+- Found and fixed a real **flow wall**: `dashboard/league/setup/page.tsx`
+  bounced any account holding an active membership in *any* league, but its
+  writer `createTenant` caps only *ownership* (one league per account). A
+  fan/scorer of one league could therefore never reach the "Create your league"
+  form even though the backend allows it. The page now gates on the new
+  `getMyOwnedTenant()` (owned-league lookup by database UUID), matching the
+  writer's cap exactly.
+- The setup page's ownership-lookup failures now propagate to a new
+  `league/setup/error.tsx` boundary instead of crashing to the default error
+  page or silently rendering the form.
+- Closed a real **one-league cap race** in `createTenant`: the ownership cap was
+  a non-transactional pre-check and `tenants.owner_id` has no unique constraint,
+  so two parallel submissions could both pass it and each create a league. The
+  transaction now locks the actor row (`SELECT … FOR UPDATE`, the repo's
+  established idiom) and re-checks ownership inside the transaction; the
+  `tenants.slug` unique index is additionally surfaced through a `23505`
+  unique-violation mapping (the tournaments pattern of pre-check + catch), so a
+  lost slug race yields the friendly "URL already taken" error.
+- Reviewed the remaining `getMyTenant` consumers without change —
+  `lib/dashboard-context.ts` and `lib/rbac-server.ts` resolve host-first and
+  fail closed with dedicated suites (`dashboard-context.test.ts`,
+  `rbac-server.test.ts`); `api/billing/stripe/checkout` re-verifies the actor
+  owns the resolved league; `updateTenantBrandingSettings` re-resolves behind
+  `settings:manage`. Their fallback-primary-resolver semantics are deliberate
+  and documented at each site.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 71 files, **2,111 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,432 passing tests** (+13 over Batch 34) |
+
+New regressions: `tenant-create.test.ts` (9) and `league-setup-page.test.tsx`
+(4). They assert the `FOR UPDATE` actor lock and in-transaction cap re-check
+(with real SQL parameters), refusal to insert when the re-check finds ownership,
+slug `23505` mapping, verbatim rethrow of infrastructure errors, the
+ownership-not-membership semantics of `getMyOwnedTenant`, owner bounce and
+member-only form access on the page, and propagated lookup failures. Local git
+`core.whitespace` was extended with `cr-at-eol` because these files are committed
+with CRLF endings; no file bytes were altered for the check. Mocked SQL and a
+client-mocked page are **not** PostgreSQL RLS, lock-timing or
+authenticated-browser proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its **19 pre-existing** error
+lines. Five prior migrations remain unapplied and the release gate stays
+default-off; a real `UNIQUE` constraint on `tenants.owner_id` remains the durable
+fix (recorded as schema work, not guessed at without a migration window). Next
+source work: public/anonymous follow hardening. No full ISO-04 or authenticated
+browser claim; whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
