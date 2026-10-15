@@ -2355,6 +2355,44 @@ Next source work: `scorecards.ts` (7 direct-db sites), `users-invites.ts`
 (12), `matches.ts` (7), then the remaining admin APIs. Whole-task roadmap
 counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 38 — scorecards actions become pure delegates (15 October 2026)
+
+`app/actions/scorecards.ts` no longer touches `db` directly. Its read surface
+moved to the new tenant-scoped `lib/scorecard-reads.ts` (`requireScorecardMatch`,
+`findScopedInnings`, `readMatchScorecards`, `readInningsScorecards` + the
+`scopedInnings` exists-subquery helper); the action keeps only the `withAuth`
+gate, Clerk session check, zod validation, exact-league permission resolution
+and the legacy zod input schemas / `SaveScorecardInput` export. The two-write
+surface stays as before: `saveScorecard` remains the exported, fail-closed
+denial stub (scoring-service is the sole writer), so this batch moves reads
+into the guarded lib layer with zero behavior change — the match→innings→child
+hierarchy checks, the dual-key `(inningsId, matchId, tenantId)` binding, the
+exists-subquery defense against legacy rows whose child tenant disagrees with
+the referenced innings, and the rejects-before-any-query ordering are all
+preserved verbatim.
+
+Remaining allowlist after removal: `tenants.ts`/`users.ts` bootstrap;
+`matches.ts` (7 direct-db sites), `scoring.ts` (tenant-scoped authz reads),
+`users-invites.ts` (12 sites).
+
+The existing 32 `scorecard-boundaries.test.ts` regressions (exact SQL shape,
+`params` per query, call ordering, fail-closed paths) pass unchanged against
+the lib-backed actions, which is the point: module-wide `@mtk/database` mocking
+means the boundary contract transferred to the lib delegate without edits.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **72** files, **2,121 tests** |
+| Focused: guard + boundaries + match-management | PASS - 296 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (scorecard files clean) |
+| `git diff --check` | Clean |
+
+Next source work: `users-invites.ts` (12 direct-db sites, includes the
+invite-accept transaction flow), `matches.ts` (7), then the remaining admin
+APIs. Whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

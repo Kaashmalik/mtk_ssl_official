@@ -1,12 +1,12 @@
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
-import { db } from "@mtk/database"
-import { battingScorecards, bowlingScorecards, fieldingScorecards, matches, matchInnings } from "@mtk/database"
-import { eq, asc, and, exists, sql } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
+import {
+  findScopedInnings, readInningsScorecards, readMatchScorecards, requireScorecardMatch,
+} from "@/lib/scorecard-reads"
 
 
 // Legacy input shape retained for source compatibility only. There is no
@@ -61,20 +61,6 @@ async function requireScorecardTenant(permission: "scorecard:read" | "scorecard:
   return tenantId
 }
 
-async function requireScorecardMatch(matchId: string, tenantId: string) {
-  const match = await db.query.matches.findFirst({ columns: { id: true, tenantId: true },
-    where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)) })
-  if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
-}
-
-function scopedInnings(column: typeof battingScorecards.inningsId | typeof bowlingScorecards.inningsId,
-  matchId: string, tenantId: string) {
-  // Defend against legacy rows whose child matchId/tenantId disagree with the
-  // referenced innings. A match UUID alone is not proof of the full hierarchy.
-  return exists(sql`(SELECT 1 FROM ${matchInnings} WHERE ${and(eq(matchInnings.id, column),
-    eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId))})`)
-}
-
 // ─── Actions ──────────────────────────────────────────────────
 
 /** @deprecated Record deliveries through scoring-service. A historical import
@@ -94,19 +80,7 @@ export const getFullScorecard = withAuth("scorecard:read", async (matchId: strin
   z.string().uuid().parse(matchId)
   const tenantId = await requireScorecardTenant("scorecard:read")
   await requireScorecardMatch(matchId, tenantId)
-  const [batting, bowling, fielding] = await Promise.all([
-    db.select().from(battingScorecards)
-      .where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId),
-        scopedInnings(battingScorecards.inningsId, matchId, tenantId)))
-      .orderBy(asc(battingScorecards.battingPosition)),
-    db.select().from(bowlingScorecards)
-      .where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId),
-        scopedInnings(bowlingScorecards.inningsId, matchId, tenantId)))
-      .orderBy(asc(bowlingScorecards.bowlingPosition)),
-    db.select().from(fieldingScorecards)
-      .where(and(eq(fieldingScorecards.matchId, matchId), eq(fieldingScorecards.tenantId, tenantId))),
-  ])
-  return { batting, bowling, fielding }
+  return readMatchScorecards(matchId, tenantId)
 })
 
 export const getInningsScorecard = withAuth("scorecard:read", async (inningsId: string) => {
@@ -114,19 +88,7 @@ export const getInningsScorecard = withAuth("scorecard:read", async (inningsId: 
   if (!userId) throw new Error("Unauthorized")
   z.string().uuid().parse(inningsId)
   const tenantId = await requireScorecardTenant("scorecard:read")
-  const innings = await db.query.matchInnings.findFirst({ columns: { id: true, tenantId: true, matchId: true },
-    where: and(eq(matchInnings.id, inningsId), eq(matchInnings.tenantId, tenantId)) })
-  if (!innings || innings.id !== inningsId || innings.tenantId !== tenantId) throw new Error("Innings not found")
+  const innings = await findScopedInnings(inningsId, tenantId)
   await requireScorecardMatch(innings.matchId, tenantId)
-  const [batting, bowling] = await Promise.all([
-    db.select().from(battingScorecards)
-      .where(and(eq(battingScorecards.inningsId, inningsId), eq(battingScorecards.matchId, innings.matchId),
-        eq(battingScorecards.tenantId, tenantId)))
-      .orderBy(asc(battingScorecards.battingPosition)),
-    db.select().from(bowlingScorecards)
-      .where(and(eq(bowlingScorecards.inningsId, inningsId), eq(bowlingScorecards.matchId, innings.matchId),
-        eq(bowlingScorecards.tenantId, tenantId)))
-      .orderBy(asc(bowlingScorecards.bowlingPosition)),
-  ])
-  return { batting, bowling }
+  return readInningsScorecards(inningsId, innings.matchId, tenantId)
 })

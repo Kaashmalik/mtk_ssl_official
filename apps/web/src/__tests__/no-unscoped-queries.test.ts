@@ -34,12 +34,11 @@ const ALLOWLIST = new Set([
   // TODO: migrate these to repos and remove from allowlist:
   "matches.ts", // withTenantContext + explicit tenantId filters; still direct db
   "scoring.ts", // all WRITES proxy to scoring-service (SoT); remaining db.select are tenant-scoped authz reads
-  "scorecards.ts",
   "users-invites.ts", // tenantId-filtered; uses direct db pending repo migration
-  // notifications.ts (Batch 33), follows.ts/registrations.ts (Batch 36) and
-  // player-ids.ts (Batch 37) no longer use direct db — they delegate to
-  // tenant-scoped readers/writers in lib/ — so the guard now enforces
-  // repo-only access there.
+  // notifications.ts (Batch 33), follows.ts/registrations.ts (Batch 36),
+  // player-ids.ts (Batch 37) and scorecards.ts (Batch 38) no longer use
+  // direct db — they delegate to tenant-scoped readers/writers in lib/ — so
+  // the guard now enforces repo-only access there.
 ]);
 
 /** Patterns that indicate intentional unscoped access. */
