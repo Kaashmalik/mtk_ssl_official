@@ -31,13 +31,13 @@ const ACTIONS_DIR = join(__dirname, "../app/actions");
 const ALLOWLIST = new Set([
   "tenants.ts",
   "users.ts",
-  // TODO: migrate these to repos and remove from allowlist:
-  "matches.ts", // withTenantContext + explicit tenantId filters; still direct db
+  // TODO: migrate this to the repo layer and remove from allowlist:
   "scoring.ts", // all WRITES proxy to scoring-service (SoT); remaining db.select are tenant-scoped authz reads
   // notifications.ts (Batch 33), follows.ts/registrations.ts (Batch 36),
-  // player-ids.ts (Batch 37), scorecards.ts (Batch 38) and users-invites.ts
-  // (Batch 39) no longer use direct db — they delegate to tenant-scoped
-  // readers/writers in lib/ — so the guard now enforces repo-only access there.
+  // player-ids.ts (Batch 37), scorecards.ts (Batch 38), users-invites.ts
+  // (Batch 39) and matches.ts (Batch 40) no longer use direct db — they
+  // delegate to tenant-scoped readers/writers in lib/ — so the guard now
+  // enforces repo-only access there.
 ]);
 
 /** Patterns that indicate intentional unscoped access. */

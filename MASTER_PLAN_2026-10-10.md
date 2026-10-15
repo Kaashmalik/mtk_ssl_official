@@ -2434,6 +2434,50 @@ Next source work: `matches.ts` (7 direct-db sites, includes the
 `withTenantContext` transaction for create/update), then the remaining admin
 APIs. Whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 40 — matches actions become pure delegates (15 October 2026)
+
+`app/actions/matches.ts` no longer touches `db` directly. Its reads and the
+scorer-assignment writer moved to the new tenant-scoped `lib/match-records.ts`
+(`findTenantMatch`, `readMatchFormOptions`, `listTenantMatches`,
+`listTenantScorers`, `assignScorerInMatch` + the `MatchStatus`/`MatchListFilters`
+types); `withTenantContext` moved inside the lib functions so the action holds
+only gates. The action keeps the zod schemas (and `CreateMatchInput`/
+`MatchFilters` exports), `requireMatchTenant`, Clerk checks, `revalidatePath`
+shaping, and its existing delegations: lifecycle commands to
+`lib/match-management.ts` (`manageMatch`), toss/start to
+`lib/match-lifecycle.ts`, `endMatch` still proxies to scoring-service and never
+writes results locally.
+
+The `assignScorerInMatch` transaction transferred verbatim: match FOR UPDATE →
+sorted-id users FOR UPDATE → league FOR SHARE → ordered memberships FOR UPDATE,
+under-lock owner re-verification, active-scorer membership check on the target,
+the both-slots-distinct rule, no-op short-circuit, preconditions-in-predicate
+UPDATE, `read committed` isolation, and the MATCH_SCORER_ASSIGN audit with
+before/after payload.
+
+Deliberate typing: `MatchListFilters.status` mirrors the real `matches` enum
+(post-rebuild), so the zod-validated filter narrows exactly into
+`eq(matches.status, …)`.
+
+The allowlist is now at its floor: `tenants.ts`/`users.ts` (bootstrap) and
+`scoring.ts` (writes proxy to scoring-service; remaining selects are
+tenant-scoped authz reads). Every other action file delegates to lib/ or
+repo-style writers.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **72** files, **2,121 tests** |
+| Focused: guard + management + assignment + concurrency + lifecycle | PASS - **410 tests** (all unchanged) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (match files clean) |
+| `git diff --check` | Clean |
+
+Next source work: `scoring.ts` is the only remaining allowlist entry — decide
+whether an explicit opt-out (e.g. `unscoped()` marking) or a repo read-layer fits
+its authz selects; then the remaining admin-API audit items. Roadmap counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
