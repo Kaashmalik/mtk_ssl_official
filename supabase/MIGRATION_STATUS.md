@@ -483,3 +483,35 @@ always read false. Inserts are idempotent via the `(userId, type, id)` unique in
 public/anonymous or cross-league follow experience and adds no owner-review audit,
 rate limit or notification fan-out. Verify real RLS, the unique constraint, grants,
 indexes and two-session follow races.
+
+## Batch 24 — stats and scoring dashboard read scope (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. `dashboard/stats`, `dashboard/stats/compare` and
+`dashboard/scoring` no longer use the primary-membership fallback (`getMyTenant`)
+or redirect to league setup on an authorization failure. A new
+`lib/league-reads.ts` resolves the exact active league, checks `stats:read` (both
+stats routes) or `match:read` (scoring console) via `requirePermissionServer`,
+maps Clerk → active account, then requires an active same-league membership whose
+role holds the permission plus an active `tenants` row. A global role, tenant array
+or primary membership never grants access.
+
+Leaderboard reads inner-join `players` and `teams` with the same active-league
+predicate as the scorecard filter, group by player, are bounded (1–50) with a
+deterministic tiebreak and let query failures propagate instead of rendering an
+empty board. The comparison roster is league-scoped and bounded (1–200);
+`readPlayerComparison` scopes the player and every batting/bowling/fielding child
+read to the active league and rejects a non-UUID id before SQL (previously the
+child scorecard reads filtered by `playerId` only). The scoring console filters
+and bounds matches (100 rows, +1 fetch to flag truncation) with SQL ordering and
+resolves team names with a league-scoped `inArray` instead of an unscoped batch
+lookup.
+
+All five prior migrations remain unapplied; release gate stays default-off. These
+are request-local authorization and projection checks — not read-versus-revocation
+locks, database RLS or a public/anonymous experience. They are not certified for
+export, cache or socket scoping. Before rollout, verify real RLS/grants and scoped
+query plans/indexes on these read paths; mocked SQL/call-order and render tests do
+not prove those database properties. Next source slice: remaining tournament
+lifecycle/list/detail writers and venue/admin writers, then public/anonymous
+follow, publication and notification boundaries.

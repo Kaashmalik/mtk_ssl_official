@@ -1673,6 +1673,59 @@ venue/admin writers, then public/anonymous follow, publication and notification
 paths. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 24: exact-league stats and scoring dashboard reads
+
+#### Implemented
+
+- Synced clean `main` with remote `6ccf8e9`. Scope is the stats, stats/compare and
+  scoring dashboard read routes; remaining tournament lifecycle writers, venue/admin
+  writers and public/anonymous follow stay open.
+- New `lib/league-reads.ts` centralizes the exact-active-league read context
+  (`requireLeagueReadContext`) and the readers. It resolves the exact active league,
+  checks `requirePermissionServer(permission, league)`, maps Clerk → active account,
+  then requires an active same-league membership whose role holds the permission and
+  an active `tenants` row. No global role, tenant array or primary membership grants
+  access.
+- `stats/page.tsx`, `stats/compare/page.tsx` and `scoring/page.tsx` drop the
+  `getMyTenant` fallback and the league-setup redirect, resolve the exact active
+  league first (`stats:read` / `match:read`) and let failures propagate rather than
+  render a fake empty state.
+- Leaderboards inner-join `players` and `teams` with the active-league predicate,
+  are bounded (1–50) with a deterministic tiebreak; the comparison roster is bounded
+  (1–200); `readPlayerComparison` scopes the player and all batting/bowling/fielding
+  children to the league and rejects non-UUID ids before SQL; the scoring console
+  filters/bounds (100, +1 for truncation) matches and resolves team names with a
+  league-scoped `inArray`.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 51 files, **1,921 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,242 passing tests** (+33 over Batch 23) |
+
+Added 33 read cases across `league-reads.test.ts` (19) and `stats-pages.test.tsx`
+(14): context resolution/denial, league-scoped joins and params, bounded limits,
+tenant-scoped comparison aggregation, invalid-id short-circuit, console name
+resolution/truncation and propagated context/query failures. Mocked SQL/call-order
+tests and in-memory predicates are not PostgreSQL RLS, constraint or concurrency
+proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. A standalone `tsc --noEmit` still reports only its pre-existing
+unrelated errors; none reference the new lib, pages or tests. Five prior migrations
+remain unapplied and the release gate stays default-off. These reads are not a
+public/anonymous or cross-league experience and are not certified for export, cache
+or socket scoping. Real RLS, grants and indexes on these read paths remain release
+acceptance work.
+
+Next source work: the remaining tournament lifecycle/list/detail writers and
+venue/admin writers, then public/anonymous follow, publication and notification
+paths. No full ISO-04 or authenticated browser claim; whole-task roadmap counts
+remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

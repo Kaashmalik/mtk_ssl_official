@@ -1,3 +1,4 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
@@ -6,30 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@mtk/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Play, Swords } from "lucide-react"
-import { getMyTenant } from "@/app/actions/tenants"
-import { db, matches, teams } from "@mtk/database"
-import { eq, and, or } from "drizzle-orm"
+import { requireLeagueReadContext, readScoringConsoleMatches } from "@/lib/league-reads"
 import { unstable_noStore as noStore } from "next/cache"
-
-async function getTeamNameMap(teamIds: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
-  const uniqueIds = [...new Set(teamIds.filter(Boolean))]
-  if (uniqueIds.length === 0) return map
-
-  try {
-    const { inArray } = await import("drizzle-orm")
-    const rows = await db
-      .select({ id: teams.id, name: teams.name })
-      .from(teams)
-      .where(inArray(teams.id, uniqueIds))
-    for (const row of rows) {
-      map.set(row.id, row.name)
-    }
-  } catch (error) {
-    console.error("Failed to batch-fetch team names:", error)
-  }
-  return map
-}
 
 export default async function ScoringConsolePage() {
   noStore()
@@ -37,50 +16,17 @@ export default async function ScoringConsolePage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
+  // Exact active league + match:read. Match and team-name reads are league-scoped
+  // and failures propagate instead of rendering a fake empty console.
+  const context = await requireLeagueReadContext("match:read")
+  const { matches, truncated } = await readScoringConsoleMatches(context.tenantId)
 
-  // Fetch live and scheduled matches
-  const scoringMatchesRaw = await db.select().from(matches)
-    .where(
-      and(
-        eq(matches.tenantId, tenant.id),
-        or(
-          eq(matches.status, "live"),
-          eq(matches.status, "scheduled"),
-          eq(matches.status, "toss"),
-          eq(matches.status, "innings_break")
-        )
-      )
-    )
-
-  // Sort matches in memory: live/innings_break first, then scheduledDate asc
-  const sortedMatches = scoringMatchesRaw.sort((a, b) => {
-    const isALive = a.status === "live" || a.status === "innings_break" ? 0 : 1
-    const isBLive = b.status === "live" || b.status === "innings_break" ? 0 : 1
-    if (isALive !== isBLive) return isALive - isBLive
-
-    const dateA = a.scheduledDate ? new Date(a.scheduledDate).getTime() : 0
-    const dateB = b.scheduledDate ? new Date(b.scheduledDate).getTime() : 0
-    return dateA - dateB
-  })
-
-  // Batch lookup all team names in a single query (fixes N+1)
-  const allTeamIds = sortedMatches.flatMap(m => [m.teamAId, m.teamBId])
-  const teamNames = await getTeamNameMap(allTeamIds)
-
-  const resolvedMatches = sortedMatches.map((m) => {
-    const teamAName = teamNames.get(m.teamAId) ?? "TBD Team A"
-    const teamBName = teamNames.get(m.teamBId) ?? "TBD Team B"
-    return {
-      ...m,
-      teamAName,
-      teamBName,
-      formattedDate: m.scheduledDate 
-        ? new Date(m.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-        : "TBD"
-    }
-  })
+  const resolvedMatches = matches.map((m) => ({
+    ...m,
+    formattedDate: m.scheduledDate
+      ? new Date(m.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "TBD",
+  }))
 
   return (
     <div className="space-y-6">
@@ -127,6 +73,11 @@ export default async function ScoringConsolePage() {
               </Card>
             )
           })}
+          {truncated && (
+            <Card className="md:col-span-2 border-dashed text-center text-sm text-muted-foreground py-4">
+              Showing the first {resolvedMatches.length} matches. Complete or archive current matches to see the rest.
+            </Card>
+          )}
           {resolvedMatches.length === 0 && (
             <Card className="md:col-span-2 bg-card/50 backdrop-blur-md py-12 text-center text-muted-foreground">
               <Swords className="h-12 w-12 mx-auto mb-3 opacity-30" />

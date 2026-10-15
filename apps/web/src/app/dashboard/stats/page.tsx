@@ -1,3 +1,4 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
@@ -7,38 +8,8 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Trophy, Target, Award, Zap } from "lucide-react"
-import { getMyTenant } from "@/app/actions/tenants"
-import { db, battingScorecards, bowlingScorecards, players, teams } from "@mtk/database"
-import { eq, sum, desc } from "drizzle-orm"
+import { requireLeagueReadContext, readBattingLeaderboard, readBowlingLeaderboard } from "@/lib/league-reads"
 import { unstable_noStore as noStore } from "next/cache"
-
-interface ScorerItem {
-  playerId: string
-  playerName: string
-  teamName: string
-  totalRuns: string | null
-}
-
-interface WicketItem {
-  playerId: string
-  playerName: string
-  teamName: string
-  totalWickets: string | null
-}
-
-interface SixesItem {
-  playerId: string
-  playerName: string
-  teamName: string
-  totalSixes: string | null
-}
-
-interface FoursItem {
-  playerId: string
-  playerName: string
-  teamName: string
-  totalFours: string | null
-}
 
 export default async function StatisticsPage() {
   noStore()
@@ -46,88 +17,15 @@ export default async function StatisticsPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
-
-  // 1. Fetch Top Run Scorers
-  let topRunScorers: ScorerItem[] = []
-  try {
-    topRunScorers = await db.select({
-      playerId: battingScorecards.playerId,
-      playerName: players.name,
-      teamName: teams.name,
-      totalRuns: sum(battingScorecards.runs),
-    })
-    .from(battingScorecards)
-    .innerJoin(players, eq(players.id, battingScorecards.playerId))
-    .innerJoin(teams, eq(teams.id, battingScorecards.teamId))
-    .where(eq(battingScorecards.tenantId, tenant.id))
-    .groupBy(battingScorecards.playerId, players.name, teams.name)
-    .orderBy(desc(sum(battingScorecards.runs)))
-    .limit(5)
-  } catch (err) {
-    console.error("Failed to query run scorers:", err)
-  }
-
-  // 2. Fetch Top Wicket Takers
-  let topWicketTakers: WicketItem[] = []
-  try {
-    topWicketTakers = await db.select({
-      playerId: bowlingScorecards.playerId,
-      playerName: players.name,
-      teamName: teams.name,
-      totalWickets: sum(bowlingScorecards.wickets),
-    })
-    .from(bowlingScorecards)
-    .innerJoin(players, eq(players.id, bowlingScorecards.playerId))
-    .innerJoin(teams, eq(teams.id, bowlingScorecards.teamId))
-    .where(eq(bowlingScorecards.tenantId, tenant.id))
-    .groupBy(bowlingScorecards.playerId, players.name, teams.name)
-    .orderBy(desc(sum(bowlingScorecards.wickets)))
-    .limit(5)
-  } catch (err) {
-    console.error("Failed to query wicket takers:", err)
-  }
-
-  // 3. Fetch Top Six Hitters
-  let topSixHitters: SixesItem[] = []
-  try {
-    topSixHitters = await db.select({
-      playerId: battingScorecards.playerId,
-      playerName: players.name,
-      teamName: teams.name,
-      totalSixes: sum(battingScorecards.sixes),
-    })
-    .from(battingScorecards)
-    .innerJoin(players, eq(players.id, battingScorecards.playerId))
-    .innerJoin(teams, eq(teams.id, battingScorecards.teamId))
-    .where(eq(battingScorecards.tenantId, tenant.id))
-    .groupBy(battingScorecards.playerId, players.name, teams.name)
-    .orderBy(desc(sum(battingScorecards.sixes)))
-    .limit(5)
-  } catch (err) {
-    console.error("Failed to query six hitters:", err)
-  }
-
-  // 4. Fetch Top Four Hitters
-  let topFourHitters: FoursItem[] = []
-  try {
-    topFourHitters = await db.select({
-      playerId: battingScorecards.playerId,
-      playerName: players.name,
-      teamName: teams.name,
-      totalFours: sum(battingScorecards.fours),
-    })
-    .from(battingScorecards)
-    .innerJoin(players, eq(players.id, battingScorecards.playerId))
-    .innerJoin(teams, eq(teams.id, battingScorecards.teamId))
-    .where(eq(battingScorecards.tenantId, tenant.id))
-    .groupBy(battingScorecards.playerId, players.name, teams.name)
-    .orderBy(desc(sum(battingScorecards.fours)))
-    .limit(5)
-  } catch (err) {
-    console.error("Failed to query four hitters:", err)
-  }
+  // Exact active league + stats:read. Read failures propagate; they never become
+  // a fake "no statistics" empty state.
+  const context = await requireLeagueReadContext("stats:read")
+  const [topRunScorers, topSixHitters, topFourHitters, topWicketTakers] = await Promise.all([
+    readBattingLeaderboard(context.tenantId, "runs"),
+    readBattingLeaderboard(context.tenantId, "sixes"),
+    readBattingLeaderboard(context.tenantId, "fours"),
+    readBowlingLeaderboard(context.tenantId),
+  ])
 
   const hasData = topRunScorers.length > 0 || topWicketTakers.length > 0
 
@@ -191,7 +89,7 @@ export default async function StatisticsPage() {
                         </div>
                       </div>
                       <Badge className="font-bold text-sm px-2.5 py-1">
-                        {Number(scorer.totalRuns).toLocaleString()} runs
+                        {Number(scorer.total).toLocaleString()} runs
                       </Badge>
                     </div>
                   ))}
@@ -218,7 +116,7 @@ export default async function StatisticsPage() {
                         </div>
                       </div>
                       <Badge variant="outline" className="font-bold text-sm px-2.5 py-1">
-                        {Number(scorer.totalSixes).toLocaleString()} sixes
+                        {Number(scorer.total).toLocaleString()} sixes
                       </Badge>
                     </div>
                   ))}
@@ -245,7 +143,7 @@ export default async function StatisticsPage() {
                         </div>
                       </div>
                       <Badge variant="secondary" className="font-bold text-sm px-2.5 py-1">
-                        {Number(scorer.totalFours).toLocaleString()} fours
+                        {Number(scorer.total).toLocaleString()} fours
                       </Badge>
                     </div>
                   ))}
@@ -275,7 +173,7 @@ export default async function StatisticsPage() {
                         </div>
                       </div>
                       <Badge className="font-bold text-sm px-2.5 py-1 bg-red-600 hover:bg-red-700">
-                        {Number(bowler.totalWickets).toLocaleString()} wickets
+                        {Number(bowler.total).toLocaleString()} wickets
                       </Badge>
                     </div>
                   ))}
