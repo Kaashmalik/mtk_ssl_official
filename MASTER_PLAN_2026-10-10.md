@@ -2648,6 +2648,55 @@ Next source work: `settings/branding` unscoped write and
 `cron/subscription-renewal` unattended transaction close out the admin/API tier.
 Roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 45 — branding + renewal cron: validated writes, tested sweep (15 October 2026)
+
+Final pass over the admin/API tier: `GET/PUT /api/settings/branding` (previously
+ran super-admin-gated but unvalidated, direct-db reads/writes) and
+`GET /api/cron/subscription-renewal` (untested, unattended transaction sweep).
+
+**Branding.** New `lib/branding-settings.ts`: `brandingPlanViolation` is the
+pure white-label/custom-domain gate (free/starter cannot set gated fields or a
+custom domain; pro cannot set a custom domain; enterprise passes — verified
+against `getPlanLimits`); `saveBrandingSettings` applies settings in one
+transaction that locks the tenant row `FOR UPDATE` and reads the plan under the
+lock, so a concurrent plan change (e.g. a Stripe settlement downgrade) cannot
+race a white-label write past the gate. The custom-domain update and the
+branding upsert (`tenantId` is the table's primary key, so no silent
+duplicates) stay in that transaction; gating answers before any write. The
+route now zod-validates the PUT body (`400 Invalid input` instead of writing
+untrusted raw JSON strings into every column) and maps
+missing → 404 / violation → 403 with the unchanged client-facing messages.
+GET shape is unchanged (`branding` row spread plus `customDomain`).
+
+**Renewal cron.** New `lib/subscription-renewal.ts` holds the sweep verbatim:
+notify pass with day-range buckets and the 36 h idempotency guard, `past_due`
+flip only for `active` rows, and the unbounded enforce pass whose pause is
+claimed via `UPDATE … WHERE id AND status IN (live) RETURNING` so a concurrent
+sweep cannot double-downgrade; the tenant downgrade shares that transaction.
+`secretsMatch`, `daysUntil`, `fillTemplate`, `GRACE_DAYS` are exported pure.
+The route is now only the fail-closed auth gate (unset `CRON_SECRET` → 503,
+constant-time bearer comparison → 401) plus response shaping.
+
+New regressions: `branding-settings.test.ts` (9) — gating matrix, read shapes,
+locked save paths (missing tenant / violation-before-writes / insert with
+domain / update-in-place) and `subscription-renewal.test.ts` (15) — pure
+helpers, bucket insert with filled templates, `past_due` flip rules,
+idempotent skip, transactional pause+downgrade with the claim predicate, lost
+races leaving the tenant untouched, and the cron route's 503/401/200/500 gate.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **78** files, **2,187 tests** (+24) |
+| Focused: branding + renewal | PASS - 24 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: the admin/API tier is complete. Candidate next batches:
+remaining untested API routes (e.g. `dns/verify`, `email/verify`), or returning
+to the roadmap register. Roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

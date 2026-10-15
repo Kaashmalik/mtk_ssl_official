@@ -1,12 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { db, getPlanLimits } from "@mtk/database";
-import { tenants, tenantBranding } from "@mtk/database";
-import { eq } from "drizzle-orm";
+import { getBrandingSettings, saveBrandingSettings } from "@/lib/branding-settings";
 import { isSuperAdmin } from "@/lib/super-admin";
-import { type PlanKey } from "@mtk/database";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Super-admin league branding settings. All reads and writes delegate to
+ * lib/branding-settings (tenant-locked upsert, plan gating evaluated against
+ * the plan read under the lock). The PUT body is validated server-side; the
+ * admin UI additionally validates with its own zod schema before sending.
+ */
+const schema = z.object({
+  tenantId: z.string().uuid(),
+  logoUrl: z.string().max(2048).nullable().optional(),
+  faviconUrl: z.string().max(2048).nullable().optional(),
+  primaryColor: z.string().max(64).nullable().optional(),
+  secondaryColor: z.string().max(64).nullable().optional(),
+  accentColor: z.string().max(64).nullable().optional(),
+  fontFamily: z.string().max(128).nullable().optional(),
+  appName: z.string().max(128).nullable().optional(),
+  hideSslBranding: z.boolean().optional(),
+  emailSenderName: z.string().max(128).nullable().optional(),
+  emailSenderAddress: z.string().max(254).nullable().optional(),
+  mobileAppIconUrl: z.string().max(2048).nullable().optional(),
+  mobileAppSplashUrl: z.string().max(2048).nullable().optional(),
+  mobileAppBundleId: z.string().max(256).nullable().optional(),
+  mobileAppPackageName: z.string().max(256).nullable().optional(),
+  customDomain: z.string().max(253).nullable().optional(),
+});
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,28 +48,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "tenantId is required" }, { status: 400 });
     }
 
-    // Get tenant for selected league
-    const tenant = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-
-    if (tenant.length === 0) {
+    const result = await getBrandingSettings(tenantId);
+    if ("missing" in result) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
 
-    const branding = await db
-      .select()
-      .from(tenantBranding)
-      .where(eq(tenantBranding.tenantId, tenant[0].id))
-      .limit(1);
-
-    const brandingData = branding[0] || {};
-
     return NextResponse.json({
-      ...brandingData,
-      customDomain: tenant[0].customDomain,
+      ...(result.branding ?? {}),
+      customDomain: result.tenant.customDomain,
     });
   } catch (error) {
     console.error("Error fetching branding settings:", error);
@@ -69,93 +78,21 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const body = await request.json();
-
-    if (!body.tenantId) {
-      return NextResponse.json({ error: "tenantId is required" }, { status: 400 });
-    }
-
-    // Get tenant for selected league
-    const tenant = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.id, body.tenantId))
-      .limit(1);
-
-    if (tenant.length === 0) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
-    }
-
-    const tenantId = tenant[0].id;
-    const tenantPlan = tenant[0].plan as PlanKey;
-
-    // ─── Plan-based feature gating ────────────────────────────────
-    // White-label (hideSslBranding, custom fonts, mobile app branding)
-    // requires pro or enterprise.
-    const planLimits = getPlanLimits(tenantPlan);
-    const isWhiteLabelAllowed = planLimits.whiteLabel === true;
-
-    if (!isWhiteLabelAllowed) {
-      const gatedFields = ["hideSslBranding", "fontFamily", "mobileAppIconUrl", "mobileAppSplashUrl", "mobileAppBundleId", "mobileAppPackageName"] as const;
-      const requestedGatedField = gatedFields.find((f) => body[f] !== undefined && body[f] !== null && body[f] !== false);
-      if (requestedGatedField) {
-        return NextResponse.json(
-          {
-            error: `White-label customization (${requestedGatedField}) requires Pro or Enterprise plan. Please upgrade your plan.`,
-          },
-          { status: 403 }
-        );
-      }
-    }
-
-    // Custom domain requires enterprise plan
-    if (body.customDomain && !planLimits.customDomain) {
+    const parsed = schema.safeParse(await request.json());
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Custom domains require Enterprise plan. Please upgrade your plan." },
-        { status: 403 }
+        { error: "Invalid input", details: parsed.error.flatten() },
+        { status: 400 }
       );
     }
+    const { tenantId, ...data } = parsed.data;
 
-    // Update custom domain if provided
-    if (body.customDomain !== undefined) {
-      await db
-        .update(tenants)
-        .set({ customDomain: body.customDomain || null })
-        .where(eq(tenants.id, tenantId));
+    const result = await saveBrandingSettings({ tenantId, data });
+    if ("missing" in result) {
+      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
-
-    // Update or insert branding
-    const existingBranding = await db
-      .select()
-      .from(tenantBranding)
-      .where(eq(tenantBranding.tenantId, tenantId))
-      .limit(1);
-
-    const brandingData = {
-      tenantId,
-      logoUrl: body.logoUrl || null,
-      faviconUrl: body.faviconUrl || null,
-      primaryColor: body.primaryColor || null,
-      secondaryColor: body.secondaryColor || null,
-      accentColor: body.accentColor || null,
-      fontFamily: body.fontFamily || null,
-      appName: body.appName || null,
-      hideSslBranding: body.hideSslBranding || false,
-      emailSenderName: body.emailSenderName || null,
-      emailSenderAddress: body.emailSenderAddress || null,
-      mobileAppIconUrl: body.mobileAppIconUrl || null,
-      mobileAppSplashUrl: body.mobileAppSplashUrl || null,
-      mobileAppBundleId: body.mobileAppBundleId || null,
-      mobileAppPackageName: body.mobileAppPackageName || null,
-    };
-
-    if (existingBranding.length > 0) {
-      await db
-        .update(tenantBranding)
-        .set(brandingData)
-        .where(eq(tenantBranding.tenantId, tenantId));
-    } else {
-      await db.insert(tenantBranding).values(brandingData);
+    if ("violation" in result) {
+      return NextResponse.json({ error: result.violation }, { status: 403 });
     }
 
     return NextResponse.json({ success: true });
@@ -167,4 +104,3 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
-
