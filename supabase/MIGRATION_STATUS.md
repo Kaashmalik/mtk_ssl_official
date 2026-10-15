@@ -667,3 +667,51 @@ database-level authorization. All five prior migrations remain unapplied; releas
 stays default-off. Before rollout, verify each picker returns only the active league's
 rows under the deployed policies and grants. Next source slice: the remaining venue
 writers, then public/anonymous follow, publication and notification boundaries.
+
+## Batch 31 — league venue (grounds/facilities) management (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or deployment
+occurred. The existing `venues` table is now administered from the dashboard. RBAC adds
+`venue:read` (every league role) and `venue:manage` (`super_admin`, `league_owner`), and the
+sidebar/header expose a gated **Venues** item. `lib/venue-reads.ts` reads the exact active
+league only — a bounded list (over-fetch 201, truncate to 200), a single venue and
+active-venue options (over-fetch 201, truncate to 200) — rejecting a `super_admin`
+membership and never falling back to an owned/default tenant. `lib/venue-writes.ts` creates,
+updates and archives/restores a venue in one `read committed` transaction that locks account
+→ league → membership → the venue row, rechecks the current authority after the wait, and
+writes its audit in the same transaction; the per-league `UNIQUE(tenantId, name)` is
+surfaced as one friendly error (pre-check plus `23505`). Archiving toggles `isActive` and
+never deletes, because `matches.venueId` is `ON DELETE SET NULL`, so historical match links
+survive.
+
+This is an application-level scoping and write-path change; it does not change any RLS
+policy or grant, and a mocked reader/database is not proof of PostgreSQL locking,
+unique-constraint behavior or authenticated-browser/database-level authorization. All five
+prior migrations remain unapplied; release gate stays default-off.
+
+**Verification:** web 2,031 / 63 files, database 128 / 8 files, scoring service 193 / 8
+suites; 2,352 passing tests (+38 over Batch 30). `tsc --noEmit` still reports only its
+pre-existing unrelated errors. Before rollout, verify the venue readers return only the
+active league's rows under the deployed policies and grants, and exercise the archive/restore
+compare-and-set and duplicate-name mapping against real PostgreSQL. Next source slice: the
+remaining catch-redirect cleanups, then public/anonymous follow, publication and notification
+boundaries.
+
+## Batch 31 — league venue (grounds/facilities) management (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or deployment
+occurred. The existing `venues` table (already in place, with `UNIQUE(tenantId, name)` and
+`matches.venueId ... ON DELETE SET NULL`) is now written through `lib/venue-writes.ts`
+(`createVenueRecord`/`updateVenueRecord`/`setVenueActive`) and read through
+`lib/venue-reads.ts`. Each write runs in one `read committed` transaction that locks account
+→ league → membership → venue row and rechecks the current authority after the wait, and it
+writes its audit row in the same transaction. Venues are archived/restored by an `isActive`
+compare-and-set and are never hard-deleted, so historical match links survive.
+
+This is an application-level scoping change; it does not change any RLS policy or grant, and
+a mocked `db.transaction` is not proof of PostgreSQL locking, unique-constraint enforcement,
+RLS or authenticated-browser authorization. All five prior migrations remain unapplied; the
+release gate stays default-off. Before rollout, verify the venue lock ordering, the `23505`
+duplicate mapping and the `isActive` compare-and-set against the deployed policies, grants
+and indexes. Next source slice: the remaining catch-redirect cleanups, then public/anonymous
+follow, publication and notification boundaries.

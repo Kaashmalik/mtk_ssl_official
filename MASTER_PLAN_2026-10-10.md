@@ -1985,6 +1985,61 @@ work: the remaining venue writers, then public/anonymous follow, publication and
 notification paths. No full ISO-04 or authenticated browser claim; whole-task roadmap
 counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 31: league venue management (locked, scoped, audited)
+
+#### Implemented
+
+- Synced clean `main` with remote `048077f`. Scope is league venue (grounds/facilities)
+  management; the registrations review-queue catch-redirect, `dashboard-context`,
+  notifications and league-setup `getMyTenant` consumers, and public/anonymous follow stay
+  open.
+- RBAC gains two permissions: `venue:read` (every league role) and `venue:manage`
+  (`super_admin`, `league_owner` only). `getNavigationForRole` returns a **Venues** item for
+  any role holding `venue:read`; the sidebar and header icon map (`MapPin`) render it in the
+  management group.
+- `lib/venue-reads.ts` — request-local `requireVenueReadContext(permission)` plus bounded,
+  tenant-scoped `readVenueList` (over-fetch `201`, truncate to 200), `readVenue(tenantId, id)`
+  (exact league predicate) and `readVenueOptions(tenantId)` (`isActive`, over-fetch `201`,
+  truncate to 200). Reads resolve the exact active league, reject a `super_admin` membership
+  and never fall back to an owned/default tenant.
+- `lib/venue-writes.ts` — `createVenueRecord`, `updateVenueRecord` and `setVenueActive`.
+  Each runs in one `read committed` transaction that locks account → league → membership
+  (`league_owner` only), takes the venue row `FOR UPDATE` **after** those locks (update and
+  archive), rechecks the current authority after the wait, and writes its audit log
+  (`VENUE_CREATE` / `VENUE_UPDATE` / `VENUE_ARCHIVE` / `VENUE_RESTORE`,
+  `payload: { resourceId, changedFields[, before, after] }`) in the same transaction so a
+  failed audit aborts the write. Per-league `UNIQUE(tenantId, name)` is surfaced as one
+  friendly error by pre-check plus a `23505` catch. Archiving is an `isActive`
+  compare-and-set, never a delete, because `matches.venueId` is `onDelete: "set null"`; an
+  archive/restore to the state a venue already holds is rejected with a clear conflict
+  message instead of a silent no-op.
+- `app/actions/venues.ts` (no direct `db`, so it passes `no-unscoped-queries`),
+  `components/venues/venue-form.tsx`, `components/venues/venue-row-actions.tsx`, and the
+  `dashboard/venues` list / `new` / `[id]/edit` routes. Read or authorization failures
+  propagate to the error boundary rather than rendering a fake empty list.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 63 files, **2,031 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,352 passing tests** (+38 over Batch 30) |
+
+New regressions: `venue-reads.test.ts` (4), `venue-writes.test.ts` (10),
+`venue-actions.test.ts` (11) and `venue-pages.test.tsx` (12); `rbac.test.ts` gains the
+venue permission and nav assertions. The writer tests assert the exact lock ordering via
+`PgDialect.sqlToQuery`. Mocked readers and a mocked `db.transaction` are **not** PostgreSQL
+locking, RLS, unique-constraint or authenticated-browser proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its pre-existing unrelated errors. Five
+prior migrations remain unapplied and the release gate stays default-off. Next source work:
+the remaining catch-redirect cleanups, then public/anonymous follow, publication and
+notification paths. No full ISO-04 or authenticated browser claim; whole-task roadmap
+counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

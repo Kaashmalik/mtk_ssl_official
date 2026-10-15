@@ -30,6 +30,12 @@ describe("Role-Based Access Control (RBAC) System", () => {
     // Fans only have read and follow permissions
     expect(hasPermission("fan", "tournament:read")).toBe(true);
     expect(hasPermission("fan", "tournament:create")).toBe(false);
+
+    // Venue management is league-owner only; every league member can read venues
+    expect(hasPermission("league_owner", "venue:manage")).toBe(true);
+    expect(hasPermission("super_admin", "venue:manage")).toBe(true);
+    expect(hasPermission("team_manager", "venue:read")).toBe(true);
+    expect(hasPermission("fan", "venue:manage")).toBe(false);
   });
 
   it("should evaluate hasAllPermissions correctly", () => {
@@ -54,6 +60,7 @@ describe("Role-Based Access Control (RBAC) System", () => {
   it("should generate correct navigation items for specific roles", () => {
     const fanNav = getNavigationForRole("fan");
     expect(fanNav.some((n) => n.href === "/dashboard/tournaments")).toBe(true);
+    expect(fanNav.some((n) => n.href === "/dashboard/venues")).toBe(true);
     expect(fanNav.some((n) => n.href === "/dashboard/users")).toBe(false);
 
     const superAdminNav = getNavigationForRole("super_admin");

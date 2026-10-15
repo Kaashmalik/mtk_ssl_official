@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useState, useEffect, useMemo } from "react"
 import {
   LayoutDashboard, Users, Trophy, Sword, Settings,
-  ChevronLeft, ChevronRight, BarChart3, Gamepad2, Shield, ClipboardList, UserCog
+  ChevronLeft, ChevronRight, BarChart3, Gamepad2, Shield, ClipboardList, UserCog, MapPin
 } from "lucide-react"
 import { useUser } from "@clerk/nextjs"
 import { Button } from "@mtk/ui/components/ui/button"
@@ -24,6 +24,7 @@ const ICON_MAP: Record<string, typeof LayoutDashboard> = {
   ClipboardList,
   UserCog,
   Settings,
+  MapPin,
 }
 
 type NavItem = {
@@ -69,7 +70,7 @@ function buildNavGroups(role: UserRole): NavGroup[] {
 
   // Split items into groups
   const managementItems = items.filter(i =>
-    ["/dashboard", "/dashboard/tournaments", "/dashboard/teams", "/dashboard/players", "/dashboard/matches"].includes(i.href)
+    ["/dashboard", "/dashboard/tournaments", "/dashboard/teams", "/dashboard/players", "/dashboard/matches", "/dashboard/venues"].includes(i.href)
   )
   const analyticsItems = items.filter(i =>
     ["/dashboard/stats"].includes(i.href)

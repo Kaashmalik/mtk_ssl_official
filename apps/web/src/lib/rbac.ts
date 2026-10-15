@@ -39,6 +39,9 @@ export type Permission =
   | "match:update"
   | "match:delete"
   | "match:score"
+  // Venue
+  | "venue:read"
+  | "venue:manage"
   // Scorecard
   | "scorecard:create"
   | "scorecard:read"
@@ -71,6 +74,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:create", "team:read", "team:update", "team:delete", "team:manage_roster",
     "player:create", "player:read", "player:update", "player:delete",
     "match:create", "match:read", "match:update", "match:delete", "match:score",
+    "venue:read", "venue:manage",
     "scorecard:create", "scorecard:read", "scorecard:update",
     "stats:read", "stats:manage",
     "user:manage", "user:read", "user:invite", "invite:accept",
@@ -84,6 +88,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:create", "team:read", "team:update", "team:delete", "team:manage_roster",
     "player:create", "player:read", "player:update", "player:delete",
     "match:create", "match:read", "match:update", "match:delete", "match:score",
+    "venue:read", "venue:manage",
     "scorecard:create", "scorecard:read", "scorecard:update",
     "stats:read", "stats:manage",
     "user:manage", "user:read", "user:invite", "invite:accept",
@@ -96,6 +101,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:read", "team:update", "team:manage_roster",
     "player:read",
     "match:read",
+    "venue:read",
     "scorecard:read",
     "stats:read",
     "user:read", "invite:accept",
@@ -107,6 +113,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:read",
     "player:read",
     "match:read",
+    "venue:read",
     "scorecard:read",
     "stats:read",
     "fan:follow", "fan:read",
@@ -116,6 +123,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:read",
     "player:read",
     "match:read", "match:score",
+    "venue:read",
     "scorecard:create", "scorecard:read", "scorecard:update",
     "stats:read",
     "invite:accept",
@@ -126,6 +134,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:read",
     "player:read",
     "match:read",
+    "venue:read",
     "scorecard:read",
     "stats:read",
     "invite:accept",
@@ -136,6 +145,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "team:read",
     "player:read",
     "match:read",
+    "venue:read",
     "scorecard:read",
     "stats:read",
     "invite:accept",
@@ -227,6 +237,9 @@ export function getNavigationForRole(role: UserRole) {
   }
   if (hasPermission(role, "match:read")) {
     nav.push({ label: "Matches", href: "/dashboard/matches", icon: "Swords", permission: "match:read" });
+  }
+  if (hasPermission(role, "venue:read")) {
+    nav.push({ label: "Venues", href: "/dashboard/venues", icon: "MapPin", permission: "venue:read" });
   }
   if (hasPermission(role, "stats:read")) {
     nav.push({ label: "Statistics", href: "/dashboard/stats", icon: "BarChart3", permission: "stats:read" });

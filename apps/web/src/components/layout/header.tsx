@@ -14,7 +14,7 @@ import {
 } from "@mtk/ui/components/ui/command-palette"
 import {
   LayoutDashboard, Users, Trophy, Sword, Settings, BarChart3,
-  Gamepad2, Shield, ClipboardList, UserCog
+  Gamepad2, Shield, ClipboardList, UserCog, MapPin
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { type UserRole, getNavigationForRole } from "@/lib/rbac"
@@ -30,6 +30,7 @@ const ICON_MAP: Record<string, typeof LayoutDashboard> = {
   BarChart3,
   ClipboardList,
   UserCog,
+  MapPin,
   Settings,
 }
 
