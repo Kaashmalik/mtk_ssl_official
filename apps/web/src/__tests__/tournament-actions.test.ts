@@ -5,6 +5,7 @@ import {
   closeRegistration,
   createTournament,
   deleteTournament,
+  generateFixtures,
   getTournament,
   getTournamentCopyOptions,
   getTournaments,
@@ -36,7 +37,10 @@ const mocks = vi.hoisted(() => ({
   txReturning: vi.fn(),
   txInsert: vi.fn(),
   txValues: vi.fn(),
+  generate: vi.fn(),
 }))
+
+vi.mock("@/lib/fixture-generation", () => ({ generateTournamentFixtures: mocks.generate }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
@@ -90,6 +94,7 @@ describe("Tournament action tenant and author boundaries", () => {
       returning: mocks.txReturning,
       then: (resolve: (value: unknown) => unknown) => Promise.resolve(undefined).then(resolve),
     }))
+    mocks.generate.mockResolvedValue({ tournament: { id: TOURNAMENT_ID }, fixtures: [], rounds: [] })
     mocks.transaction.mockImplementation(async (fn: any) => fn({
       execute: mocks.execute, update: mocks.txUpdate, insert: mocks.txInsert,
       query: { users: { findFirst: mocks.txUser }, tenants: { findFirst: mocks.txLeague },
@@ -508,5 +513,32 @@ describe("Tournament registration opens/closes under the owner lock", () => {
   it("validates the id shape before any transaction", async () => {
     await expect(openRegistration("not-a-uuid")).rejects.toThrow()
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe("Fixture generation action delegation", () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.auth.mockResolvedValue({ userId: CLERK_ID })
+    mocks.resolveTenant.mockResolvedValue(ACTIVE_TENANT)
+    mocks.authorize.mockResolvedValue(undefined)
+    mocks.generate.mockResolvedValue({ tournament: { id: TOURNAMENT_ID }, fixtures: [], rounds: [] })
+  })
+
+  it("requires match creation permission and delegates to the generation writer", async () => {
+    const result = await generateFixtures(TOURNAMENT_ID)
+
+    expect(mocks.authorize).toHaveBeenCalledWith("match:create", ACTIVE_TENANT)
+    expect(mocks.generate).toHaveBeenCalledWith(CLERK_ID, ACTIVE_TENANT, TOURNAMENT_ID)
+    expect(mocks.transaction).not.toHaveBeenCalled() // delegation, not a second transaction
+    expect(result).toMatchObject({ success: true, tournament: { id: TOURNAMENT_ID } })
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/dashboard/tournaments/${TOURNAMENT_ID}`)
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/matches")
+  })
+
+  it("validates the tournament id shape before any lookup", async () => {
+    await expect(generateFixtures("not-a-uuid")).rejects.toThrow()
+    expect(mocks.generate).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
   })
 })

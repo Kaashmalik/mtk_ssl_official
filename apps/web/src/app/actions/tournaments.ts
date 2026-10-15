@@ -9,6 +9,7 @@ import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-serve
 import type { Permission } from "@/lib/rbac"
 import { calendarDateSchema, decimalMoney, moneySchema, readTournamentConfiguration, resizeSeedOrder, tournamentConfigurationSchema } from "@mtk/database/lib/tournament-configuration"
 import { archiveTournament, setTournamentRegistration } from "@/lib/tournament-lifecycle"
+import { generateTournamentFixtures } from "@/lib/fixture-generation"
 import { createTournamentRecord, updateTournamentRecord } from "@/lib/tournament-writes"
 
 const createTournamentSchema = z.object({
@@ -225,4 +226,20 @@ export async function closeRegistration(tournamentId: string) {
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
   revalidatePath("/dashboard/tournaments")
   return { success: true, tournament }
+}
+
+/**
+ * Generate the tournament's fixtures from its approved registrations. This
+ * starts the competition: the tournament becomes live and registration
+ * closes. Creating matches requires the match:create permission.
+ */
+export async function generateFixtures(tournamentId: string) {
+  const { userId, tenantId } = await requireTournamentContext("match:create")
+  z.string().uuid().parse(tournamentId)
+
+  const result = await generateTournamentFixtures(userId, tenantId, tournamentId)
+
+  revalidatePath(`/dashboard/tournaments/${tournamentId}`)
+  revalidatePath("/dashboard/matches")
+  return { success: true, ...result }
 }

@@ -2836,6 +2836,72 @@ Next source work: the API tier is fully covered. Remaining register items are
 product slices (fixtures/advancement, member UI, records) or environment-
 dependent acceptance. Roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 49 — fixture generation: approved registrations to planned fixtures (16 October 2026)
+
+COMP-04 groundwork. No fixture generation existed anywhere before this batch;
+matches were create-one-at-a-time forms.
+
+**Pure planners — new `lib/fixture-planning.ts`.** Deterministic registration
+ranking (earliest approval = seed 1, untimed approvals last, team-id
+tie-break); seed binding `resolveSeededSlots` (a saved bracket-slot
+permutation maps seed rank → slot; fail-closed on invalid permutations,
+strict mode blocks mismatched lengths so knockout brackets are never
+silently re-seeded, group formats fall back to ranking with the fallback
+recorded in the audit); league single round-robin via the circle method
+(Berger tables — every pairing exactly once, one match per team per round as
+the structural rest check, byes for odd counts); knockout first-round
+planning with standard top-vs-bottom seeding and stage labels
+(final/semi_final/quarter_final/knockout for 2/4/8/16/32 only); hybrid
+group-stage planning (balanced snake-distributed groups of ≤ 4 with complete
+group round-robins; the knockout stage waits for standings, one qualifier per
+group per the wizard's documented assumption).
+
+**Locked writer — new `lib/fixture-generation.ts`.**
+`generateTournamentFixtures` runs in one `read committed` transaction:
+account → league/membership shares → tournament row `FOR UPDATE` → re-checks
+(archived/completed blocked, any pre-existing fixture blocks regeneration —
+the row lock makes concurrent generations race-free), wizard configuration
+required (`readTournamentConfiguration`), ≥ 2 approved teams and capacity
+enforced, knockouts restricted to power-of-two counts (checked before
+seeding so a wrong count never masquerades as a seeding problem), every
+slotted team verified present and active. Persists scheduled matches with
+sequential `matchNumber` and format-derived `matchType`/`matchFormat`/
+`totalOvers`; match dates are deliberately left unscheduled (rescheduling is
+COMP-07). Creating fixtures starts the competition: tournament → `live`,
+registration closed, audited as `TOURNAMENT_FIXTURES_GENERATE` with
+before/after, counts and whether the saved seed order applied. New server
+action `generateFixtures` (permission `match:create`) delegates with both
+dashboard revalidations.
+
+New regressions: `fixture-planning.test.ts` (16) — ranking order, seed
+binding (identity/permutation/invalid/strict-mismatch), round-robin
+properties for 3/4/6/7/10 teams, knockout labels and standard pairings,
+power-of-two gate, hybrid balance/caps; `fixture-generation.test.ts` (14) —
+lock order, archived/duplicate/missing-config/small/capacity/inactive-team
+fail-closed gates, league happy path (values, bindings, numbering, live
+transition, audit), seed order applied vs stale fallback, live-tournament
+no-op transition, knockout first round/counts/strict seeding, hybrid groups;
+`tournament-actions.test.ts` (+2) — action permission mapping and
+delegation. Group labels are intentionally not persisted (the matches table
+has no group column) — they live in the returned rounds/plan where needed.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **85** files, **2,265 tests** (+32) |
+| Focused: planning/generation/actions | PASS — 87 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: advancement + standings (COMP-05) — shared points/NRR/
+tie-breaker module replacing the inline standings in both tournament pages,
+and a locked advancement writer that creates knockout rounds from group
+standings and transitions live → completed. Then COMP-06/07 (eligibility,
+toss, rescheduling) or the remaining smaller product IDs. Roadmap counts:
+**19 checked / 60 open / 79 IDs** (COMP-04 partially closed — generation done,
+binding-to-UI surfaces still to wire).
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
