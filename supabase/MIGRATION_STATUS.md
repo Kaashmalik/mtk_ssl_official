@@ -423,5 +423,18 @@ team drift, roster versus toss/start/scoring/archive/revocation, deadlocks and
 audit-failure rollback. Inspect actual grants, query plans, constraints and RLS;
 mocked SQL/count/call-order tests do not prove these properties. Other/admin
 writers and tournament/venue cascade paths still require protocol review.
-Team/player read actions and dashboard context/privacy behavior are the next
-source slice, not certified by these writer changes.
+Team/player read actions and core dashboard routes now use exact-active-league
+context, scoped joins, explicit field projections, bounded pickers and current-
+authority controls. Ordinary reads exclude contact/DOB/physical/biography/global
+identity/creator fields; owner-only edit reads separate private profile data.
+Team summaries use scoped database-side counts rather than per-row queries.
+Archived rows remain historical; no restore/purge/quota release is introduced.
+These are request-local authorization/projection checks, not read-versus-
+revocation locks or database-wide privacy constraints.
+
+All five prior migrations remain unapplied; release gate stays default-off.
+Before rollout, verify real RLS/grants, scoped query plans/indexes, picker/list
+performance and concurrent read/write behavior. Inspect actual constraints and
+RLS; mocked SQL/projection/call-order tests do not prove these properties. Team
+analytics, player ID-card list/detail and follow/publication paths remain the next
+source slice, followed by tournament/venue/admin writers and delete paths.

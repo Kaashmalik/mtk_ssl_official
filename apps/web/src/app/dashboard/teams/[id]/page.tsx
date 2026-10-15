@@ -1,3 +1,4 @@
+import React from "react"
 import Link from "next/link"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
@@ -5,14 +6,13 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Edit, MapPin, TrendingUp } from "lucide-react"
-import { getTeamWithRoster, deleteTeam } from "@/app/actions/teams"
-import { getPlayers } from "@/app/actions/players"
+import { deleteTeam } from "@/app/actions/teams"
+import { requireRosterReadContext, readRosterTeam, readRosterSquad, readRosterPlayers, canManageRosterTeam } from "@/lib/roster-reads"
+import { readRosterTeamHistory, readRosterFollowState } from "@/lib/roster-history"
+import { requirePermissionServer } from "@/lib/rbac-server"
 import { DeleteButton } from "@/components/shared/delete-button"
-import { isFollowing, getFollowerCount } from "@/app/actions/follows"
 import { FollowButton } from "@/components/shared/follow-button"
 import { TeamRosterManager } from "@/components/teams/team-roster-manager"
-import { db, matches, teams, matchInnings } from "@mtk/database"
-import { eq, and, or, desc } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 
@@ -28,53 +28,28 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
   noStore()
   const { id } = await params
   
-  const team = await getTeamWithRoster(id)
-  if (!team) {
-    notFound()
-  }
+  const context = await requireRosterReadContext("team:read")
+  const parent = await readRosterTeam(context.tenantId, id)
+  if (!parent) notFound()
+  await requirePermissionServer("player:read", context.tenantId)
+  await requirePermissionServer("match:read", context.tenantId)
+  const team = { ...parent, players: await readRosterSquad(context.tenantId, id) }
 
-  const followingState = await isFollowing("team", id)
-  const followersCount = await getFollowerCount("team", id)
-
-  let availablePlayers: { id: string; name: string; teamId: string | null }[] = []
-  try {
-    const playersResult = await getPlayers({
-      page: 1,
-      pageSize: 200,
-      sortBy: "name",
-      sortOrder: "asc",
-    })
-    availablePlayers = playersResult.data.map((p) => ({
-      id: p.id,
-      name: p.name,
-      teamId: p.teamId ?? null,
-    }))
-  } catch {
-    availablePlayers = team.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      teamId: id,
-    }))
-  }
-
-  // Fetch all matches involving this team
-  const teamMatches = await db.select().from(matches)
-    .where(
-      and(
-        eq(matches.tenantId, team.tenantId),
-        or(eq(matches.teamAId, id), eq(matches.teamBId, id))
-      )
-    )
-    .orderBy(desc(matches.scheduledDate))
+  const canManage = canManageRosterTeam(context, team)
+  const canArchive = team.isActive && context.role === "league_owner"
+  const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.clerkId, "team", id)
+  const playersResult = canManage ? await readRosterPlayers(context.tenantId, { pageSize: 100, unassigned: true, isActive: true, status: "active" }) : null
+  const availablePlayers = (playersResult?.data ?? []).map(p => ({ id: p.id, name: p.name, teamId: p.teamId }))
+  const { fixtures: teamMatches, names, innings: allInnings } = await readRosterTeamHistory(context.tenantId, id)
 
   // Resolve match details and opponent details
   const resolvedMatches = await Promise.all(teamMatches.map(async (m) => {
     const oppId = m.teamAId === id ? m.teamBId : m.teamAId
-    const [opp] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(eq(teams.id, oppId)).limit(1)
+    const opp = names.find(team => team.id === oppId)
     const oppName = opp?.name ?? "TBD"
 
     // Fetch innings scores
-    const innings = await db.select().from(matchInnings).where(eq(matchInnings.matchId, m.id))
+    const innings = allInnings.filter(innings => innings.matchId === m.id)
     const teamInn = innings.find(inn => inn.teamId === id)
     const oppInn = innings.find(inn => inn.teamId === oppId)
 
@@ -97,6 +72,7 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
       opScore: oppScoreText,
       result: m.result || (m.status === "live" ? "Live" : m.status.toUpperCase()),
       isWin,
+      isLoss: m.status === "completed" && m.winnerId === oppId,
       date: formattedDate,
       status: m.status
     }
@@ -105,7 +81,7 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
   const completedMatches = resolvedMatches.filter(m => m.status === "completed")
   const playedCount = completedMatches.length
   const winsCount = completedMatches.filter(m => m.isWin).length
-  const lossesCount = playedCount - winsCount
+  const lossesCount = completedMatches.filter(m => m.isLoss).length
   const winRate = playedCount > 0 ? ((winsCount / playedCount) * 100).toFixed(0) : "0"
 
   const primaryColor = team.primaryColor || "#3B82F6"
@@ -156,24 +132,24 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
                   initialIsFollowing={followingState}
                   initialFollowerCount={followersCount}
                 />
-<Link href={`/dashboard/teams/${id}/edit`}>
+ {canManage && <Link href={`/dashboard/teams/${id}/edit`}>
                 <Button variant="outline" size="sm">
                   <Edit className="h-4 w-4 mr-1" />Edit
                 </Button>
-              </Link>
+              </Link>}
               <Link href={`/dashboard/teams/${id}/analytics`}>
                 <Button variant="outline" size="sm">
                   <TrendingUp className="h-4 w-4 mr-1" />Analytics
                 </Button>
               </Link>
-                <DeleteButton
+                {canArchive && <DeleteButton
                   action={deleteTeam}
                   id={id}
                   redirectHref="/dashboard/teams"
                   entityLabel="team"
                   operation="archive"
                   entityName={team.name}
-                />
+                />}
               </div>
             </div>
           </CardContent>
@@ -219,11 +195,12 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
           </TabsList>
 
           <TabsContent value="squad" className="space-y-4">
-            <TeamRosterManager
+            {canManage && <TeamRosterManager
               teamId={id}
               roster={team.players.map((p) => ({ id: p.id, name: p.name, teamId: id }))}
               availablePlayers={availablePlayers}
-            />
+            />}
+            {canManage && <p className="text-sm text-muted-foreground" role="status">Showing {availablePlayers.length} of {playersResult?.pagination.total ?? 0} active unassigned players (up to 100). Roster changes during play are blocked; archived links still consume capacity.</p>}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {team.players.map((p) => (
                 <Link key={p.id} href={`/dashboard/players/${p.id}`}>

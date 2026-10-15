@@ -85,7 +85,7 @@ export function TeamListGrid({ initialTeams }: TeamListGridProps) {
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="inactive">Inactive</SelectItem>
+              <SelectItem value="inactive">Archived</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -140,7 +140,7 @@ export function TeamListGrid({ initialTeams }: TeamListGridProps) {
                       </div>
                     </div>
                     {!team.isActive && (
-                      <Badge variant="outline" className="text-xs bg-muted text-muted-foreground">Inactive</Badge>
+                      <Badge variant="outline" className="text-xs bg-muted text-muted-foreground">Archived</Badge>
                     )}
                   </div>
 

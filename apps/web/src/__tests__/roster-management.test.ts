@@ -283,8 +283,11 @@ describe("Player/roster lock ordering, eligibility and retries", () => {
     noWrites()
   })
   it("does not rewrite/audit a still-authorized same-team add retry", async () => {
-    mocks.player.mockResolvedValue({ ...player, teamId: TEAM })
-    await addPlayerToTeam(TEAM, PLAYER)
+    mocks.member.mockResolvedValue({ ...member, role: "team_manager" })
+    mocks.player.mockResolvedValue({ ...player, teamId: TEAM, phone: "private", email: "private@example.test",
+      userId: ACTOR, profileId: OTHER, dateOfBirth: "2000-02-29", biography: "Private biography" })
+    const result = await addPlayerToTeam(TEAM, PLAYER)
+    expect(result.player).toEqual({ id: PLAYER, name: player.name, teamId: TEAM })
     expect(mocks.countWhere).not.toHaveBeenCalled()
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.insert).not.toHaveBeenCalled()

@@ -13,10 +13,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2 } from "lucide-react"
 import { updatePlayer } from "@/app/actions/players"
-import type { Player } from "@mtk/database"
+import type { EditableRosterPlayer } from "@/lib/roster-reads"
 
 interface EditPlayerFormProps {
-  player: Player
+  player: EditableRosterPlayer
   teams: { id: string; name: string }[]
 }
 

@@ -1464,6 +1464,63 @@ list/detail/new/edit/roster destinations, scoped joins/pickers and current
 authority/privacy-aware controls. No full ISO-04 or authenticated browser claim;
 whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 20: scoped roster reads and dashboard controls
+
+#### Implemented
+
+- Synced clean `main` with remote `0b330bb`. Scope is core team/player read
+  actions and list/detail/new/edit/roster dashboard routes; analytics, ID cards
+  and follow/publication paths stay open.
+- Exact active-league read permission is checked before business SQL. Removed
+  `getMyTenant`/legacy repository reads and owned/default-league assumptions.
+  Strict UUID/filter validation rejects forged scope and overposts. List/count
+  predicates and deterministic ordering are shared; pages are bounded to 100.
+- Explicit projections exclude contact/DOB/physical/biography/global identity and
+  creator metadata from ordinary reads. Owner-only edit reads separate private
+  fields. Player detail joins require the same active league. Roster add returns
+  only ID/name/link, closing a manager private-field bypass.
+- Team summaries use scoped database-side counts, not per-row queries. Losses
+  require an opposing winner in a completed match. Archived rows remain historical;
+  no restore/purge/quota release is added.
+- New/edit routes enforce current owner/assigned-manager authority. Unassigned
+  managers and archived/inactive resources redirect. Pickers are bounded to active
+  same-league ID/name fields, retain the current team and disclose truncation.
+  Creation offers only active unassigned players; moves require explicit unlink.
+- Detail auxiliary reads are authorized after the exact-league parent and
+  correlated to the same league/hierarchy. Player historical side comes from
+  performance rows, not today's roster. Win/loss requires a valid historical side
+  and opposing winner. Follow state is scoped to the same league/entity.
+- Edit/roster/ID-card/archive controls match current authority. Private profile
+  data is owner-only and not serialized to other clients. Player stats copy says
+  league-only, not cross-league career.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 47 files, **1,706 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,027 passing tests** (+216 over Batch 19) |
+
+Added 139 read-boundary, 13 history/hierarchy and 64 route/control regressions.
+SQL/call-order mocks and rendered route component mocks are not PostgreSQL
+execution, RLS, index/performance or authenticated browser proof. Current Drizzle
+select/join/operator docs and N+1 guidance were consulted. Nest negative-fixture
+logs are expected.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five prior migrations remain
+unapplied and the release gate stays default-off. These are request-local
+authorization/projection checks, not read-versus-revocation locks or database-
+wide privacy constraints. Real RLS/grants/indexes/query plans and concurrent
+read/write behavior remain release acceptance work.
+
+Next source work: team analytics, player ID-card list/detail and follow/
+publication paths, then tournament/venue/admin writers and delete paths. No full
+ISO-04 or authenticated browser claim; whole-task roadmap counts remain
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

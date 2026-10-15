@@ -18,6 +18,7 @@ interface Player {
   city: string | null
   status: string
   photoUrl: string | null
+  isActive: boolean
 }
 
 interface PlayerListTableProps {
@@ -229,7 +230,7 @@ export function PlayerListTable({ initialPlayers }: PlayerListTableProps) {
                   <td className="px-4 py-3 text-muted-foreground">{player.city ?? "—"}</td>
                   <td className="px-4 py-3">
                     <Badge variant="outline" className={`text-xs capitalize ${STATUS_COLORS[player.status] ?? ""}`}>
-                      {player.status}
+                       {player.isActive ? player.status : "Archived"}
                     </Badge>
                   </td>
                   <td className="px-4 py-3 text-right">

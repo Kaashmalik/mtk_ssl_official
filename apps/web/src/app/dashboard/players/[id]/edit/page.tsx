@@ -1,6 +1,7 @@
+import React from "react"
 import { notFound, redirect } from "next/navigation"
-import { getPlayer } from "@/app/actions/players"
-import { getTeams } from "@/app/actions/teams"
+import { unstable_noStore as noStore } from "next/cache"
+import { requireRosterReadContext, readEditableRosterPlayer, readRosterTeamOptions, readRosterTeam } from "@/lib/roster-reads"
 import { EditPlayerForm } from "@/components/players/edit-player-form"
 
 export default async function EditPlayerPage({
@@ -8,23 +9,19 @@ export default async function EditPlayerPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  noStore()
+  const context = await requireRosterReadContext("player:update")
   const { id } = await params
-  const player = await getPlayer(id)
+  const player = await readEditableRosterPlayer(context, id)
   if (!player) notFound()
-
-  let teams: { id: string; name: string }[] = []
-  try {
-    const result = await getTeams({
-      page: 1,
-      pageSize: 100,
-      isActive: true,
-      sortBy: "name",
-      sortOrder: "asc",
-    })
-    teams = result.data.map((t) => ({ id: t.id, name: t.name }))
-  } catch {
-    redirect("/dashboard/league/setup")
-  }
-
-  return <EditPlayerForm player={player} teams={teams} />
+  if (!player.isActive) redirect(`/dashboard/players/${id}`)
+  const currentTeam = player.teamId ? await readRosterTeam(context.tenantId, player.teamId) : null
+  if (player.teamId && (!currentTeam || !currentTeam.isActive)) redirect(`/dashboard/players/${id}`)
+  const { teams, truncated } = await readRosterTeamOptions(context.tenantId)
+  if (currentTeam && !teams.some(team => team.id === currentTeam.id)) teams.push({ id: currentTeam.id, name: currentTeam.name })
+  return <div className="space-y-4">
+    <p className="text-sm text-muted-foreground">To move a player between teams, remove them from their current roster first.</p>
+    {truncated && <p role="status">Showing the first 100 active teams plus the current team.</p>}
+    <EditPlayerForm player={player} teams={teams} />
+  </div>
 }

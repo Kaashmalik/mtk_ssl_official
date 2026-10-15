@@ -12,10 +12,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2, Palette } from "lucide-react"
 import { updateTeam } from "@/app/actions/teams"
-import type { Team } from "@mtk/database"
+import type { RosterTeam } from "@/lib/roster-reads"
 
 interface EditTeamFormProps {
-  team: Team
+  team: RosterTeam
 }
 
 export function EditTeamForm({ team }: EditTeamFormProps) {

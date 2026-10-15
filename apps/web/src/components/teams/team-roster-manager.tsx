@@ -32,7 +32,7 @@ export function TeamRosterManager({
   const [playerToAdd, setPlayerToAdd] = useState("")
 
   const unassigned = useMemo(
-    () => availablePlayers.filter((p) => !p.teamId || p.teamId !== teamId),
+    () => availablePlayers.filter((p) => !p.teamId),
     [availablePlayers, teamId],
   )
 
@@ -79,7 +79,6 @@ export function TeamRosterManager({
                 {unassigned.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.name}
-                    {p.teamId ? " (other team)" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

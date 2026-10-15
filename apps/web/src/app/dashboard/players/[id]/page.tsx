@@ -1,3 +1,4 @@
+import React from "react"
 import Link from "next/link"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
@@ -5,13 +6,15 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Edit, Trophy, Target, Crosshair, Shield } from "lucide-react"
-import { getPlayer, deletePlayer } from "@/app/actions/players"
+import { deletePlayer } from "@/app/actions/players"
+import { requireRosterReadContext, readRosterPlayer, readEditableRosterPlayer } from "@/lib/roster-reads"
+import { readRosterPlayerHistory, rosterHistoricalSide, readRosterFollowState } from "@/lib/roster-history"
+import { requirePermissionServer } from "@/lib/rbac-server"
 import { DeleteButton } from "@/components/shared/delete-button"
-import { isFollowing, getFollowerCount } from "@/app/actions/follows"
 import { PlayerIdActions } from "@/components/players/player-id-actions"
 import { FollowButton } from "@/components/shared/follow-button"
-import { db, teams, battingScorecards, bowlingScorecards, matches, tournaments, playerIds } from "@mtk/database"
-import { eq, and, inArray, desc } from "drizzle-orm"
+import { db, playerIds } from "@mtk/database"
+import { eq, and } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 
@@ -41,39 +44,32 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
   noStore()
   const { id } = await params
   
-  const player = await getPlayer(id)
+  const context = await requireRosterReadContext("player:read")
+  const player = await readRosterPlayer(context.tenantId, id)
   if (!player) {
     notFound()
   }
 
-  const followingState = await isFollowing("player", id)
-  const followersCount = await getFollowerCount("player", id)
-
-  // Resolve Team name
-  let teamName = "Unassigned"
-  if (player.teamId) {
-    const [team] = await db.select({ name: teams.name }).from(teams).where(eq(teams.id, player.teamId)).limit(1)
-    if (team) {
-      teamName = team.name
-    }
-  }
+  await requirePermissionServer("scorecard:read", context.tenantId)
+  await requirePermissionServer("match:read", context.tenantId)
+  const canManage = context.role === "league_owner" && player.isActive
+  const privateProfile = context.role === "league_owner" ? await readEditableRosterPlayer(context, id) : null
+  const canEdit = canManage && privateProfile && (!privateProfile.teamId || player.teamIsActive === true)
+  const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.clerkId, "player", id)
+  const teamName = player.teamName ?? "Unassigned / unavailable"
 
   // Issued league ID card (if any)
-  const [playerIdCard] = await db.select({
+  const [playerIdCard] = context.role === "league_owner" ? await db.select({
     id: playerIds.id,
     formattedId: playerIds.formattedId,
     isValid: playerIds.isValid,
   })
     .from(playerIds)
-    .where(and(eq(playerIds.playerId, id), eq(playerIds.tenantId, player.tenantId)))
-    .limit(1)
+    .where(and(eq(playerIds.playerId, id), eq(playerIds.tenantId, context.tenantId)))
+    .limit(1) : []
 
   // Fetch all scorecard stats for the player
-  const battingStats = await db.select().from(battingScorecards)
-    .where(eq(battingScorecards.playerId, id))
-
-  const bowlingStats = await db.select().from(bowlingScorecards)
-    .where(eq(bowlingScorecards.playerId, id))
+  const { batting: battingStats, bowling: bowlingStats, fixtures, names, competitions } = await readRosterPlayerHistory(context.tenantId, id)
 
   // Calculate career statistics
   const playerMatchIds = Array.from(new Set([
@@ -104,16 +100,12 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
     : "0.00"
 
   // Fetch match details for matches the player played in
-  const recentMatchesRaw = playerMatchIds.length > 0
-    ? await db.select().from(matches)
-        .where(inArray(matches.id, playerMatchIds))
-        .orderBy(desc(matches.scheduledDate))
-        .limit(5)
-    : []
+  const recentMatchesRaw = fixtures.slice(0, 5)
 
   const recentMatches = await Promise.all(recentMatchesRaw.map(async (m) => {
-    const oppId = m.teamAId === player.teamId ? m.teamBId : m.teamAId
-    const [opp] = await db.select({ name: teams.name }).from(teams).where(eq(teams.id, oppId)).limit(1)
+    const historicalSide = rosterHistoricalSide(m.id, [...battingStats, ...bowlingStats])
+    const oppId = historicalSide === m.teamAId ? m.teamBId : historicalSide === m.teamBId ? m.teamAId : null
+    const opp = names.find(team => team.id === oppId)
     const oppName = opp?.name ?? "TBD"
 
     const matchBat = battingStats.find(b => b.matchId === m.id)
@@ -135,26 +127,26 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
       : "TBD"
 
     let isWin = false
-    if (m.status === "completed" && m.winnerId === player.teamId) {
+    if (m.status === "completed" && historicalSide && m.winnerId === historicalSide) {
       isWin = true
     }
 
     return {
       vs: oppName,
       score: perfText,
-      result: isWin ? "Won" : m.status === "completed" ? "Lost" : m.status.toUpperCase(),
+      result: isWin ? "Won" : m.status === "completed" && oppId && m.winnerId === oppId ? "Lost" : m.status.toUpperCase(),
       isWin,
       date: formattedDate
     }
   }))
 
   // Resolve tournament-by-tournament season stats
-  const tournamentIds = Array.from(new Set(recentMatchesRaw.map(m => m.tournamentId).filter(Boolean))) as string[]
+  const tournamentIds = Array.from(new Set(fixtures.map(m => m.tournamentId).filter(Boolean))) as string[]
   const seasons = await Promise.all(tournamentIds.map(async (tId) => {
-    const [tournament] = await db.select({ name: tournaments.name }).from(tournaments).where(eq(tournaments.id, tId)).limit(1)
+    const tournament = competitions.find(tournament => tournament.id === tId)
     const tournamentName = tournament?.name ?? "Other Tournament"
 
-    const tMatches = recentMatchesRaw.filter(m => m.tournamentId === tId)
+    const tMatches = fixtures.filter(m => m.tournamentId === tId)
     const tMatchIds = tMatches.map(m => m.id)
 
     const tBat = battingStats.filter(b => tMatchIds.includes(b.matchId))
@@ -184,8 +176,8 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
   }))
 
   const nameInitial = player.name.charAt(0)
-  const formattedDob = player.dateOfBirth 
-    ? new Date(player.dateOfBirth).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  const formattedDob = privateProfile?.dateOfBirth
+    ? new Date(`${privateProfile.dateOfBirth}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
     : "—"
 
   return (
@@ -226,27 +218,28 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
                   initialIsFollowing={followingState}
                   initialFollowerCount={followersCount}
                 />
-<Link href={`/dashboard/players/${id}/edit`}>
+ {canEdit && <Link href={`/dashboard/players/${id}/edit`}>
                     <Button variant="outline" size="sm">
                       <Edit className="h-4 w-4 mr-1" />Edit
                     </Button>
-                  </Link>
-                  <PlayerIdActions playerId={id} card={playerIdCard ?? null} />
-                <DeleteButton
+                  </Link>}
+                  {canManage && <PlayerIdActions playerId={id} card={playerIdCard ?? null} />}
+                {canManage && <DeleteButton
                   action={deletePlayer}
                   id={id}
                   redirectHref="/dashboard/players"
                   entityLabel="player"
                   operation="archive"
                   entityName={player.name}
-                />
+                />}
               </div>
             </div>
           </CardContent>
         </Card>
       </MotionWrapper>
 
-      {/* Career Stats Cards */}
+      <p className="text-sm text-muted-foreground">Statistics in this league only. Not a cross-league career record.</p>
+      {/* League Stats Cards */}
       <MotionWrapper variant="fadeInUp" delay={0.2}>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
           {[
@@ -361,9 +354,11 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
                     ["Role", player.role ? (ROLE_LABELS[player.role] || player.role.replace("_", " ")) : "—"],
                     ["Batting Style", player.battingStyle ? (BATTING_STYLE_LABELS[player.battingStyle] || player.battingStyle) : "—"],
                     ["Bowling Style", player.bowlingStyle ? (BOWLING_STYLE_LABELS[player.bowlingStyle] || player.bowlingStyle) : "—"],
-                    ["Date of Birth", formattedDob],
-                    ["Height", player.heightCm ? `${player.heightCm} cm` : "—"],
-                    ["Weight", player.weightKg ? `${player.weightKg} kg` : "—"],
+                    ...(privateProfile ? [
+                      ["Date of Birth", formattedDob],
+                      ["Height", privateProfile.heightCm ? `${privateProfile.heightCm} cm` : "—"],
+                      ["Weight", privateProfile.weightKg ? `${privateProfile.weightKg} kg` : "—"],
+                    ] : []),
                     ["City", player.city || "—"],
                     ["Nationality", player.nationality || "—"],
                   ].map(([label, value]) => (
@@ -373,7 +368,7 @@ export default async function PlayerDetailPage({ params }: { params: Promise<{ i
                     </div>
                   ))}
                 </dl>
-                {player.biography && <p className="mt-4 text-sm text-muted-foreground border-t pt-4">{player.biography}</p>}
+                {privateProfile?.biography && <p className="mt-4 text-sm text-muted-foreground border-t pt-4">{privateProfile.biography}</p>}
               </CardContent>
             </Card>
           </TabsContent>
