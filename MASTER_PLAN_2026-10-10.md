@@ -2079,6 +2079,70 @@ migrations remain unapplied and the release gate stays default-off. Next source 
 public/anonymous follow, publication and notification paths. No full ISO-04 or authenticated
 browser claim; whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 33: exact-league notification reads/writes
+
+#### Implemented
+
+- Synced clean `main` with remote `85dbd9d`. Scope is the personal notification
+  read/write paths and the notifications route; public/anonymous follow,
+  publication boundaries, refunds and notification fan-out stay open.
+- New `lib/notification-reads.ts` centralizes the request-local
+  `requireNotificationMemberContext()` gate. It resolves the exact active league
+  and requires an *active membership of any role* — deliberately **not** a
+  management permission, because fan/player/commentator roles have no
+  match-scoped capability but must still see their own bell. It rejects
+  `super_admin`-only identities, remapped sessions, inactive accounts/leagues,
+  suspended/missing/foreign memberships, and never falls back to a global role,
+  the mutable `users.tenantIds` array, a primary membership or a client-supplied
+  tenant.
+- `resolveNotificationMemberContext()` is the non-throwing companion used by the
+  page: it returns `null` only for a confirmed non-member, while tenant/
+  membership/account/league **lookup failures propagate** so an outage is not
+  disguised as an empty bell.
+- Bounded, tenant-scoped readers replace the previous inline queries:
+  `readMyNotifications` (clamped 1–100, newest-first with an id tiebreak),
+  `readUnreadNotificationCount`, `markNotificationReadById` (validates the id as
+  a UUID before any write and re-asserts the tenant/ownership predicate) and
+  `markAllNotificationsReadFor`. The shared `myNotificationFilter` carries the
+  resolved actor + tenant on both the personal and league-wide (`user_id IS
+  NULL`) branches.
+- `app/actions/notifications.ts` now delegates to the reader context, keeps the
+  personal-read contract (an unauthenticated/league-less caller yields empty
+  results rather than a throw so the bell still renders during SSR), and lets a
+  genuine infrastructure failure propagate. Direct `db` access is gone, so
+  `notifications.ts` is removed from the `no-unscoped-queries` allowlist and the
+  guard now enforces repo-only access there.
+- `dashboard/notifications/page.tsx` gates on the exact active league, bounces
+  only confirmed non-members to `/dashboard`, and propagates read/access failures
+  to a new `notifications/error.tsx` boundary instead of a benign empty page.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 67 files, **2,069 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,390 passing tests** (+32 over Batch 32) |
+
+New regressions: `notification-reads.test.ts` (21), `notification-actions.test.ts`
+(6) and `notifications-page.test.tsx` (5). They assert exact-member resolution,
+super-admin/remapped/suspended/foreign denial, non-throwing page resolution with
+propagated failures, tenant+actor SQL predicates, UUID validation before write,
+limit clamping, and the empty-vs-propagate action contract. Mocked readers/SQL and
+a client-mocked page are **not** PostgreSQL RLS, index or authenticated-browser
+proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its **19 pre-existing** error
+lines (verified identical with `git stash`), none in the new files. Five prior
+migrations remain unapplied and the release gate stays default-off. The bell,
+page and actions are request-local authorization/projection checks, not
+read-versus-revocation locks. Next source work: public/anonymous follow and
+publication boundaries, then the `dashboard-context`/`league-setup` `getMyTenant`
+consumers. No full ISO-04 or authenticated browser claim; whole-task roadmap
+counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

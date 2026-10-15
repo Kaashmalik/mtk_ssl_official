@@ -37,10 +37,9 @@ const ALLOWLIST = new Set([
   "registrations.ts", // withTenantContext + tenantId filters; still direct db
   "scorecards.ts",
   "follows.ts",
-  // Personal notifications: every query is filtered by the caller's active
-  // tenant (resolved via the RBAC junction table) plus userId. No repo exists
-  // for this table yet; remove from the allowlist when one is added.
-  "notifications.ts",
+  // notifications.ts no longer uses direct db: the personal reads/writes live in
+  // lib/notification-reads.ts scoped to the verified active league, so the guard
+  // now enforces repo-only access here.
   "player-ids.ts", // tenantId-filtered; uses direct db pending repo migration
   "users-invites.ts", // tenantId-filtered; uses direct db pending repo migration
 ]);

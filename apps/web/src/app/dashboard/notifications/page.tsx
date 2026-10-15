@@ -1,11 +1,20 @@
+import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { unstable_noStore as noStore } from "next/cache"
-import { getMyNotifications } from "@/app/actions/notifications"
+import { redirect } from "next/navigation"
+import { resolveNotificationMemberContext, readMyNotifications } from "@/lib/notification-reads"
 
 export default async function NotificationsPage() {
   noStore()
-  const items = await getMyNotifications(50)
+
+  // Only active league members reach their bell; a genuine non-member is bounced
+  // to the dashboard, while a tenant/membership/read failure propagates to the
+  // route error boundary instead of a benign-looking empty page.
+  const context = await resolveNotificationMemberContext()
+  if (!context) redirect("/dashboard")
+
+  const items = await readMyNotifications(context, 50)
 
   return (
     <div className="max-w-2xl space-y-4">

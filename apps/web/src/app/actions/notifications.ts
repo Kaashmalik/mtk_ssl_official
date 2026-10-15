@@ -1,115 +1,55 @@
 "use server"
 
-import { auth } from "@clerk/nextjs/server"
-import { db, notifications, users } from "@mtk/database"
-import { and, desc, eq, isNull, or } from "drizzle-orm"
-import { getMyTenant } from "@/app/actions/tenants"
+import {
+  requireNotificationMemberContext, readMyNotifications, readUnreadNotificationCount,
+  markNotificationReadById, markAllNotificationsReadFor, notificationListLimit,
+} from "@/lib/notification-reads"
 
 /**
- * Notifications are inherently personal — there is no tenant-wide "read" action.
- * These actions are guarded by session presence plus an explicit active-tenant
- * check rather than an RBAC permission:
+ * Notifications are inherently personal — there is no league-wide "read"
+ * action. They are guarded by a verified active-league membership rather than a
+ * management permission, because roles like fan, player or commentator have no
+ * match-scoped capability but must still see their own bell.
  *
- *   - `match:read` would wrongly exclude roles like commentator or viewer, who
- *     have no match-scoped permission but should still see their own bell.
- *   - Leaving them unguarded (the previous state) meant every query was scoped
- *     by `users.tenantIds` alone — a mutable legacy array with no verification
- *     that it reflects real tenant membership.
- *
- * `requireTenantContext` resolves the caller's active tenant via the RBAC
- * junction table and returns null otherwise, so each query below is scoped by a
- * tenant id that was actually confirmed, not one read off the user row.
+ * The two read helpers resolve the exact active league from a real junction
+ * membership row (never a global role, the mutable `users.tenantIds` array or a
+ * client-supplied tenant). They return an empty result when the caller simply is
+ * not a member — so the bell still renders during an unauthenticated SSR pass —
+ * while a genuine tenant/membership/database failure is left to propagate.
  */
 
-type CurrentUser = { id: string; tenantIds: string[] }
-
-async function getCurrentUser(): Promise<CurrentUser | null> {
-  const { userId } = await auth()
-  if (!userId) return null
-  const [u] = await db
-    .select({ id: users.id, tenantIds: users.tenantIds })
-    .from(users)
-    .where(eq(users.clerkId, userId))
-    .limit(1)
-  return u ?? null
-}
-
-/**
- * Resolves the caller plus their active tenant, or null when they have neither.
- *
- * Null is treated as "not entitled" and yields empty results rather than a
- * throw, so the bell still renders during an unauthenticated SSR pass.
- */
-async function requireTenantContext(): Promise<{
-  user: CurrentUser
-  tenantId: string
-} | null> {
-  const user = await getCurrentUser()
-  if (!user) return null
-
-  const tenant = await getMyTenant()
-  if (!tenant) return null
-
-  return { user, tenantId: tenant.id }
-}
-
-/**
- * Notifications visible to the current user:
- *   - rows addressed directly to them (user_id = me)
- *   - tenant-wide in_app rows for their active tenant (user_id IS NULL)
- */
-function myNotificationFilter(user: CurrentUser, tenantId: string) {
-  return or(
-    and(eq(notifications.userId, user.id), eq(notifications.tenantId, tenantId)),
-    and(isNull(notifications.userId), eq(notifications.tenantId, tenantId)),
-  )
+async function readOrEmpty<T>(read: (context: Awaited<ReturnType<typeof requireNotificationMemberContext>>) => Promise<T>, empty: T): Promise<T> {
+  try {
+    const context = await requireNotificationMemberContext()
+    return await read(context)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ""
+    // Absence of a session or an active league is "not entitled", not a failure.
+    if (message === "Unauthorized" || message === "Tenant not found"
+      || message.startsWith("Forbidden")) return empty
+    throw error
+  }
 }
 
 export async function getMyNotifications(limit = 20) {
-  const ctx = await requireTenantContext()
-  if (!ctx) return []
-  return db
-    .select()
-    .from(notifications)
-    .where(myNotificationFilter(ctx.user, ctx.tenantId))
-    .orderBy(desc(notifications.createdAt))
-    // Clamp: a non-finite, zero, or negative value from a client component
-    // would otherwise produce an invalid or unbounded query.
-    .limit(Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 20)
+  return readOrEmpty(
+    (context) => readMyNotifications(context, notificationListLimit.parse(limit)),
+    [],
+  )
 }
 
 export async function getUnreadCount() {
-  const ctx = await requireTenantContext()
-  if (!ctx) return 0
-  const rows = await db
-    .select({ id: notifications.id })
-    .from(notifications)
-    .where(
-      and(myNotificationFilter(ctx.user, ctx.tenantId), isNull(notifications.readAt)),
-    )
-  return rows.length
+  return readOrEmpty((context) => readUnreadNotificationCount(context), 0)
 }
 
 export async function markNotificationRead(id: string) {
-  const ctx = await requireTenantContext()
-  if (!ctx) return { success: false }
-  // The `myNotificationFilter` predicate in the WHERE clause is what prevents a
-  // caller from marking a notification belonging to another tenant as read.
-  await db
-    .update(notifications)
-    .set({ readAt: new Date(), status: "read" })
-    .where(and(eq(notifications.id, id), myNotificationFilter(ctx.user, ctx.tenantId)))
+  const context = await requireNotificationMemberContext()
+  await markNotificationReadById(context, id)
   return { success: true }
 }
 
 export async function markAllNotificationsRead() {
-  const ctx = await requireTenantContext()
-  if (!ctx) return { success: false }
-  await db
-    .update(notifications)
-    .set({ readAt: new Date(), status: "read" })
-    .where(
-      and(myNotificationFilter(ctx.user, ctx.tenantId), isNull(notifications.readAt)),
-    )
+  const context = await requireNotificationMemberContext()
+  await markAllNotificationsReadFor(context)
   return { success: true }
 }
