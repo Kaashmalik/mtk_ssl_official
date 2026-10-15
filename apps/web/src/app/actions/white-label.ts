@@ -1,10 +1,10 @@
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
-import { db, users, whiteLabelRequests, getPlanLimits, withTenantContext, withoutTenantContext, type PlanKey } from "@mtk/database"
-import { and, desc, eq } from "drizzle-orm"
+import { db, users, tenants, whiteLabelRequests, getPlanLimits, withTenantContext, withoutTenantContext, type PlanKey } from "@mtk/database"
+import { and, eq } from "drizzle-orm"
 import { z } from "zod"
-import { getMyTenant } from "@/app/actions/tenants"
+import { resolveActiveTenantId } from "@/lib/rbac-server"
 import { withAuth } from "./action-guard"
 
 const requestSchema = z.object({
@@ -30,7 +30,13 @@ function normalizeDomain(value: string): string {
 export const requestWhiteLabel = withAuth("settings:manage", async (input: z.infer<typeof requestSchema>) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  const tenant = await getMyTenant()
+
+  // The exact active league, not the account's primary/owned league. `withAuth`
+  // already checked settings:manage against this same resolved league.
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("League not found")
+  const [tenant] = await withoutTenantContext(() => db.select({ id: tenants.id, plan: tenants.plan })
+    .from(tenants).where(and(eq(tenants.id, tenantId), eq(tenants.isActive, true))).limit(1))
   if (!tenant) throw new Error("League not found")
 
   const validated = requestSchema.parse(input)
@@ -69,23 +75,4 @@ export const requestWhiteLabel = withAuth("settings:manage", async (input: z.inf
 
     return { success: true, request: created }
   })
-})
-
-export const getMyWhiteLabelRequests = withAuth("settings:manage", async () => {
-  const { userId } = await auth()
-  if (!userId) throw new Error("Unauthorized")
-  const tenant = await getMyTenant()
-  if (!tenant) return []
-  return withTenantContext({ userId, tenantId: tenant.id }, () => db.select({
-      id: whiteLabelRequests.id,
-      status: whiteLabelRequests.status,
-      customDomain: whiteLabelRequests.customDomain,
-      hideBranding: whiteLabelRequests.hideBranding,
-      customAppName: whiteLabelRequests.customAppName,
-      adminNotes: whiteLabelRequests.adminNotes,
-      createdAt: whiteLabelRequests.createdAt,
-    }).from(whiteLabelRequests)
-      .where(eq(whiteLabelRequests.tenantId, tenant.id))
-      .orderBy(desc(whiteLabelRequests.createdAt))
-      .limit(10))
 })

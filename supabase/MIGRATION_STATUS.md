@@ -596,3 +596,29 @@ unique-index behaviour under concurrency, audit rollback, lock deadlock freedom 
 RLS; mocked call-order/SQL tests do not prove those database properties. Next source
 slice: remaining venue writers, settings/billing and other dashboard destinations,
 then public/anonymous follow, publication and notification boundaries.
+
+## Batch 28 — exact-league settings, billing and invoices (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. The settings, billing, invoices and invoice-detail pages no
+longer use `getMyTenant` (the account's primary/owned league); they resolve the exact
+active league with `requireActiveLeagueContext("settings:manage")` and read through
+new `lib/league-settings-reads.ts`, which predicates every query on the resolved
+`tenantId` and returns explicit projections (identity/branding, bounded invoice
+history, a single invoice, bounded white-label requests). A missing/inactive league
+or an insufficient role throws to the error boundary rather than redirecting to
+league setup. `lib/invoices.ts` is removed (its `getMyInvoices` returned `[]` when no
+tenant was found); the white-label writer resolves the exact active league and plan
+instead of the primary league, and its unused read action is replaced by the scoped
+reader.
+
+This tightens `TEN-*`/`ISO-04` application-level scoping but does not change any RLS
+policy or grant: these reads run as the application connection, so real isolation
+still depends on the deployed policies and grants in the five unapplied migrations
+(notably `20261012100136_league_membership_controls.sql`). All five prior migrations
+remain unapplied; release gate stays default-off. Before rollout, verify real
+per-tenant `tenant_branding`, `invoices` and `white_label_requests` visibility under
+RLS and grants, and cross-league denial for a multi-league account; mocked readers do
+not prove those database properties. Next source slice: the remaining
+`dashboard-context`/notifications/stripe-checkout/league-setup destinations and venue
+writers, then public/anonymous follow, publication and notification boundaries.

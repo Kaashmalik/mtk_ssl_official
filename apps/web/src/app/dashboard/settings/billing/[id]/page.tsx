@@ -1,3 +1,4 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { notFound } from "next/navigation"
@@ -5,14 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Separator } from "@mtk/ui/components/ui/separator"
 import { PrintButton } from "@/components/share/print-button"
-import { db, invoices, tenants } from "@mtk/database"
-import { and, eq } from "drizzle-orm"
-import { getMyTenant } from "@/app/actions/tenants"
 import { unstable_noStore as noStore } from "next/cache"
+import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { readInvoice, readLeagueIdentity } from "@/lib/league-settings-reads"
 
 /**
  * Printable invoice / receipt for the signed-in league owner.
- * Tenant-scoped: an invoice is only visible to the league that owns it.
+ * Tenant-scoped: an invoice is only visible to the exact active league that owns it.
  */
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
   noStore()
@@ -21,16 +21,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   if (!userId) redirect("/sign-in")
 
   const { id } = await params
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
+  const context = await requireActiveLeagueContext("settings:manage")
 
-  const [invoice] = await db.select().from(invoices)
-    .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenant.id)))
-    .limit(1)
+  const invoice = await readInvoice(context.tenantId, id)
   if (!invoice) notFound()
 
-  const [league] = await db.select({ name: tenants.name, slug: tenants.slug })
-    .from(tenants).where(eq(tenants.id, tenant.id)).limit(1)
+  const league = await readLeagueIdentity(context.tenantId)
 
   const subtotal = Number(invoice.subtotal)
   const taxAmount = Number(invoice.taxAmount)
@@ -51,8 +47,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             <div>
               <CardTitle className="text-xl">Shakir Super League</CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                {league?.name}
-                {league?.slug ? ` · ${league.slug}` : ""}
+                {league.name}
+                {league.slug ? ` · ${league.slug}` : ""}
               </p>
             </div>
             <div className="text-right">

@@ -12,7 +12,7 @@ import {
   Building2, Wallet, Landmark, QrCode, Copy, CheckCheck, Phone, ChevronDown, ChevronUp,
 } from "lucide-react"
 import { UpgradePlanModal } from "@/components/settings/upgrade-plan-modal"
-import type { Tenant } from "@mtk/database"
+import type { LeagueIdentity } from "@/lib/league-settings-reads"
 import { PLAN_PRICES, PLAN_LIMITS } from "@mtk/database/lib/plan-limits"
 import { PAYMENT_CONFIG } from "@/lib/payment-config"
 
@@ -126,7 +126,7 @@ interface SubscriptionRequest {
 }
 
 interface BillingPageClientProps {
-  tenant: Tenant
+  tenant: LeagueIdentity
   clerkUserId: string
 }
 

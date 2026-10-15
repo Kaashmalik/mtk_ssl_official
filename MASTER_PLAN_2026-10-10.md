@@ -1860,6 +1860,47 @@ destinations, then public/anonymous follow, publication and notification paths. 
 full ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19
 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 28: exact-league settings, billing and invoices
+
+#### Implemented
+
+- Synced clean `main` with remote `905891b`. Scope is the settings/billing/invoices/
+  white-label destinations; `dashboard-context`, notifications, Stripe-checkout,
+  league-setup, venue writers and public/anonymous follow stay open.
+- New `lib/league-settings-reads.ts` reads the active league's identity/branding,
+  bounded invoice history, one invoice and bounded white-label requests, each
+  predicated on the resolved `tenantId` with explicit projections. No
+  primary/owned-league fallback.
+- The settings, billing, invoices and invoice-detail pages resolve the exact active
+  league with `requireActiveLeagueContext("settings:manage")` (was `getMyTenant`);
+  failures propagate instead of redirecting to league setup or rendering fake empty
+  settings. The billing client/upgrade modal take a minimal `LeagueIdentity`, and a
+  foreign invoice 404s.
+- `lib/invoices.ts` is removed; the white-label writer resolves the exact active
+  league and plan, and the unused `getMyWhiteLabelRequests` action is removed in
+  favour of the scoped reader.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 56 files, **1,974 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,295 passing tests** (+27 over Batch 27) |
+
+New regressions: `league-settings-reads.test.ts` (8), `settings-pages.test.tsx` (15)
+and `white-label-actions.test.ts` (4). Mocked readers are not PostgreSQL RLS or grant
+proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. `tsc --noEmit` still reports only its pre-existing unrelated errors.
+Five prior migrations remain unapplied and the release gate stays default-off. Next
+source work: the remaining `dashboard-context`/notifications/stripe-checkout/
+league-setup destinations and venue writers, then public/anonymous follow, publication
+and notification paths. No full ISO-04 or authenticated browser claim; whole-task
+roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

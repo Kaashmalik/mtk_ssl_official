@@ -1,20 +1,17 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
-import { getMyTenant } from "@/app/actions/tenants"
 import { TenantSettingsForm } from "@/components/settings/tenant-settings-form"
 import { WhiteLabelRequestPanel } from "@/components/settings/white-label-request-panel"
 import { UsageMeters } from "@/components/settings/usage-meters"
-import { db, tenantBranding } from "@mtk/database"
-import { eq } from "drizzle-orm"
 import { unstable_noStore as noStore } from "next/cache"
 import { Settings, CreditCard } from "lucide-react"
-import { getMyWhiteLabelRequests } from "@/app/actions/white-label"
-import { getUserRoleForTenant } from "@/lib/rbac-server"
-import { hasPermission } from "@/lib/rbac"
+import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { readLeagueSettings, readWhiteLabelRequests } from "@/lib/league-settings-reads"
 
 export default async function SettingsPage() {
   noStore()
@@ -22,18 +19,14 @@ export default async function SettingsPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
-
-  const tenantRole = await getUserRoleForTenant(userId, tenant.id)
-  if (!tenantRole || !hasPermission(tenantRole, "settings:manage")) {
-    redirect("/dashboard")
-  }
-  const whiteLabelRequests = await getMyWhiteLabelRequests()
-
-  const [branding] = await db.select().from(tenantBranding)
-    .where(eq(tenantBranding.tenantId, tenant.id))
-    .limit(1)
+  // Resolve the exact active league and require settings:manage against it. A missing
+  // league or insufficient role throws to the error boundary; it never silently falls
+  // back to the account's primary/owned league or redirects to league setup.
+  const context = await requireActiveLeagueContext("settings:manage")
+  const [{ tenant, branding }, whiteLabelRequests] = await Promise.all([
+    readLeagueSettings(context.tenantId),
+    readWhiteLabelRequests(context.tenantId),
+  ])
 
   const initialData = {
     name: tenant.name,

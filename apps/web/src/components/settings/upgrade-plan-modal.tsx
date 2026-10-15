@@ -18,9 +18,10 @@ import {
   Upload, X, Loader2, CheckCircle2, AlertCircle,
   Building2, Phone, Copy, CheckCheck, ChevronDown, ChevronUp,
 } from "lucide-react"
-import type { Tenant, PlanKey } from "@mtk/database"
+import type { PlanKey } from "@mtk/database"
 import { PLAN_PRICES } from "@mtk/database/lib/plan-limits"
 import { PAYMENT_CONFIG } from "@/lib/payment-config"
+import type { LeagueIdentity } from "@/lib/league-settings-reads"
 
 const PLAN_DISPLAY_NAMES: Record<string, string> = {
   starter: `Starter — Rs ${PLAN_PRICES.starter.toLocaleString()}`,
@@ -32,7 +33,7 @@ interface UpgradePlanModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   selectedPlan: string | null
-  tenant: Tenant
+  tenant: LeagueIdentity
   onRequestCreated: () => void
 }
 

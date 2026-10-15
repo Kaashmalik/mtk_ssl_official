@@ -1,11 +1,13 @@
+import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
-import { getMyTenant } from "@/app/actions/tenants"
 import { BillingPageClient } from "./billing-client"
 import { SubscriptionCountdown } from "@/components/billing/subscription-countdown"
 import Link from "next/link"
 import { unstable_noStore as noStore } from "next/cache"
+import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { readLeagueIdentity } from "@/lib/league-settings-reads"
 
 export const metadata = {
   title: "Billing & Plan",
@@ -17,8 +19,9 @@ export default async function BillingPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
+  // The exact active league, not the account's primary/owned league.
+  const context = await requireActiveLeagueContext("settings:manage")
+  const tenant = await readLeagueIdentity(context.tenantId)
 
   return (
     <div className="space-y-6">

@@ -1,10 +1,12 @@
+import React from "react"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@clerk/nextjs/server"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
-import { getMyInvoices } from "@/lib/invoices"
 import { unstable_noStore as noStore } from "next/cache"
+import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { readInvoices } from "@/lib/league-settings-reads"
 
 export const metadata = { title: "Invoices" }
 
@@ -13,7 +15,8 @@ export default async function InvoicesPage() {
   const { userId } = await auth()
   if (!userId) redirect("/")
 
-  const rows = await getMyInvoices()
+  const context = await requireActiveLeagueContext("settings:manage")
+  const rows = await readInvoices(context.tenantId)
   const fmt = (total: string, currency: string) =>
     new Intl.NumberFormat("en-PK", { style: "currency", currency, maximumFractionDigits: 2 }).format(Number(total))
 
