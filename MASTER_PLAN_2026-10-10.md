@@ -2743,6 +2743,51 @@ Next source work: remaining direct-db API routes (`auth/otp/send|verify`,
 `webhooks/clerk`, `payments/upload-proof`, `subscriptions/request`) or the
 roadmap register. Roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 47 — OTP flows: brute-force-cap race fixed, tested (16 October 2026)
+
+The OTP entry points `POST /api/auth/otp/send` and `POST /api/auth/otp/verify`
+previously ran untested direct-db flows. The zod schemas, constants and helpers
+from `lib/otp` were already sound — the verify flow had a real race: the
+wrong-attempt counter was **read-then-written**, so two concurrent wrong
+guesses could both pass the `attempts >= maxAttempts` check and both increment,
+pushing the counter past the brute-force cap.
+
+New `lib/otp-verification.ts`:
+- `sendOtp` holds the hourly rate-limit (`OTP_MAX_PER_HOUR` per
+  identifier+purpose), the resend cooldown, hashed-token minting inside the TTL
+  and dispatch — returning a discriminated result the route maps to
+  429/200 (messages unchanged).
+- `verifyLatestOtp` keeps the latest-unverified-unexpired selection and the
+  exhausted fast path, but claims the wrong-attempt increment optimistically:
+  `UPDATE … SET attempts = attempts + 1 WHERE id AND maxAttempts > attempts
+  AND attempts = <observed> RETURNING attempts`. A concurrent loser gets an
+  empty result and is answered `exhausted` (429) — the counter can now reach
+  exactly `maxAttempts`, never beyond it. Correct codes still mark
+  `verifiedAt` (single-use via the `verifiedAt IS NULL` selection filter).
+- Caught while testing: the lib initially referenced `OTP_MAX_PER_HOUR`
+  without importing it — the new suite failed it immediately.
+
+Both routes are thin wrappers; response shapes, status codes and messages are
+unchanged. New regressions: `otp-verification.test.ts` (11) — mint
+values/expiry window, rate-limit and cooldown paths (incl. cooldown expiry
+recovery), not-found/exhausted fast paths, verified stamping, the predicated
+increment (with the optimistic-clause params pinned), the lost-race 429, and
+the route mappings (400/429/200).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **80** files, **2,215 tests** (+11) |
+| Focused: OTP flows | PASS - 11 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: remaining direct-db API routes (`webhooks/clerk` (already
+Svix-verified — needs regressions only), `payments/upload-proof`,
+`subscriptions/request`) or the roadmap register. Roadmap counts remain
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
