@@ -1526,6 +1526,65 @@ publication paths, then tournament/venue/admin writers and delete paths. No full
 ISO-04 or authenticated browser claim; whole-task roadmap counts remain
 **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 21: scoped registration review writers and reads
+
+#### Implemented
+
+- Synced clean `main` with remote `2fa43ec`. Scope is the registration review
+  writers (create/approve/reject/confirm-fee) plus a new withdraw action and the
+  scoped registration review reads; tournament/venue/admin writers and public
+  visibility stay open.
+- Removed `getMyTenant`/`withTenantContext` and owned/default-league fallback from
+  the registration actions. Exact active-league permission is checked before SQL
+  and re-checked (account, active membership, active league) inside the
+  transaction. Steady-state role matrix is enforced: owners review, owners or the
+  team's manager/captain create/withdraw.
+- Review writers lock account → league → membership → tournament → team →
+  registration under READ COMMITTED. Tournament locks precede registration locks
+  so approval cannot deadlock a concurrent registration. Approval locks the
+  tournament row `FOR UPDATE`, checks `maxTeams` capacity, links the team and
+  flips status atomically; fee confirmation inserts the payment and marks the
+  entry paid atomically; both write minimal audits without squad/notes/reference/
+  account data.
+- Creation verifies active same-league team, open registration window and status,
+  squad membership as active tenant-scoped players (fixes a prior unscoped read),
+  team squad limit and `(team, tournament)` uniqueness.
+- Review reads use explicit projections excluding the payment transaction
+  reference and registered-by/approved-by UUIDs, join team/tournament with the
+  same active-league predicate, and are bounded to 100 rows with honest totals.
+  The registrations dashboard route switched to the scoped read context and a
+  single joined read.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 48 files, **1,862 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,183 passing tests** (+156 over Batch 20) |
+
+Added 156 registration review cases: exact authority, locked tournament-before-
+registration ordering, capacity/squad/duplicate/window checks, payment resolution,
+delegation boundaries, projection exclusion, scoped joins, bounded pages and
+failure propagation. Call-order/SQL-construction mocks and in-memory callbacks
+are not PostgreSQL locking, rollback or RLS proof. Nest negative-fixture logs are
+expected.
+
+No build, lint, standalone type-check, schema change, migration application,
+remote database operation or deployment ran. Five prior migrations remain
+unapplied and the release gate stays default-off. These are transaction-scoped
+locks and request-local authorization/projection checks, not database-wide
+constraints or read-versus-revocation guarantees. Real RLS/grants/indexes,
+two-session create/approve/capacity races and rollback remain release acceptance
+work.
+
+Next source work: tournament/venue/admin writers and delete paths, then follow/
+publication and notification paths. Withdrawal keeps the squad, fee and linkage;
+refunds, slot release, waitlist and archival remain separate workflows. No full
+ISO-04 or authenticated browser claim; whole-task roadmap counts remain
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

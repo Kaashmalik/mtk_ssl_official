@@ -438,5 +438,25 @@ All five prior migrations remain unapplied; release gate stays default-off.
 Before rollout, verify real RLS/grants, scoped query plans/indexes, picker/list
 performance and concurrent read/write behavior. Inspect actual constraints and
 RLS; mocked SQL/projection/call-order tests do not prove these properties. Team
-analytics, player ID-card list/detail and follow/publication paths remain the next
-source slice, followed by tournament/venue/admin writers and delete paths.
+analytics, player ID-card list/detail and follow/publication paths were scoped in
+the Batch 20 follow-up; tournament/venue/admin writers and delete paths remain the
+next source slice.
+
+Registration review writers (create/approve/reject/withdraw/confirm-fee) now use
+exact-active-league READ COMMITTED transactions with current account/Clerk/
+membership and league checks. Lock order is account -> league -> membership ->
+tournament -> team -> registration; tournament locks always precede registration
+locks so approval cannot deadlock a concurrent registration. Approval locks the
+tournament row and re-checks `maxTeams` capacity before linking the team; fee
+confirmation inserts the payment and flips the fee state atomically. Creation
+verifies a same-league active team, an open window/status, active tenant-scoped
+squad members, the team squad limit and `(team, tournament)` uniqueness. Audits
+omit squad lists, notes, fee references and account UUIDs; no refunds, slot
+release, waitlist, restore or quota release is added. Review reads use explicit
+projections (no payment reference or registered-by/approved-by UUIDs) and bounded
+pages.
+
+This is still not a database-wide constraint. Verify real two-session
+create/approve capacity races, tournament/registration deadlock ordering, fee/
+status CAS and audit-failure rollback, plus actual grants, query plans and RLS;
+mocked call-order tests do not prove these properties.
