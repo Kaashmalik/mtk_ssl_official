@@ -2697,6 +2697,52 @@ Next source work: the admin/API tier is complete. Candidate next batches:
 remaining untested API routes (e.g. `dns/verify`, `email/verify`), or returning
 to the roadmap register. Roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 46 — domain verification trio: DKIM redaction, validated inputs (15 October 2026)
+
+The custom-domain trust surface: `GET/POST /api/dns/verify`,
+`GET/POST /api/email/verify` and `GET /api/ssl/status` — previously untested
+direct-db routes with unvalidated inputs.
+
+**Fix — DKIM private key no longer leaves the server.** Both `email/verify`
+endpoints returned the full verification row **including the DKIM RSA private
+key** (`dkimPrivateKey`, PKCS#8 PEM) to the HTTP client — gratuitously, since
+the admin UI renders only `dkimPublicKey`/`dkimSelector` and the mail service
+reads the key from the DB. New `lib/domain-verification.ts` returns responses
+through `toClientEmailVerification`, which omits the private key while keeping
+every published-record field. Key generation/rotation semantics are unchanged
+(new RSA 2048 pair on every POST, 90-day expiry; DNS tokens rotate on every
+POST with a 7-day window).
+
+**Extraction (verbatim behavior otherwise).** `canManageTenantDomain`
+(super admin or exactly the league owner), DNS TXT check, email
+SPF/DMARC/DKIM triple-check (all three required), verification upserts, the
+two-row "verified" transitions (verification row + tenant flag) and the SSL
+certificate read all move to the lib. Routes become thin wrappers with
+zod-validated inputs (`400` on a malformed domain/tenantId/senderEmail instead
+of storing arbitrary strings), keeping every status code and client-facing
+message (401/403/404/409/500).
+
+New regressions: `domain-verification.test.ts` (17) — owner/super-admin
+authority matrix, TXT token matching (including the honest pinned boundary
+that a token split across 255-byte chunks does **not** reassemble, fixed
+fail-closed behavior on resolver errors, and unsupported types), the all-three
+email-record requirement with per-record failure isolation, the private-key
+redaction contract, DKIM key-pair publishability, DNS mint insertion/rotation,
+two-row verified writes, and the route gates (401/400/403/409).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **79** files, **2,204 tests** (+17) |
+| Focused: domain verification | PASS - 17 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: remaining direct-db API routes (`auth/otp/send|verify`,
+`webhooks/clerk`, `payments/upload-proof`, `subscriptions/request`) or the
+roadmap register. Roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

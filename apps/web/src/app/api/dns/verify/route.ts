@@ -1,26 +1,31 @@
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@mtk/database";
-import { tenants, dnsVerifications, users } from "@mtk/database";
-import { eq, and } from "drizzle-orm";
-import { randomBytes } from "crypto";
-import { isSuperAdmin } from "@/lib/super-admin";
+import { tenants } from "@mtk/database";
+import { eq } from "drizzle-orm";
+import {
+  canManageTenantDomain,
+  checkDnsRecord,
+  getDnsVerification,
+  getDnsVerificationById,
+  markDnsVerified,
+  upsertDnsVerification,
+} from "@/lib/domain-verification";
 
-async function canManageTenantDomain(clerkUserId: string, tenantId: string) {
-  if (await isSuperAdmin()) return true;
-  const [actor] = await db.select({ id: users.id }).from(users)
-    .where(eq(users.clerkId, clerkUserId)).limit(1);
-  if (!actor) return false;
-  const [tenant] = await db.select({ id: tenants.id }).from(tenants)
-    .where(and(eq(tenants.id, tenantId), eq(tenants.ownerId, actor.id))).limit(1);
-  return Boolean(tenant);
-}
+export const dynamic = "force-dynamic";
 
-/**
- * GET - Check DNS verification status
- */
+/** Custom-domain DNS verification (TXT `_ssl-verify.<domain>`).
+ *  Authorized for super admins or exactly the league owner; the domain must
+ *  be the league's assigned enterprise custom domain. Inputs are validated;
+ *  the minted token rotates on every POST so only currently served
+ *  instructions can verify. */
+const querySchema = z.object({
+  domain: z.string().min(1).max(253).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/, "domain looks invalid"),
+  tenantId: z.string().uuid(),
+});
+const bodySchema = querySchema;
+
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await auth();
@@ -28,82 +33,39 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const searchParams = request.nextUrl.searchParams;
-    const domain = searchParams.get("domain");
-    const tenantId = searchParams.get("tenantId");
-
-    if (!domain || !tenantId) {
+    const parsed = querySchema.safeParse({
+      domain: request.nextUrl.searchParams.get("domain"),
+      tenantId: request.nextUrl.searchParams.get("tenantId"),
+    });
+    if (!parsed.success) {
       return NextResponse.json({ error: "Domain and tenantId required" }, { status: 400 });
     }
+    const { domain, tenantId } = parsed.data;
 
-    // Get tenant
-    const tenant = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-
-    if (tenant.length === 0) {
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!tenant) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
     if (!(await canManageTenantDomain(userId, tenantId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (tenant[0].customDomain !== domain) {
+    if (tenant.customDomain !== domain) {
       return NextResponse.json({ error: "This domain is not assigned to the league" }, { status: 409 });
     }
 
-    // Get DNS verification
-    const verification = await db
-      .select()
-      .from(dnsVerifications)
-      .where(
-        and(
-          eq(dnsVerifications.tenantId, tenant[0].id),
-          eq(dnsVerifications.domain, domain)
-        )
-      )
-      .limit(1);
-
-    if (verification.length === 0) {
+    const verification = await getDnsVerification(tenantId, domain);
+    if (!verification) {
       return NextResponse.json({ error: "Verification not found" }, { status: 404 });
     }
 
-    // Check DNS record (simplified - in production, use a DNS lookup library)
-    const isVerified = await checkDnsRecord(
-      domain,
-      verification[0].verificationType,
-      verification[0].expectedValue
-    );
-
-    if (isVerified && verification[0].status !== "verified") {
-      // Update status
-      await db
-        .update(dnsVerifications)
-        .set({
-          status: "verified",
-          verifiedAt: new Date(),
-          lastCheckedAt: new Date(),
-        })
-        .where(eq(dnsVerifications.id, verification[0].id));
-
-      // Update tenant
-      await db
-        .update(tenants)
-        .set({
-          customDomainVerified: true,
-          customDomainVerifiedAt: new Date(),
-        })
-        .where(eq(tenants.id, tenant[0].id));
+    const now = new Date();
+    const isVerified = await checkDnsRecord(domain, verification.verificationType, verification.expectedValue);
+    if (isVerified && verification.status !== "verified") {
+      await markDnsVerified(verification.id, tenantId, now);
     }
 
-    const updated = await db
-      .select()
-      .from(dnsVerifications)
-      .where(eq(dnsVerifications.id, verification[0].id))
-      .limit(1);
-
-    return NextResponse.json(updated[0]);
+    const updated = await getDnsVerificationById(verification.id);
+    return NextResponse.json(updated);
   } catch (error) {
     console.error("Error checking DNS verification:", error);
     return NextResponse.json(
@@ -113,9 +75,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * POST - Initiate DNS verification
- */
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await auth();
@@ -123,82 +82,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { domain, tenantId } = body;
-
-    if (!domain || !tenantId) {
+    const parsed = bodySchema.safeParse(await request.json());
+    if (!parsed.success) {
       return NextResponse.json({ error: "Domain and tenantId required" }, { status: 400 });
     }
+    const { domain, tenantId } = parsed.data;
 
-    // Get tenant
-    const tenant = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-
-    if (tenant.length === 0) {
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!tenant) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
     if (!(await canManageTenantDomain(userId, tenantId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Check if enterprise plan
-    if (tenant[0].plan !== "enterprise" || tenant[0].customDomain !== domain) {
+    // An approved custom domain requires the enterprise plan.
+    if (tenant.plan !== "enterprise" || tenant.customDomain !== domain) {
       return NextResponse.json(
         { error: "An approved custom domain requires an Enterprise plan" },
         { status: 403 }
       );
     }
 
-    // Generate verification token
-    const verificationToken = randomBytes(16).toString("hex");
-    const expectedValue = `ssl-verify-${verificationToken}`;
-
-    // Create or update DNS verification
-    const existing = await db
-      .select()
-      .from(dnsVerifications)
-      .where(
-        and(
-          eq(dnsVerifications.tenantId, tenant[0].id),
-          eq(dnsVerifications.domain, domain)
-        )
-      )
-      .limit(1);
-
-    const verificationData = {
-      tenantId: tenant[0].id,
-      domain,
-      verificationToken,
-      verificationType: "txt",
-      expectedValue,
-      status: "pending" as const,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-    };
-
-    if (existing.length > 0) {
-      await db
-        .update(dnsVerifications)
-        .set(verificationData)
-        .where(eq(dnsVerifications.id, existing[0].id));
-    } else {
-      await db.insert(dnsVerifications).values(verificationData);
-    }
-
-    const verification = await db
-      .select()
-      .from(dnsVerifications)
-      .where(
-        and(
-          eq(dnsVerifications.tenantId, tenant[0].id),
-          eq(dnsVerifications.domain, domain)
-        )
-      )
-      .limit(1);
-
-    return NextResponse.json(verification[0]);
+    const verification = await upsertDnsVerification(tenantId, domain);
+    return NextResponse.json(verification);
   } catch (error) {
     console.error("Error initiating DNS verification:", error);
     return NextResponse.json(
@@ -207,32 +114,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-/**
- * Check DNS record (simplified - in production use dns.promises.resolveTxt or similar)
- */
-import dns from "dns";
-
-/**
- * Check DNS record using Node dns promises
- */
-async function checkDnsRecord(
-  domain: string,
-  type: string,
-  expectedValue: string
-): Promise<boolean> {
-  try {
-    if (type.toLowerCase() === "txt") {
-      const records = await dns.promises.resolveTxt(`_ssl-verify.${domain}`);
-      return records.some((record) =>
-        record.some((val) => val === expectedValue || val.includes(expectedValue))
-      );
-    }
-    return false;
-  } catch (error) {
-    // dns.resolveTxt throws on no records / domain not found
-    console.warn("DNS check failed or record not found for domain:", domain, error);
-    return false;
-  }
-}
-

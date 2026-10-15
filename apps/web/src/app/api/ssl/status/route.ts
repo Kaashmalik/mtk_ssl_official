@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { db } from "@mtk/database";
-import { tenants, sslCertificates } from "@mtk/database";
-import { eq, and } from "drizzle-orm";
+import { getSslCertificate } from "@/lib/domain-verification";
 import { isSuperAdmin } from "@/lib/super-admin";
+
+/** SSL certificate status for a league's custom domain (super-admin gated). */
+const querySchema = z.object({
+  domain: z.string().min(1).max(253).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/, "domain looks invalid"),
+  tenantId: z.string().uuid(),
+});
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,42 +22,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const searchParams = request.nextUrl.searchParams;
-    const domain = searchParams.get("domain");
-    const tenantId = searchParams.get("tenantId");
-
-    if (!domain || !tenantId) {
+    const parsed = querySchema.safeParse({
+      domain: request.nextUrl.searchParams.get("domain"),
+      tenantId: request.nextUrl.searchParams.get("tenantId"),
+    });
+    if (!parsed.success) {
       return NextResponse.json({ error: "Domain and tenantId required" }, { status: 400 });
     }
 
-    // Get tenant
-    const tenant = await db
-      .select()
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-
-    if (tenant.length === 0) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
-    }
-
-    // Get SSL certificate
-    const certificate = await db
-      .select()
-      .from(sslCertificates)
-      .where(
-        and(
-          eq(sslCertificates.tenantId, tenant[0].id),
-          eq(sslCertificates.domain, domain)
-        )
-      )
-      .limit(1);
-
-    if (certificate.length === 0) {
+    const certificate = await getSslCertificate(parsed.data.tenantId, parsed.data.domain);
+    if (!certificate) {
       return NextResponse.json({ status: "pending" });
     }
 
-    return NextResponse.json(certificate[0]);
+    return NextResponse.json(certificate);
   } catch (error) {
     console.error("Error fetching SSL status:", error);
     return NextResponse.json(
@@ -61,4 +44,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
