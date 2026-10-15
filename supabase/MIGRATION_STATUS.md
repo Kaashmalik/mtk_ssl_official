@@ -430,7 +430,9 @@ identity/creator fields; owner-only edit reads separate private profile data.
 Team summaries use scoped database-side counts rather than per-row queries.
 Archived rows remain historical; no restore/purge/quota release is introduced.
 These are request-local authorization/projection checks, not read-versus-
-revocation locks or database-wide privacy constraints.
+revocation locks or database-wide privacy constraints. Team analytics and player
+ID-card list/detail routes also now resolve the exact active league and tenant-
+filter every child query.
 
 All five prior migrations remain unapplied; release gate stays default-off.
 Before rollout, verify real RLS/grants, scoped query plans/indexes, picker/list

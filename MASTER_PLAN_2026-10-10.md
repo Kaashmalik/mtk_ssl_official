@@ -1493,6 +1493,11 @@ whole-task roadmap counts remain **19 checked / 60 open / 79 IDs**.
 - Edit/roster/ID-card/archive controls match current authority. Private profile
   data is owner-only and not serialized to other clients. Player stats copy says
   league-only, not cross-league career.
+- Team analytics and player ID-card list/detail routes now resolve the exact
+  active league and explicitly check read permission before business SQL. Every
+  child query is tenant-filtered. ID-card issuance/revocation/expiry use the same
+  active-league permission and validate UUIDs and dates. The ID-card detail page
+  selects only the fields the card renders and scopes team/league lookups.
 
 #### Verification recorded
 

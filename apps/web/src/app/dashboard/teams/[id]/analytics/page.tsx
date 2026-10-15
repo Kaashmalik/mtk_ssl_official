@@ -10,10 +10,10 @@ import {
   bowlingScorecards, fieldingScorecards,
 } from "@mtk/database"
 import { and, eq, or, desc, inArray } from "drizzle-orm"
-import { getMyTenant } from "@/app/actions/tenants"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
+import { requireRosterReadContext, readRosterTeam } from "@/lib/roster-reads"
 
 function oversFromBalls(balls: number): string {
   return `${Math.floor(balls / 6)}.${balls % 6}`
@@ -26,27 +26,25 @@ export default async function TeamAnalyticsPage({ params }: { params: Promise<{ 
   if (!userId) redirect("/sign-in")
 
   const { id } = await params
-  const tenant = await getMyTenant()
-  if (!tenant) redirect("/dashboard/league/setup")
+  const context = await requireRosterReadContext("team:read")
+  const tenant = context.tenantId
 
   // Tenant-scoped: analytics must never leak across leagues.
-  const [team] = await db.select().from(teams)
-    .where(and(eq(teams.id, id), eq(teams.tenantId, tenant.id)))
-    .limit(1)
+  const team = await readRosterTeam(tenant, id)
   if (!team) notFound()
 
   const teamMatches = await db.select().from(matches)
-    .where(and(eq(matches.tenantId, tenant.id), or(eq(matches.teamAId, id), eq(matches.teamBId, id))))
+    .where(and(eq(matches.tenantId, tenant), or(eq(matches.teamAId, id), eq(matches.teamBId, id))))
     .orderBy(desc(matches.scheduledDate))
 
   const matchIds = teamMatches.map((m) => m.id)
 
   const [batting, bowling, fielding, inningsRows] = matchIds.length
     ? await Promise.all([
-        db.select().from(battingScorecards).where(inArray(battingScorecards.matchId, matchIds)),
-        db.select().from(bowlingScorecards).where(inArray(bowlingScorecards.matchId, matchIds)),
-        db.select().from(fieldingScorecards).where(inArray(fieldingScorecards.matchId, matchIds)),
-        db.select().from(matchInnings).where(inArray(matchInnings.matchId, matchIds)),
+        db.select().from(battingScorecards).where(and(inArray(battingScorecards.matchId, matchIds), eq(battingScorecards.tenantId, tenant))),
+        db.select().from(bowlingScorecards).where(and(inArray(bowlingScorecards.matchId, matchIds), eq(bowlingScorecards.tenantId, tenant))),
+        db.select().from(fieldingScorecards).where(and(inArray(fieldingScorecards.matchId, matchIds), eq(fieldingScorecards.tenantId, tenant))),
+        db.select().from(matchInnings).where(and(inArray(matchInnings.matchId, matchIds), eq(matchInnings.tenantId, tenant))),
       ])
     : [[], [], [], []]
 
@@ -116,7 +114,7 @@ export default async function TeamAnalyticsPage({ params }: { params: Promise<{ 
   const performerIds = [...batterRows, ...bowlerRows].map((r) => r.playerId)
   const performerRows = performerIds.length
     ? await db.select({ id: players.id, name: players.name }).from(players)
-        .where(inArray(players.id, [...new Set(performerIds)]))
+        .where(and(inArray(players.id, [...new Set(performerIds)]), eq(players.tenantId, tenant)))
     : []
   const nameById = new Map(performerRows.map((p) => [p.id, p.name]))
 

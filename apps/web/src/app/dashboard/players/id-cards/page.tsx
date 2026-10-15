@@ -1,3 +1,4 @@
+import React from "react"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@clerk/nextjs/server"

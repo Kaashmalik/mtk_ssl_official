@@ -1468,6 +1468,12 @@ paths are not repaired here.
   Archived detail history remains readable without edit/archive/roster controls.
   Player stats copy says league-only, not cross-league career. Private profile data
   is rendered only for the current owner and never serialized to other clients.
+- Team analytics and player ID-card list/detail routes now resolve the exact
+  active league and explicitly check read permission before business SQL. Every
+  child query (fixtures, scorecards, innings, performers, teams, tournaments) is
+  tenant-filtered. ID-card issuance/revocation/expiry use the same active-league
+  permission and validate UUIDs and dates. The ID-card detail page selects only
+  the fields the card renders and scopes team/league lookups to the active league.
 
 **Fresh verification:** web **1,706 / 47 files**, database **128 / 8 files**,
 scoring service **193 / 8 suites**; **2,027 passing tests**, +216 over Batch 19.
