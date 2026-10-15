@@ -2478,6 +2478,45 @@ whether an explicit opt-out (e.g. `unscoped()` marking) or a repo read-layer fit
 its authz selects; then the remaining admin-API audit items. Roadmap counts
 remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 41 — scoring actions become pure delegates; allowlist reaches its floor (15 October 2026)
+
+`app/actions/scoring.ts` no longer touches `db` directly. All of its reads moved
+to the new tenant-scoped `lib/scoring-reads.ts` (`findScoringTenant`,
+`readInningsForCommand`, `findInningsId`, `findScoringMatch`,
+`readMatchScoringBatch`, `readMatchPlayersForScoring`, `readBallHistory`); the
+action keeps the zod schemas (and `RecordBallInput`/`CreateInningsInput`
+exports), `requireTenant` gating, Clerk checks, `requireMatchScoringAccess`/
+`requireScoringActorId`, the scoring-service proxy calls and response shaping.
+
+The migration kept every semantic verbatim: the innings gate that predicated
+`recordBall`/`completeInnings`/`getBallHistory` on `(inningsId, matchId,
+tenantId)` (the third having been the historical tenant-scope fix), the
+match→canScore→batch ordering of the scoring page, the 60-ball recency bound,
+the match-players two-tenant predicate, and the exact WHERE-parameter sequence
+the `scoring-actions` regression asserts. All writes still belong to the
+scoring-service SoT — this batch moved **reads only**, so the option to
+introduce an explicit `unscoped()`-style opt-out for `scoring.ts` became
+moot: a read-layer was both possible and consistent.
+
+**The `no-unscoped-queries` allowlist is now at its floor:** `tenants.ts` /
+`users.ts` bootstrap only (the pre-context first-tenant/actor provisioning).
+Every other action file is guard-enforced repo/lib-only. The five-batch sweep
+(37–41) retired the last direct-`db` action files with zero behavior change
+and zero edits to existing test suites.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS - **72** files, **2,121 tests** |
+| Focused: guard + scoring actions/access/hydration | PASS - **68 tests** (all unchanged) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (scoring files clean) |
+| `git diff --check` | Clean |
+
+Next source work: the remaining admin-API audit items from the master plan; the
+allowlist sweep is complete. Roadmap counts remain **19 checked / 60 open /
+79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

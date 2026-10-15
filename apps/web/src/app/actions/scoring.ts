@@ -2,11 +2,6 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db } from "@mtk/database"
-import {
-  matches, matchInnings, matchBalls, players, teams, tenants,
-} from "@mtk/database"
-import { eq, and, desc, asc } from "drizzle-orm"
 import { z } from "zod"
 import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
@@ -18,6 +13,8 @@ import {
   proxyCreateInnings,
   proxyCompleteInnings,
 } from "@/lib/scoring-service-client"
+import { findInningsId, findScoringMatch, findScoringTenant, readBallHistory,
+  readInningsForCommand, readMatchPlayersForScoring, readMatchScoringBatch } from "@/lib/scoring-reads"
 
 // ─── Schemas ──────────────────────────────────────────────────
 
@@ -56,7 +53,7 @@ async function requireTenant() {
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   await requirePermissionServer("match:read", tenantId)
-  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
+  const tenant = await findScoringTenant(tenantId)
   if (!tenant) throw new Error("Tenant not found")
   return tenant
 }
@@ -76,10 +73,7 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
 
   await requireMatchScoringAccess(userId, tenant.id, validated.matchId)
   const actorId = await requireScoringActorId(userId)
-  const [innings] = await db.select().from(matchInnings)
-    .where(and(eq(matchInnings.id, validated.inningsId), eq(matchInnings.matchId, validated.matchId),
-      eq(matchInnings.tenantId, tenant.id)))
-    .limit(1)
+  const innings = await readInningsForCommand(validated.inningsId, validated.matchId, tenant.id)
 
   if (!innings) throw new Error("Innings not found")
   // Lifecycle and replay decisions belong to the canonical service: a retry
@@ -180,27 +174,13 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
 
-  // Batch: match + teams + innings + last 30 balls per innings
-  const [match] = await db.select().from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-    .limit(1)
-
+  const match = await findScoringMatch(matchId, tenant.id)
   if (!match) throw new Error("Match not found")
   const canScore = await canScoreMatch(userId, tenant.id, match)
 
-  const [teamA, teamB, allInnings, recentBalls] = await Promise.all([
-    db.select({ id: teams.id, name: teams.name }).from(teams)
-      .where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, tenant.id))).limit(1),
-    db.select({ id: teams.id, name: teams.name }).from(teams)
-      .where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, tenant.id))).limit(1),
-    db.select().from(matchInnings)
-      .where(and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenant.id)))
-      .orderBy(asc(matchInnings.inningsNumber)),
-    db.select().from(matchBalls)
-      .where(and(eq(matchBalls.matchId, matchId), eq(matchBalls.tenantId, tenant.id)))
-      .orderBy(desc(matchBalls.createdAt))
-      .limit(60),
-  ])
+  const { teamA, teamB, allInnings, recentBalls } = await readMatchScoringBatch(
+    matchId, match.teamAId, match.teamBId, tenant.id,
+  )
 
   return {
     canScore,
@@ -230,30 +210,10 @@ export const getMatchPlayersForScoring = withAuth("match:read", async (matchId: 
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
 
-  const [match] = await db.select({ teamAId: matches.teamAId, teamBId: matches.teamBId })
-    .from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenant.id)))
-    .limit(1)
+  const result = await readMatchPlayersForScoring(matchId, tenant.id)
+  if (!result) throw new Error("Match not found")
 
-  if (!match) throw new Error("Match not found")
-
-  const [teamAPlayers, teamBPlayers] = await Promise.all([
-    db.select({ id: players.id, name: players.name, role: players.role })
-      .from(players)
-      .where(and(eq(players.teamId, match.teamAId), eq(players.tenantId, tenant.id),
-        eq(players.isActive, true), eq(players.status, "active")))
-      .orderBy(asc(players.name)),
-    db.select({ id: players.id, name: players.name, role: players.role })
-      .from(players)
-      .where(and(eq(players.teamId, match.teamBId), eq(players.tenantId, tenant.id),
-        eq(players.isActive, true), eq(players.status, "active")))
-      .orderBy(asc(players.name)),
-  ])
-
-  return {
-    teamA: teamAPlayers,
-    teamB: teamBPlayers,
-  }
+  return result
 })
 
 // ─── Complete Innings ─────────────────────────────────────────
@@ -272,15 +232,7 @@ export const completeInnings = withAuth("match:score", async (matchId: string, i
 
   // Early tenant boundary; the canonical transaction also checks tenant,
   // actor membership, and current assignment before completing the innings.
-  const [owned] = await db.select({ id: matchInnings.id })
-    .from(matchInnings)
-    .where(and(
-      eq(matchInnings.id, inningsId),
-      eq(matchInnings.matchId, matchId),
-      eq(matchInnings.tenantId, tenant.id),
-    ))
-    .limit(1)
-
+  const owned = await findInningsId(inningsId, matchId, tenant.id)
   if (!owned) throw new Error("Innings not found")
 
   const result = await proxyCompleteInnings(matchId, inningsId, tenant.id, actorId)
@@ -303,27 +255,11 @@ export const getBallHistory = withAuth("match:read", async (matchId: string, inn
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
 
-  // Tenant scope was missing here. `withAuth("match:read")` checks that the
-  // caller holds `match:read` in *their own* tenant, which says nothing about
-  // whether this particular match belongs to it — so any user with that
-  // permission could read ball-by-ball history for another tenant's match by
-  // passing a known id. Scope the join through `matchInnings.tenantId`.
-  const [owned] = await db.select({ id: matchInnings.id })
-    .from(matchInnings)
-    .where(and(
-      eq(matchInnings.id, inningsId),
-      eq(matchInnings.matchId, matchId),
-      eq(matchInnings.tenantId, tenant.id),
-    ))
-    .limit(1)
-
-  if (!owned) throw new Error("Innings not found")
-
-  return db.select().from(matchBalls)
-    .where(and(
-      eq(matchBalls.matchId, matchId),
-      eq(matchBalls.inningsId, inningsId),
-      eq(matchBalls.tenantId, tenant.id),
-    ))
-    .orderBy(asc(matchBalls.ballSequence))
+  // Tenant scope was missing here historically. `withAuth("match:read")` checks
+  // that the caller holds `match:read` in *their own* tenant, which says nothing
+  // about whether this particular match belongs to it — the innings gate keeps
+  // the join scoped through `matchInnings.tenantId`.
+  const balls = await readBallHistory(matchId, inningsId, tenant.id)
+  if (!balls) throw new Error("Innings not found")
+  return balls
 })

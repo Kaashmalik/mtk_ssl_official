@@ -29,15 +29,18 @@ const ACTIONS_DIR = join(__dirname, "../app/actions");
  * is migrated, remove it from this set — the test will then enforce repo-only access.
  */
 const ALLOWLIST = new Set([
+  // Bootstrap only: tenants.ts provisions the very first tenant/actor rows
+  // before any TenantScopedRepository context can exist; users.ts syncs the
+  // Clerk session into the app schema the same way. Both pre-date resolution
+  // of an active league and are audited accordingly.
   "tenants.ts",
   "users.ts",
-  // TODO: migrate this to the repo layer and remove from allowlist:
-  "scoring.ts", // all WRITES proxy to scoring-service (SoT); remaining db.select are tenant-scoped authz reads
-  // notifications.ts (Batch 33), follows.ts/registrations.ts (Batch 36),
-  // player-ids.ts (Batch 37), scorecards.ts (Batch 38), users-invites.ts
-  // (Batch 39) and matches.ts (Batch 40) no longer use direct db — they
-  // delegate to tenant-scoped readers/writers in lib/ — so the guard now
-  // enforces repo-only access there.
+  // Every other action file now delegates to tenant-scoped readers/writers in
+  // lib/ (or scoring-service via its client): notifications.ts (Batch 33),
+  // follows.ts/registrations.ts (Batch 36), player-ids.ts (Batch 37),
+  // scorecards.ts (Batch 38), users-invites.ts (Batch 39), matches.ts
+  // (Batch 40) and scoring.ts (Batch 41 — reads only; all writes belong to
+  // the scoring-service SoT). The guard enforces repo-only access everywhere.
 ]);
 
 /** Patterns that indicate intentional unscoped access. */
