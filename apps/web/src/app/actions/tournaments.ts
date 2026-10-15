@@ -2,14 +2,14 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, users, tournamentRepo } from "@mtk/database"
+import { tournamentRepo } from "@mtk/database"
 import { withTenantContext, type Tournament } from "@mtk/database"
-import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-server"
 import type { Permission } from "@/lib/rbac"
 import { calendarDateSchema, decimalMoney, moneySchema, readTournamentConfiguration, resizeSeedOrder, tournamentConfigurationSchema } from "@mtk/database/lib/tournament-configuration"
 import { archiveTournament, setTournamentRegistration } from "@/lib/tournament-lifecycle"
+import { createTournamentRecord, updateTournamentRecord } from "@/lib/tournament-writes"
 
 const createTournamentSchema = z.object({
   name: z.string().min(2).max(200),
@@ -40,15 +40,21 @@ function validateRelations(input: { startDate?: string | null; endDate?: string 
   }
 }
 
-function persistenceValues(input: z.infer<typeof updateTournamentSchema> & {
+type PersistenceInput = z.infer<typeof updateTournamentSchema> & {
   configuration?: z.infer<typeof tournamentConfigurationSchema>
-}) {
-  const { registrationFee, prizeAmount, configuration, ...base } = input
+}
+
+function persistenceValues<T extends PersistenceInput>(input: T) {
+  const { registrationFee, prizeAmount, configuration, ...base } = input as PersistenceInput
   return {
     ...base,
     ...(registrationFee !== undefined ? { entryFee: decimalMoney(registrationFee) } : {}),
-    ...(prizeAmount !== undefined ? { prizePool: { version: 1, total: decimalMoney(prizeAmount) } } : {}),
+    ...(prizeAmount !== undefined ? { prizePool: { version: 1 as const, total: decimalMoney(prizeAmount) } } : {}),
     ...(configuration !== undefined ? { rules: { wizard: configuration } } : {}),
+  } as Omit<T, "registrationFee" | "prizeAmount" | "configuration"> & {
+    entryFee?: string
+    prizePool?: { version: 1; total: string }
+    rules?: { wizard: z.infer<typeof tournamentConfigurationSchema> }
   }
 }
 
@@ -84,8 +90,9 @@ async function requireTournamentContext(permission: Permission) {
 /**
  * Create a new tournament.
  *
- * The tenant context is resolved from Clerk auth, then passed into
- * `withTenantContext` so the repository layer auto-scopes the insert.
+ * The exact active league is resolved from Clerk auth; `createTournamentRecord`
+ * then locks account -> league -> membership, enforces a per-league unique slug
+ * and writes the insert plus an audit in one transaction.
  */
 export async function createTournament(input: CreateTournamentInput) {
   const { userId, tenantId } = await requireTournamentContext("tournament:create")
@@ -94,25 +101,12 @@ export async function createTournament(input: CreateTournamentInput) {
   validateRelations(validated)
   const slug = validated.slug || generateSlug(validated.name)
 
-  // Clerk's string ID is not the UUID referenced by tournaments.created_by.
-  const dbUser = await db.query.users.findFirst({
-    where: eq(users.clerkId, userId),
-    columns: { id: true },
+  // Clerk's string ID is not the UUID referenced by tournaments.created_by; the
+  // writer resolves the active account under its lock.
+  const tournament = await createTournamentRecord(userId, tenantId, {
+    ...persistenceValues(validated),
+    slug,
   })
-  if (!dbUser) throw new Error("Your account is still being set up. Please refresh and try again.")
-
-  // ── Tenant-scoped via withTenantContext ──
-  // The repo's insert() will auto-set tenantId from context.
-  // Even if `values` contained a tenantId field, it would be overridden.
-  const [tournament] = await withTenantContext({ userId, tenantId }, () =>
-    tournamentRepo.insert<Tournament>({
-      ...persistenceValues(validated),
-      slug,
-      createdBy: dbUser.id,
-    })
-  )
-
-  if (!tournament) throw new Error("Tournament could not be created. Please try again.")
 
   revalidatePath("/dashboard/tournaments")
   revalidatePath("/dashboard")
@@ -121,33 +115,34 @@ export async function createTournament(input: CreateTournamentInput) {
 
 /**
  * Update a tournament.
- * The repo's updateById() scopes by both id AND tenantId from context.
+ *
+ * The writer locks the exact-league row, rechecks the current owner and writes the
+ * update plus an audit in one transaction; a renamed slug keeps per-league
+ * uniqueness.
  */
 export async function updateTournament(id: string, input: UpdateTournamentInput) {
   const { userId, tenantId } = await requireTournamentContext("tournament:update")
 
   const validated = updateTournamentSchema.parse(input)
-  const cleanData = Object.fromEntries(Object.entries(persistenceValues(validated)).filter(([, v]) => v !== undefined)) as Record<string, unknown>
-  if (cleanData.name && !cleanData.slug) cleanData.slug = generateSlug(cleanData.name as string)
 
-  const tournament = await withTenantContext({ userId, tenantId }, () =>
-    tournamentRepo.updateWithLock(id, (existing) => {
-      validateRelations({
-        startDate: validated.startDate === undefined ? existing.startDate : validated.startDate,
-        endDate: validated.endDate === undefined ? existing.endDate : validated.endDate,
-      })
-      const configuration = readTournamentConfiguration(existing.rules)
-      if (configuration && existing.rules && typeof existing.rules === "object" && !Array.isArray(existing.rules) && validated.maxTeams !== undefined) {
-        if (validated.maxTeams === null) throw new Error("A saved bracket setup requires a maximum team count")
-        cleanData.rules = { ...existing.rules, wizard: {
-          ...configuration, seedOrder: resizeSeedOrder(configuration.seedOrder, validated.maxTeams),
-        } }
-      }
-      return { ...cleanData, updatedAt: new Date() }
+  const tournament = await updateTournamentRecord(userId, tenantId, id, (existing) => {
+    const cleanData = Object.fromEntries(Object.entries(persistenceValues(validated)).filter(([, v]) => v !== undefined)) as Record<string, unknown>
+    if (cleanData.name && !cleanData.slug) cleanData.slug = generateSlug(cleanData.name as string)
+
+    validateRelations({
+      startDate: validated.startDate === undefined ? existing.startDate : validated.startDate,
+      endDate: validated.endDate === undefined ? existing.endDate : validated.endDate,
     })
-  )
+    const configuration = readTournamentConfiguration(existing.rules)
+    if (configuration && existing.rules && typeof existing.rules === "object" && !Array.isArray(existing.rules) && validated.maxTeams !== undefined) {
+      if (validated.maxTeams === null) throw new Error("A saved bracket setup requires a maximum team count")
+      cleanData.rules = { ...existing.rules, wizard: {
+        ...configuration, seedOrder: resizeSeedOrder(configuration.seedOrder, validated.maxTeams),
+      } }
+    }
+    return cleanData
+  })
 
-  if (!tournament) throw new Error("Tournament not found")
   revalidatePath("/dashboard/tournaments")
   revalidatePath(`/dashboard/tournaments/${id}`)
   return { success: true, tournament }

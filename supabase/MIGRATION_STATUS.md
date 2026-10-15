@@ -570,3 +570,29 @@ writes, audit rollback, lock deadlock freedom and RLS; mocked call-order/SQL tes
 not prove those database properties. Next source slice: remaining tournament
 create/update writers and venue/admin writers, then public/anonymous follow,
 publication and notification boundaries.
+
+## Batch 27 — locked, audited tournament create/update (15 October 2026)
+
+No schema change, migration application, remote database inspection/write or
+deployment occurred. `createTournament`/`updateTournament` no longer call
+`tournamentRepo.insert`/`updateWithLock`; a new `lib/tournament-writes.ts` performs
+both in READ COMMITTED transactions that lock account → league → membership (and, for
+update, the tournament row), recheck the current owner after the wait and write an
+atomic minimal audit (`TOURNAMENT_CREATE`/`TOURNAMENT_UPDATE`). It shares
+`lockOwnerContext` with the Batch 26 lifecycle writers, so all tournament writers use
+one lock order.
+
+Per-league unique slug: create and a renamed slug pre-check a `(tenant_id, slug)`
+duplicate and map a PostgreSQL unique-violation (`23505`) race to the same friendly
+error instead of a raw 500 — the unique constraint added by
+`uniqueTenantSlug: UNIQUE (tenant_id, slug)` is the real guarantee. The update write
+keeps the existing locked date/seed-order validation and legacy-rules preservation
+inside its `prepare` callback. `persistenceValues` is now generic so a create input
+keeps its required `name`/`format` through validation.
+
+All five prior migrations remain unapplied; release gate stays default-off. Before
+rollout, verify real two-session create/update/archive/registration lock ordering,
+unique-index behaviour under concurrency, audit rollback, lock deadlock freedom and
+RLS; mocked call-order/SQL tests do not prove those database properties. Next source
+slice: remaining venue writers, settings/billing and other dashboard destinations,
+then public/anonymous follow, publication and notification boundaries.

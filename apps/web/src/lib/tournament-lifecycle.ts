@@ -9,7 +9,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 // match lock, never hard-deletes and never cascades: registration history and
 // match/team links are preserved. READ COMMITTED reads after waits recheck the
 // current owner and status.
-async function ownerContext(tx: Tx, clerkId: string, tenantId: string) {
+export async function lockOwnerContext(tx: Tx, clerkId: string, tenantId: string) {
   const initial = await tx.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
   if (!initial) throw new Error("Forbidden: tournament account not found")
   await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${initial.id} FOR UPDATE`)
@@ -38,7 +38,7 @@ async function ownerContext(tx: Tx, clerkId: string, tenantId: string) {
 export async function archiveTournament(clerkId: string, tenantId: string, id: string) {
   z.string().uuid().parse(id)
   return db.transaction(async (tx) => {
-    const context = await ownerContext(tx, clerkId, tenantId)
+    const context = await lockOwnerContext(tx, clerkId, tenantId)
     await tx.execute(sql`SELECT ${tournaments.id} FROM ${tournaments}
       WHERE ${and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId))} FOR UPDATE`)
     const tournament = await tx.query.tournaments.findFirst({ where: and(
@@ -68,7 +68,7 @@ export async function archiveTournament(clerkId: string, tenantId: string, id: s
 export async function setTournamentRegistration(clerkId: string, tenantId: string, id: string, open: boolean) {
   z.string().uuid().parse(id)
   return db.transaction(async (tx) => {
-    const context = await ownerContext(tx, clerkId, tenantId)
+    const context = await lockOwnerContext(tx, clerkId, tenantId)
     await tx.execute(sql`SELECT ${tournaments.id} FROM ${tournaments}
       WHERE ${and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId))} FOR UPDATE`)
     const tournament = await tx.query.tournaments.findFirst({ where: and(

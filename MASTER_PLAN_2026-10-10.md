@@ -1816,6 +1816,50 @@ writers, then public/anonymous follow, publication and notification paths. No fu
 ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19 checked
 / 60 open / 79 IDs**.
 
+### 2026-10-15 — Batch 27: locked, audited tournament create/update
+
+#### Implemented
+
+- Synced clean `main` with remote `ff5d12e`. Scope is the tournament create/update
+  writers; venue writers, settings/billing destinations and public/anonymous follow
+  stay open.
+- New `lib/tournament-writes.ts` moves create/update off `tournamentRepo.insert` /
+  `updateWithLock` into READ COMMITTED account → league → membership → tournament
+  locks with a post-wait owner recheck and an atomic minimal audit
+  (`TOURNAMENT_CREATE`/`TOURNAMENT_UPDATE`), sharing `lockOwnerContext` with the
+  Batch 26 lifecycle writers. `createTournament`/`updateTournament` are thin wrappers.
+- Per-league unique slug: create and a renamed slug pre-check a duplicate and map a
+  PostgreSQL unique-violation (`23505`) race to the same friendly error, replacing a
+  raw 500. The update write keeps the locked date/seed-order validation and
+  legacy-rules preservation inside its `prepare` callback.
+- `persistenceValues` is generic so a create input keeps its required `name`/`format`.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/web test` | PASS — 53 files, **1,947 tests** |
+| `corepack pnpm --filter @mtk/database test` | PASS — 8 files, **128 tests** |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS — 8 suites, **193 tests** |
+| Combined | **2,268 passing tests** (+5 over Batch 26) |
+
+The `tournament-actions.test.ts` writer block adds cases for the locked create with
+audit and lock order, duplicate-slug pre-check, unique-violation mapping, locked
+update with audit and lock order, foreign/missing tournament, membership-change
+denial, renamed-slug collision and permission denial before the transaction. Mocked
+call-order/SQL tests are not PostgreSQL lock, rollback, unique-index or RLS proof.
+
+No build, lint, schema change, migration application, remote database operation or
+deployment ran. A standalone `tsc --noEmit` still reports only its pre-existing
+unrelated errors. Five prior migrations remain unapplied and the release gate stays
+default-off. Real two-session create/update/archive/registration lock ordering,
+unique-index behaviour, audit rollback and RLS remain release acceptance work.
+
+Next source work: the remaining venue writers, settings/billing and other dashboard
+destinations, then public/anonymous follow, publication and notification paths. No
+full ISO-04 or authenticated browser claim; whole-task roadmap counts remain **19
+checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
