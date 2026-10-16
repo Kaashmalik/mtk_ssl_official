@@ -9,6 +9,8 @@ import {
   memberRoleChangeSchema, memberStatusChangeSchema, memberRemovalSchema,
 } from "@/lib/member-management"
 import type { MemberRoleChange, MemberStatusChange, MemberRemoval } from "@/lib/member-management"
+import { readMemberDirectory, readMemberDetails } from "@/lib/member-directory"
+import { memberDirectoryRequest, memberDetailRequest, type MemberDirectoryRequest, type MemberDetailRequest } from "@/lib/member-directory-filters"
 
 export type { MemberRoleChange, MemberStatusChange, MemberRemoval }
 
@@ -22,6 +24,7 @@ async function requireMemberManager() {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const access = await getDashboardContext(userId)
+  if (access.status === "unavailable") throw new Error("League member access is unavailable. Please try again.")
   if (access.status !== "ready" || access.context.role !== "league_owner" || !hasPermission(access.context.role, "user:manage")) {
     throw new Error("Forbidden: league member management requires an active owner membership")
   }
@@ -32,6 +35,20 @@ async function requireMemberManager() {
 export async function getUsers(expectedTenantId?: string) {
   const context = await requireMemberManager()
   return readLeagueMembers(context.tenantId, expectedTenantId)
+}
+
+export async function getMemberDirectory(input: MemberDirectoryRequest) {
+  const { tenantId, ...filters } = memberDirectoryRequest.parse(input)
+  const context = await requireMemberManager()
+  if (tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before viewing.")
+  return readMemberDirectory(context.tenantId, filters)
+}
+
+export async function getMemberDetails(input: MemberDetailRequest) {
+  const parsed = memberDetailRequest.parse(input)
+  const context = await requireMemberManager()
+  if (parsed.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before viewing.")
+  return readMemberDetails(context.tenantId, parsed.membershipId)
 }
 
 export async function updateUserRole(input: MemberRoleChange) {

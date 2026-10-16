@@ -116,4 +116,10 @@ describe("League member UI contracts (SSR/stubbed controls, not browser certific
     expect(html).toContain("&lt;script&gt;bad&lt;/script&gt;")
     expect(html).not.toContain("<script>")
   })
+  it("uses server-side directory controls instead of a misleading loaded-row search in directory mode", () => {
+    const html = renderToStaticMarkup(<UserListTable initialUsers={[member]} directoryMode currentUserId="owner" tenantId="A" tenantName="League A" />)
+    expect(html).not.toContain('aria-label="Search loaded league members"')
+    expect(html).toContain("Use directory search to search the whole league")
+    expect(html).toContain('href="/dashboard/settings/members/membership-A"')
+  })
 })

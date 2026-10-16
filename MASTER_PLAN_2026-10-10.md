@@ -3234,6 +3234,32 @@ coverage: parser 15, query +11, page +9 (35). No schema, migration, RLS/grant, p
 remote database or deployment change; mocked aggregate predicates are not real-DB proof.
 Roadmap counts stay **19 checked / 60 open / 79 IDs**.
 
+### Batch 58 — searchable member directory, cursor navigation and details (16 October 2026)
+
+IAM-02 source slice. Replaced the first-100, loaded-row-only member administration
+surface with owner-only exact-league server reads. New member-directory filters/readers
+and action delegates validate search/role/status/UUID cursors, parameterize and escape
+literal name/email search, and return 50 ID-ordered memberships plus next-cursor metadata
+derived from one extra row. No OFFSET scan, per-member query fan-out or invented total.
+
+The shared users/settings-members page gets labelled GET filters and next/first links;
+filter submissions deliberately reset the cursor. Ownership recipients come from the
+current results, with an explicit instruction to search/page to locate another member.
+An owner-only membership detail route shows one same-league member, assignments and
+the existing versioned save-confirmed controls. It 404s missing/foreign/malformed IDs
+and propagates read outages. Private contact fields never become team-manager-readable.
+Both existing URLs remain supported; settings members has shared loading/error states.
+
+Fresh verification: web **2,445 tests / 98 files passed**, process exit 0 (+55);
+targeted member/guard **177 / 8 files passed**; `git diff --check` clean. New query/filter
+tests 19, action 14, SSR controls 4, detail page 12, existing page +5 and table +1.
+Type check remains at its
+18 pre-existing diagnostics, none introduced here. No schema, migration, remote database,
+RLS/grant, provider or deployment change. Actual expiry/grants, database concurrency
+and browser/device acceptance are still separate requirements. Docker/PostgreSQL tools
+were not available through this environment's PATH/service checks.
+Roadmap counts remain **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

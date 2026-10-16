@@ -48,8 +48,8 @@ function describeAssignments(assignments?: MemberAssignmentMap[string]): string[
   return assignments.isComplete ? parts : parts.map(part => `At least: ${part}`)
 }
 
-export function UserListTable({ initialUsers, assignments = {}, currentUserId, tenantId, tenantName }: {
-  initialUsers: Member[]; assignments?: MemberAssignmentMap; currentUserId?: string | null; tenantId: string; tenantName: string
+export function UserListTable({ initialUsers, assignments = {}, directoryMode = false, currentUserId, tenantId, tenantName }: {
+  initialUsers: Member[]; assignments?: MemberAssignmentMap; directoryMode?: boolean; currentUserId?: string | null; tenantId: string; tenantName: string
 }) {
   const router = useRouter()
   const [members, setMembers] = useState(initialUsers)
@@ -105,10 +105,10 @@ export function UserListTable({ initialUsers, assignments = {}, currentUserId, t
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">Active membership permits only this league's role. A suspended platform account stays blocked everywhere. Owner and self access are protected.</p>
-      <div className="relative max-w-sm">
+      {!directoryMode && <div className="relative max-w-sm">
         <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <Input aria-label="Search loaded league members" placeholder="Search loaded members…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9 min-h-11" />
-      </div>
+      </div>}
       <p role="status" aria-live="polite" className="text-sm">{notice}</p>
       <div className="rounded-xl border bg-card overflow-x-auto">
         <Table>
@@ -121,7 +121,7 @@ export function UserListTable({ initialUsers, assignments = {}, currentUserId, t
               const memberAssignments = assignments[member.id]
               const assignmentSummary = describeAssignments(memberAssignments)
               return <TableRow key={member.membershipId}>
-                <TableCell><span className="font-semibold block">{member.displayName || "No display name"}</span><span className="text-xs text-muted-foreground">Joined {new Date(member.createdAt).toLocaleDateString()}</span></TableCell>
+                <TableCell><Link className="font-semibold underline min-h-11 inline-flex items-center" href={`/dashboard/settings/members/${member.membershipId}`}>{member.displayName || "No display name"}</Link><span className="block text-xs text-muted-foreground">Joined {new Date(member.createdAt).toLocaleDateString()}</span></TableCell>
                 <TableCell>{member.email}</TableCell>
                 <TableCell>{!memberAssignments
                   ? <span className="text-xs text-muted-foreground">Assignments not loaded</span>
@@ -163,7 +163,7 @@ export function UserListTable({ initialUsers, assignments = {}, currentUserId, t
           </TableBody>
         </Table>
       </div>
-      <p className="text-xs text-muted-foreground">Showing up to 100 members in this league. Search applies to loaded members only.</p>
+      <p className="text-xs text-muted-foreground">{directoryMode ? `Showing ${members.length} members on this page. Use directory search to search the whole league.` : "Showing up to 100 members in this league. Search applies to loaded members only."}</p>
       <Dialog open={confirmation !== null} onOpenChange={open => { if (!open && !updatingId) setConfirmation(null) }}>
         <DialogContent>
           <DialogHeader>

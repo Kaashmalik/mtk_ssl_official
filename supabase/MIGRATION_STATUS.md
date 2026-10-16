@@ -11,6 +11,15 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 58 application-only member directory (16 October 2026)
+
+Owner-only member readers add literal name/email search, league role/access filters,
+membership-ID keyset pagination and exact-membership detail reads. Every read retains
+an exact tenant predicate and a bounded explicit field projection; no new public API
+or private-contact permission is granted. No schema/migration, database inspection/write,
+RLS/grant, provider or deployment change ran. Real PostgreSQL query plans, isolation,
+concurrent changes between pages and authenticated browser journeys remain unverified.
+
 ### Batch 57 application-only leaderboard qualification (16 October 2026)
 
 Published league leaderboards now apply user-selected minimum innings/balls to the

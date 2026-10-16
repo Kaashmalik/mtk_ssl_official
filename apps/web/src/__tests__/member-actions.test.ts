@@ -105,9 +105,14 @@ describe("League-only member administration", () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
     expect(mocks.select).not.toHaveBeenCalled()
   })
-  it.each(["denied", "unavailable", "no-tenant"])("denies context %s", async status => {
+  it.each(["denied", "no-tenant"])("denies context %s", async status => {
     mocks.context.mockResolvedValue({ status })
     await expect(getUsers()).rejects.toThrow("Forbidden")
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
+  it("surfaces an unavailable member-management context", async () => {
+    mocks.context.mockResolvedValue({ status: "unavailable" })
+    await expect(getUsers()).rejects.toThrow("League member access is unavailable")
     expect(mocks.select).not.toHaveBeenCalled()
   })
   it("requires a current authenticated session", async () => {
