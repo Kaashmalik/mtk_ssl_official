@@ -3310,6 +3310,39 @@ missing-row legacy fallback is not a predicate lock or immutable XI declaration.
 Official approval, frozen XI/substitution history and real-DB/browser acceptance remain
 open. Roadmap stays **19 checked / 60 open / 79 IDs**, release gate default-off.
 
+### Batch 61 — publication-gated public scoring HTTP and sockets (16 October 2026)
+
+SCORE-13/ISO-08 source slice. Canonical service HTTP state/history accepted a bare UUID;
+socket joins subscribed before looking up state, and commentary/reactions bypassed the
+web publication gate. This was not protected by CORS, UUID secrecy or cached state.
+
+Added shared lifecycle policy and publication-aware service reads: exact league/match,
+active league, same-league published tournament or explicit friendly; failures never
+authorize. Public state/history uses fresh repeatable-read read-only transactions rather
+than the internal Redis cache. History verifies innings parentage and projects bounded,
+allowlisted fields without operation/actor metadata. GET routes now require `x-tenant-id`.
+
+Socket contracts carry tenant+match; public room names include both. Joins authorize
+before subscribing. State broadcasts, commentary and reactions recheck publication;
+denied rooms are evicted without turning committed writes into failed acknowledgements,
+even if the transport adapter is unavailable. Commentary strips unrelated event metadata.
+Reactions require approved room membership/emoji and a one-second per-connection limit;
+distributed anti-abuse is still open. Clients scope subscriptions/reactions, show denied
+updates and preserve unconfirmed work; public custom-domain resolution also requires
+active league status. The anonymous channel deliberately does not grant private access.
+
+Coordinated rollout requires normal shared-package artifact generation, gated backend
+deployment/draining of old UUID-only instances, then the new client. No rollout occurred.
+Fresh verification: web **2,482 / 101 files**, database **181 / 11 files**, scoring
+**262 / 10 suites** — **2,925 passing tests** (+89), all processes exit 0. Targeted web
+**53 / 4 files**, policy/events **35 / 2 files**, scoring **166 / 6 suites** passed.
+Web type check exits 0; `git diff --check` clean. The legacy API scoring module is
+already unregistered, confirmed by source inspection; it is not a live endpoint.
+No schema/migration, RLS/grant, remote database,
+provider, build or deployment changes. Real multi-instance fan-out/withdrawal, browser,
+consent and private socket grant acceptance are not certified. Other gateways still need
+review. Roadmap **19 checked / 60 open / 79 IDs**; release gate remains default-off.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

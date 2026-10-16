@@ -1,6 +1,8 @@
 import { and, eq, asc, desc, inArray, sum, gte } from "drizzle-orm"
 import { db, matches, tournaments, teams, matchInnings, players, playerSeasonStats } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput } from "./leaderboard-filters"
+import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
+export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
 /**
  * Publication boundary for the public (unauthenticated) surface.
@@ -18,27 +20,8 @@ import { publicLeaderboardFilters, type PublicLeaderboardFilterInput } from "./l
  * hidden, and the database stays authoritative.
  */
 
-/** Tournament statuses that may be shown to the public. `draft`/`cancelled` may not. */
-export const PUBLISHED_TOURNAMENT_STATUS_VALUES = ["registration", "live", "completed"] as const
-
-/** Match statuses that may be shown to the public. A cancelled fixture may not. */
-export const PUBLISHED_MATCH_STATUS_VALUES = [
-  "scheduled", "toss", "live", "innings_break", "completed", "abandoned", "no_result",
-] as const
-
-const PUBLISHED_TOURNAMENT_STATUSES: ReadonlySet<string> = new Set(PUBLISHED_TOURNAMENT_STATUS_VALUES)
-const PUBLISHED_MATCH_STATUSES: ReadonlySet<string> = new Set(PUBLISHED_MATCH_STATUS_VALUES)
-
 /** Public leaderboard rows are bounded, newest-agnostic (ranked by aggregate). */
 export const PUBLIC_LEADERBOARD_LIMIT = 10
-
-export function isTournamentPublished(status: string | null | undefined): boolean {
-  return !!status && PUBLISHED_TOURNAMENT_STATUSES.has(status)
-}
-
-export function isMatchPublished(status: string | null | undefined): boolean {
-  return !!status && PUBLISHED_MATCH_STATUSES.has(status)
-}
 
 export type PublicTournament = typeof tournaments.$inferSelect
 export type PublicMatch = typeof matches.$inferSelect

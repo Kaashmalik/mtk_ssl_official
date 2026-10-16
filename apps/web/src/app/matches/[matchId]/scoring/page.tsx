@@ -94,7 +94,7 @@ function ScoringInterface() {
   const totalOvers = matchData?.match.totalOvers ?? 20;
 
   // Live updates from scoring-service WebSocket (reconnect + backoff)
-  useScoringSocket(matchId);
+  const { unavailable: liveUnavailable } = useScoringSocket(matchId, matchData?.tenantId);
 
   const currentTeamId = currentInningsData?.teamId;
 
@@ -368,6 +368,7 @@ function ScoringInterface() {
     <div
       className="min-h-screen bg-background px-3 pt-2 sm:p-6 space-y-3 sm:space-y-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
     >
+      {liveUnavailable && <p role="alert" className="text-sm text-warning">Public live updates are unavailable. Scoring commands still require server confirmation.</p>}
       {/* Sticky mobile header: score + connection + undo */}
       <div className="sticky top-0 z-20 -mx-3 px-3 py-2 sm:static sm:mx-0 sm:px-0 sm:py-0 bg-background/95 backdrop-blur border-b sm:border-0 supports-[backdrop-filter]:bg-background/80">
         <div className="flex items-start justify-between gap-2">

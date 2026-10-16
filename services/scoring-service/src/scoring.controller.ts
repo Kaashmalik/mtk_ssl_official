@@ -70,23 +70,25 @@ const MUTATION_GUARDS = [
 export class ScoringController {
   constructor(private readonly scoringService: ScoringService, private readonly gateway: ScoringGateway) {}
 
-  // Reads stay unauthenticated so public scoreboards can poll state. They only
-  // ever expose scorecard numbers for a match the caller already holds a UUID
-  // for, and the public pages themselves resolve the tenant before rendering.
+  // Anonymous reads declare an exact tenant and must pass publication checks.
+  // UUID knowledge and CORS are not authorization for private match data.
 
   @Get('match/:matchId/state')
+  @UseGuards(TenantScopeGuard)
   @Throttle({ default: { limit: 60, ttl: 60000 } }) // 60 requests per minute for state polling
-  async getMatchState(@Param('matchId') matchId: string) {
-    return this.scoringService.getMatchState(matchId);
+  async getMatchState(@Req() req: Request, @Param('matchId') matchId: string) {
+    return this.scoringService.getPublicMatchState(tenantIdOf(req), matchId);
   }
 
   @Get('match/:matchId/innings/:inningsId/history')
+  @UseGuards(TenantScopeGuard)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
   async getBallHistory(
+    @Req() req: Request,
     @Param('matchId') matchId: string,
     @Param('inningsId') inningsId: string,
   ) {
-    return this.scoringService.getBallHistory(matchId, inningsId, 100);
+    return this.scoringService.getBallHistory(tenantIdOf(req), matchId, inningsId, 100);
   }
 
   @Post('ball')
@@ -99,7 +101,7 @@ export class ScoringController {
       ...dto,
       timestamp: new Date(),
     });
-    await this.gateway.broadcastMatchState(dto.matchId);
+    await this.gateway.broadcastMatchState(tenantIdOf(req), dto.matchId);
     return result;
   }
 
@@ -116,7 +118,7 @@ export class ScoringController {
       body.matchId,
       body.ballId,
     );
-    await this.gateway.broadcastMatchState(body.matchId);
+    await this.gateway.broadcastMatchState(tenantIdOf(req), body.matchId);
     return result;
   }
 
@@ -130,7 +132,7 @@ export class ScoringController {
       teamId: dto.teamId,
       inningsNumber: Number(dto.inningsNumber),
     });
-    await this.gateway.broadcastMatchState(dto.matchId);
+    await this.gateway.broadcastMatchState(tenantIdOf(req), dto.matchId);
     return result;
   }
 
@@ -153,7 +155,7 @@ export class ScoringController {
       body.matchId,
       inningsId,
     );
-    await this.gateway.broadcastMatchState(body.matchId);
+    await this.gateway.broadcastMatchState(tenantIdOf(req), body.matchId);
     return result;
   }
 
@@ -174,7 +176,7 @@ export class ScoringController {
       body.result,
       body.manOfMatchId,
     );
-    await this.gateway.broadcastMatchState(matchId);
+    await this.gateway.broadcastMatchState(tenantIdOf(req), matchId);
     return { success: true, matchId, status: 'completed' };
   }
 }

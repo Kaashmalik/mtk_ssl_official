@@ -29,12 +29,14 @@ import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
 import { z } from 'zod';
 import { env } from './env';
 import { requireScoringWriteAccess, requireDeliveryParticipants, requireMatchTeams } from './scoring-write-access';
+import { requirePublishedScoringMatch, validatePublicReadIds } from './scoring-public-access';
 import {
   KafkaScoringPublisher,
   ScoringBallEventPayload,
 } from './kafka-scoring-publisher.service';
 import {
   parseCachedMatchState,
+  buildMatchState,
   type MatchState,
   type MatchStatus,
   type Scorecard,
@@ -189,6 +191,7 @@ export class ScoringService {
     });
   }
 
+  /** Internal cached read only. Network reads must use getPublicMatchState. */
   async getMatchState(matchId: string, fresh = false): Promise<MatchState | null> {
     if (!z.string().uuid().safeParse(matchId).success) throw new BadRequestException('Invalid match ID');
     const cacheKey = `match:state:${matchId}`;
@@ -223,39 +226,7 @@ export class ScoringService {
           where: and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, match.tenantId)),
           orderBy: [matchInnings.inningsNumber],
         });
-        const state: MatchState = {
-          version: 2,
-          matchId,
-          status: match.status,
-          currentInnings: 1,
-          updatedAt: match.updatedAt.toISOString(),
-        };
-        for (const inn of innings) {
-          const scorecard = {
-            matchId,
-            innings: inn.inningsNumber,
-            inningsId: inn.id,
-            teamId: inn.teamId,
-            status: inn.status,
-            extras: inn.extras,
-            wides: inn.wides,
-            noBalls: inn.noBalls,
-            byes: inn.byes,
-            legByes: inn.legByes,
-            totalBalls: inn.totalBalls,
-            updatedAt: inn.updatedAt.toISOString(),
-            totalRuns: inn.totalRuns,
-            totalWickets: inn.totalWickets,
-            overs: Math.floor(inn.totalBalls / 6),
-            balls: inn.totalBalls % 6,
-            runRate: inn.totalBalls > 0 ? (inn.totalRuns / (inn.totalBalls / 6)) : 0,
-          };
-          if (inn.inningsNumber === 1) state.innings1 = scorecard;
-          else if (inn.inningsNumber === 2) state.innings2 = scorecard;
-          else if (inn.inningsNumber === 3) state.superOver = scorecard;
-          state.currentInnings = inn.inningsNumber;
-        }
-        return state;
+        return buildMatchState(match, innings);
       }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
 
       try {
@@ -798,15 +769,47 @@ export class ScoringService {
     return result;
   }
 
-  async getBallHistory(matchId: string, inningsId: string, limit: number = 50) {
-    return db.query.matchBalls.findMany({
-      where: and(
-        eq(matchBalls.matchId, matchId),
-        eq(matchBalls.inningsId, inningsId)
-      ),
-      orderBy: [desc(matchBalls.ballSequence)],
-      limit,
-    });
+  /** Publication is revalidated on every public read; Redis cannot authorize visibility. */
+  async getPublicMatchState(tenantId: string, matchId: string): Promise<MatchState> {
+    validatePublicReadIds(tenantId, matchId);
+    return db.transaction(async tx => {
+      const match = await requirePublishedScoringMatch(tx, tenantId, matchId);
+      const innings = await tx.query.matchInnings.findMany({ where: and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId)), orderBy: [matchInnings.inningsNumber] });
+      return buildMatchState(match, innings);
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
+  async assertPublicMatch(tenantId: string, matchId: string): Promise<void> {
+    validatePublicReadIds(tenantId, matchId);
+    await db.transaction(async tx => { await requirePublishedScoringMatch(tx, tenantId, matchId); }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
+  /** Internal Kafka bridge discovery only, not an anonymous network route. */
+  async publishedMatchTenant(matchId: string): Promise<string> {
+    validatePublicReadIds(matchId);
+    return db.transaction(async tx => {
+      const row = await tx.query.matches.findFirst({ where: eq(matches.id, matchId), columns: { id: true, tenantId: true } });
+      if (!row || row.id !== matchId) throw new NotFoundException('Match not found');
+      await requirePublishedScoringMatch(tx, row.tenantId, matchId);
+      return row.tenantId;
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
+  async getBallHistory(tenantId: string, matchId: string, inningsId: string, limit: number = 50) {
+    validatePublicReadIds(tenantId, matchId, inningsId);
+    const bounded = z.number().int().min(1).max(100).parse(limit);
+    return db.transaction(async tx => {
+      await requirePublishedScoringMatch(tx, tenantId, matchId);
+      const innings = await tx.query.matchInnings.findFirst({ where: and(eq(matchInnings.id, inningsId), eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId)) });
+      if (!innings || innings.id !== inningsId || innings.matchId !== matchId || innings.tenantId !== tenantId) throw new NotFoundException('Innings not found');
+      return tx.query.matchBalls.findMany({
+        columns: { id: true, matchId: true, inningsId: true, overNumber: true, ballNumber: true, ballSequence: true, runs: true,
+          isWicket: true, isWide: true, isNoBall: true, isBye: true, isLegBye: true, isFour: true, isSix: true,
+          batsmanId: true, bowlerId: true, wicketType: true, createdAt: true },
+        where: and(eq(matchBalls.tenantId, tenantId), eq(matchBalls.matchId, matchId), eq(matchBalls.inningsId, inningsId)),
+        orderBy: [desc(matchBalls.ballSequence)], limit: bounded,
+      });
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
   }
 
   /**

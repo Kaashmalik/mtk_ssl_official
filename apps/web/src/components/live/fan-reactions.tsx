@@ -3,27 +3,33 @@
 import { useEffect, useState } from "react"
 import Confetti from "react-confetti"
 import { getScoringSocket } from "@/lib/scoring-socket"
+import { PUBLIC_FAN_REACTIONS, isScopedFanReaction } from "@mtk/database/lib/public-scoring-events"
 
-const REACTIONS = ["🔥", "👏", "😱", "🏏", "🎉", "💔"]
-
-export function FanReactions({ matchId }: { matchId: string }) {
+export function FanReactions({ matchId, tenantId }: { matchId: string; tenantId: string }) {
   const [burst, setBurst] = useState<{ key: number; active: boolean } | null>(null)
+  const [notice, setNotice] = useState("")
 
   useEffect(() => {
     const socket = getScoringSocket()
-    const handler = (data: { emoji: string }) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    setBurst(null)
+    setNotice("")
+    const handler = (data: unknown) => {
+      if (!isScopedFanReaction(data, tenantId, matchId)) return
+      if (timer) clearTimeout(timer)
       setBurst({ key: Date.now(), active: true })
-      setTimeout(() => setBurst((b) => (b ? { ...b, active: false } : b)), 1800)
-      void data
+      timer = setTimeout(() => setBurst((b) => (b ? { ...b, active: false } : b)), 1800)
     }
     socket.on("fan-reaction", handler)
-    return () => { socket.off("fan-reaction", handler) }
-  }, [])
+    return () => { socket.off("fan-reaction", handler); if (timer) clearTimeout(timer) }
+  }, [matchId, tenantId])
 
   const react = (emoji: string) => {
-    getScoringSocket().emit("fan-reaction", { matchId, emoji })
-    setBurst({ key: Date.now(), active: true })
-    setTimeout(() => setBurst((b) => (b ? { ...b, active: false } : b)), 1800)
+    // Only the scoped, server-confirmed broadcast triggers the visual reaction.
+    getScoringSocket().emit("fan-reaction", { matchId, tenantId, emoji }, (ack?: { success?: boolean; error?: string }) => {
+      if (ack?.success === false) setNotice(ack.error || "Reaction unavailable")
+      else if (ack?.success === true) setNotice("")
+    })
   }
 
   return (
@@ -34,7 +40,7 @@ export function FanReactions({ matchId }: { matchId: string }) {
         </div>
       )}
       <div className="flex gap-2 justify-center">
-        {REACTIONS.map((e) => (
+        {PUBLIC_FAN_REACTIONS.map((e) => (
           <button
             key={e}
             type="button"
@@ -46,6 +52,7 @@ export function FanReactions({ matchId }: { matchId: string }) {
           </button>
         ))}
       </div>
+      <p role="status" aria-live="polite" className="text-xs text-muted-foreground">{notice}</p>
     </div>
   )
 }

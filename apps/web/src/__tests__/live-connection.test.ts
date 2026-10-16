@@ -12,6 +12,7 @@ vi.hoisted(() => {
   } })
 })
 const MATCH = "00000000-0000-4000-8000-000000000001"
+const TENANT = "00000000-0000-4000-8000-000000000004"
 function snapshot() {
   return { version: 2, matchId: MATCH, status: "live", currentInnings: 1,
     updatedAt: "2026-10-12T12:00:00.000Z", innings1: {
@@ -42,14 +43,16 @@ function transport() {
 describe("Live connection lifecycle", () => {
   let connection: ReturnType<typeof transport>
   let cleanups: (() => void)[]
+  let unavailable: ReturnType<typeof vi.fn>
   function subscribe() {
-    const cleanup = subscribeToLiveMatch(connection.socket as unknown as Socket, MATCH, connection.browser)
+    const cleanup = subscribeToLiveMatch(connection.socket as unknown as Socket, MATCH, TENANT, connection.browser, unavailable)
     cleanups.push(cleanup)
     return cleanup
   }
   beforeEach(() => {
     connection = transport()
     cleanups = []
+    unavailable = vi.fn()
     useScoringStore.setState({ matchId: MATCH, matchStatus: "scheduled", matchUpdatedAt: undefined,
       innings1: null, innings2: null, superOver: null })
   })
@@ -92,7 +95,7 @@ describe("Live connection lifecycle", () => {
     cleanups = []
     expect(connection.listeners.get("match-state")?.size).toBe(0)
     expect(connection.browserListeners.size).toBe(0)
-    expect(connection.socket.emit).toHaveBeenCalledWith("leave-match", { matchId: MATCH })
+    expect(connection.socket.emit).toHaveBeenCalledWith("leave-match", { matchId: MATCH, tenantId: TENANT })
   })
   it("does not leave a room used by another mounted consumer", () => {
     const first = subscribe()
@@ -107,5 +110,30 @@ describe("Live connection lifecycle", () => {
     expect(useScoringStore.getState().isOnline).toBe(true)
     connection.browserListeners.get("offline")!()
     expect(useScoringStore.getState().isOnline).toBe(false)
+  })
+  it("declares the exact league on every join rather than using UUID knowledge as access", () => {
+    subscribe()
+    expect(connection.socket.emit).toHaveBeenCalledWith("join-match", { matchId: MATCH, tenantId: TENANT }, expect.any(Function))
+  })
+  it("reports a rejected join without erasing locally unconfirmed work", () => {
+    subscribe()
+    const callback = connection.socket.emit.mock.calls.find(([event]) => event === "join-match")![2]
+    callback({ success: false, error: "Unavailable" })
+    expect(unavailable).toHaveBeenCalledWith(true)
+    expect(useScoringStore.getState().matchId).toBe(MATCH)
+  })
+  it("responds only to unavailability for the exact league and match", () => {
+    subscribe()
+    connection.receive("match-unavailable", { matchId: MATCH, tenantId: MATCH })
+    expect(unavailable).not.toHaveBeenCalled()
+    connection.receive("match-unavailable", { matchId: MATCH, tenantId: TENANT })
+    expect(unavailable).toHaveBeenCalledWith(true)
+  })
+  it("tracks shared consumers separately across league contexts", () => {
+    const first = subscribe()
+    cleanups.push(subscribeToLiveMatch(connection.socket as unknown as Socket, MATCH, MATCH, connection.browser))
+    first()
+    cleanups.shift()
+    expect(connection.socket.emit).toHaveBeenCalledWith("leave-match", { matchId: MATCH, tenantId: TENANT })
   })
 })

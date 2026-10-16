@@ -28,7 +28,7 @@ export default async function LiveMatchPage({ params }: { params: Promise<{ matc
       <StreamSelector source={match.streamSource} url={match.liveStreamUrl} />
       <Card>
         <CardContent className="py-3">
-          <LiveOverlay matchId={matchId} />
+          <LiveOverlay matchId={matchId} tenantId={tenantId} />
         </CardContent>
       </Card>
     </div>

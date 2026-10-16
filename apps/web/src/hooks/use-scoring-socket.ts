@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getScoringSocket } from "@/lib/scoring-socket";
 import { subscribeToLiveMatch } from "@/lib/live-scoring-connection";
 
 /** Every connection/reconnection requests a complete, fresh innings snapshot. */
-export function useScoringSocket(matchId: string | undefined) {
+export function useScoringSocket(matchId: string | undefined, tenantId: string | undefined) {
+  const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {
-    if (!matchId) return;
-    return subscribeToLiveMatch(getScoringSocket(), matchId);
-  }, [matchId]);
+    setUnavailable(false);
+    if (!matchId || !tenantId) return;
+    return subscribeToLiveMatch(getScoringSocket(), matchId, tenantId, undefined, setUnavailable);
+  }, [matchId, tenantId]);
+  return { unavailable };
 }

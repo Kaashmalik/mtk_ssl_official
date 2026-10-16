@@ -37,7 +37,7 @@ describe('Post-commit match-state broadcast', () => {
   }
   it.each(Object.keys(service))('broadcasts a full snapshot after successful %s', async (operation) => {
     await mutate(operation);
-    expect(gateway.broadcastMatchState).toHaveBeenCalledWith(MATCH);
+    expect(gateway.broadcastMatchState).toHaveBeenCalledWith('tenant', MATCH);
     expect(service[operation].mock.calls[0].slice(0, 2)).toEqual(['tenant', '00000000-0000-4000-8000-000000000006']);
   });
   it.each(Object.keys(service))('never broadcasts a rejected %s', async (operation) => {
@@ -66,5 +66,30 @@ describe('Post-commit match-state broadcast', () => {
   it.each(Object.keys(service))('protects the real %s route with ordered token, tenant, and actor guards', (operation) => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, ScoringController.prototype[operation]) as unknown[];
     expect(guards.slice(-3)).toEqual([ScoringServiceAuthGuard, TenantScopeGuard, ScoringActorGuard]);
+  });
+});
+
+describe('Publication-gated anonymous scoring HTTP reads', () => {
+  const service = { getPublicMatchState: jest.fn(), getBallHistory: jest.fn() };
+  const request = { tenantId: '00000000-0000-4000-8000-000000000002' } as unknown as Request;
+  let controller: ScoringController;
+  beforeEach(() => {
+    jest.resetAllMocks();
+    controller = new ScoringController(service as unknown as ScoringService, {} as ScoringGateway);
+  });
+  it.each(['getMatchState', 'getBallHistory'])('requires an explicit tenant on %s', operation => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, ScoringController.prototype[operation])).toContain(TenantScopeGuard);
+  });
+  it('delegates snapshots to the publication-aware reader, not the internal cache', async () => {
+    await controller.getMatchState(request, MATCH);
+    expect(service.getPublicMatchState).toHaveBeenCalledWith(request['tenantId'], MATCH);
+  });
+  it('scopes history to league, match and innings with a hard maximum', async () => {
+    await controller.getBallHistory(request, MATCH, MATCH);
+    expect(service.getBallHistory).toHaveBeenCalledWith(request['tenantId'], MATCH, MATCH, 100);
+  });
+  it('rejects missing tenant context before invoking a reader', async () => {
+    await expect(controller.getMatchState({} as Request, MATCH)).rejects.toThrow('Tenant scope missing');
+    expect(service.getPublicMatchState).not.toHaveBeenCalled();
   });
 });

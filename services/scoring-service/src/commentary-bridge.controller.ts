@@ -21,13 +21,11 @@ export class CommentaryBridgeController {
   constructor(private readonly scoringGateway: ScoringGateway) {}
 
   @EventPattern('ssl.commentary')
-  handleCommentary(@Payload() data: CommentaryEvent) {
+  async handleCommentary(@Payload() data: CommentaryEvent) {
     if (!data?.matchId) {
       this.logger.warn('Commentary event missing matchId');
       return;
     }
-    this.scoringGateway.server
-      ?.to(`match:${data.matchId}`)
-      .emit('commentary-update', data);
+    await this.scoringGateway.broadcastCommentary({ ...data });
   }
 }

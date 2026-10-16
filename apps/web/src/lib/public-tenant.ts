@@ -77,7 +77,7 @@ export async function getPublicTenantContext(): Promise<PublicTenantContext | nu
   const rows = await db
     .select({ id: tenants.id, slug: tenants.slug, customDomain: tenants.customDomain })
     .from(tenants)
-    .where(or(...conditions))
+    .where(and(eq(tenants.isActive, true), or(...conditions)))
     .limit(3);
 
   if (rows.length === 0) return null;

@@ -11,6 +11,18 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 61 canonical public live-read boundary (16 October 2026)
+
+Canonical public snapshot/history reads now use exact-league publication/active-league
+checks in the same repeatable-read read-only transaction as their data. History verifies
+the innings hierarchy and uses an explicit field allowlist; Redis does not authorize
+publication. Socket/commentary/reaction forwarding rechecks the boundary and uses scoped
+rooms. Custom-domain web public resolution now applies the active-league predicate too.
+No schema/migration, RLS/grant, remote database operation, build or deployment ran.
+These application tests do not certify deployed RLS, race/withdrawal behavior, cross-node
+room eviction, provider delivery or browser acceptance. The historical rebuild remains
+historical evidence only; the release gate stays default-off.
+
 ### Batch 60 registered-squad validation (16 October 2026)
 
 Canonical scoring now reads/locks existing `league_registrations` rows with exact

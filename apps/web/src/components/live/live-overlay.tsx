@@ -8,7 +8,7 @@ import { CommentaryFeed } from "@/components/scoring/commentary-feed"
 import { LanguageSelector } from "@/components/scoring/language-selector"
 import { FanReactions } from "@/components/live/fan-reactions"
 
-export function LiveOverlay({ matchId }: { matchId: string }) {
+export function LiveOverlay({ matchId, tenantId }: { matchId: string; tenantId: string }) {
   const setMatchId = useScoringStore((s) => s.setMatchId)
   const matchStateId = useScoringStore((s) => s.matchId)
 
@@ -16,7 +16,10 @@ export function LiveOverlay({ matchId }: { matchId: string }) {
     if (matchStateId !== matchId) setMatchId(matchId)
   }, [matchId, matchStateId, setMatchId])
 
-  useScoringSocket(matchId)
+  const { unavailable } = useScoringSocket(matchId, tenantId)
+
+  if (unavailable) return <p role="alert" className="text-sm text-destructive">Live updates are unavailable. Refresh the match page to check access.</p>
+  if (matchStateId !== matchId) return <p role="status" className="text-sm text-muted-foreground">Connecting to this match…</p>
 
   return (
     <div className="space-y-3">
@@ -28,7 +31,7 @@ export function LiveOverlay({ matchId }: { matchId: string }) {
         </div>
         <CommentaryFeed />
       </div>
-      <FanReactions matchId={matchId} />
+      <FanReactions matchId={matchId} tenantId={tenantId} />
     </div>
   )
 }

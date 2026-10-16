@@ -183,6 +183,7 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
   )
 
   return {
+    tenantId: tenant.id,
     canScore,
     match: {
       id: match.id,

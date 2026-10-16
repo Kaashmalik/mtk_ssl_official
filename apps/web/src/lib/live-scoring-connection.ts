@@ -13,23 +13,27 @@ interface BrowserConnection {
 // A shared socket may serve more than one mounted scoreboard for the same match.
 const subscriptions = new Map<string, number>()
 
-export function subscribeToLiveMatch(socket: Socket, matchId: string, browser: BrowserConnection = {
+export function subscribeToLiveMatch(socket: Socket, matchId: string, tenantId: string, browser: BrowserConnection = {
   online: () => navigator.onLine,
   on: (event, listener) => window.addEventListener(event, listener),
   off: (event, listener) => window.removeEventListener(event, listener),
-}) {
+}, onUnavailable: (unavailable: boolean) => void = () => {}) {
   let cancelled = false
   let deferredSnapshot: LiveMatchState | null = null
-  subscriptions.set(matchId, (subscriptions.get(matchId) ?? 0) + 1)
+  const subscriptionKey = `${tenantId}/${matchId}`
+  subscriptions.set(subscriptionKey, (subscriptions.get(subscriptionKey) ?? 0) + 1)
   const setOnline = (online: boolean) => useScoringStore.getState().setOnline(online)
 
   const join = () => {
     if (cancelled) return
-    socket.emit("join-match", { matchId }, (ack?: { success?: boolean; error?: string }) => {
+    socket.emit("join-match", { matchId, tenantId }, (ack?: { success?: boolean; error?: string }) => {
       if (cancelled) {
-        if (ack?.success && !subscriptions.has(matchId)) socket.emit("leave-match", { matchId })
+        if (ack?.success && !subscriptions.has(subscriptionKey)) socket.emit("leave-match", { matchId, tenantId })
       } else if (ack?.success === false) {
+        onUnavailable(true)
         console.warn("[scoring-ws] join-match failed:", ack.error)
+      } else if (ack?.success === true) {
+        onUnavailable(false)
       }
     })
   }
@@ -42,11 +46,18 @@ export function subscribeToLiveMatch(socket: Socket, matchId: string, browser: B
     const snapshot = decodeLiveMatchState(input)
     const state = useScoringStore.getState()
     if (!snapshot || snapshot.matchId !== matchId || state.matchId !== matchId) return
+    onUnavailable(false)
     if (hasUnconfirmedDeliveries(state)) {
       deferredSnapshot = snapshot
       return
     }
     useScoringStore.setState(reconcileLiveState(state, snapshot))
+  }
+  const onMatchUnavailable = (input: { tenantId?: string; matchId?: string } | undefined) => {
+    if (input?.tenantId === tenantId && input.matchId === matchId) {
+      deferredSnapshot = null
+      onUnavailable(true)
+    }
   }
   const unsubscribe = useScoringStore.subscribe((state) => {
     if (!deferredSnapshot || hasUnconfirmedDeliveries(state)) return
@@ -65,6 +76,7 @@ export function subscribeToLiveMatch(socket: Socket, matchId: string, browser: B
   socket.on("disconnect", onDisconnect)
   socket.on("score-update", onScoreUpdate)
   socket.on("match-state", onMatchState)
+  socket.on("match-unavailable", onMatchUnavailable)
   socket.on("commentary-update", onCommentaryUpdate)
   browser.on("online", onBrowserOnline)
   browser.on("offline", onBrowserOffline)
@@ -81,14 +93,15 @@ export function subscribeToLiveMatch(socket: Socket, matchId: string, browser: B
     socket.off("disconnect", onDisconnect)
     socket.off("score-update", onScoreUpdate)
     socket.off("match-state", onMatchState)
+    socket.off("match-unavailable", onMatchUnavailable)
     socket.off("commentary-update", onCommentaryUpdate)
     browser.off("online", onBrowserOnline)
     browser.off("offline", onBrowserOffline)
-    const remaining = (subscriptions.get(matchId) ?? 1) - 1
-    if (remaining > 0) subscriptions.set(matchId, remaining)
+    const remaining = (subscriptions.get(subscriptionKey) ?? 1) - 1
+    if (remaining > 0) subscriptions.set(subscriptionKey, remaining)
     else {
-      subscriptions.delete(matchId)
-      socket.emit("leave-match", { matchId })
+      subscriptions.delete(subscriptionKey)
+      socket.emit("leave-match", { matchId, tenantId })
     }
   }
 }

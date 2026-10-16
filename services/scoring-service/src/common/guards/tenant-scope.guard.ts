@@ -37,8 +37,8 @@ export const TENANT_HEADER = 'x-tenant-id';
  * Treat network isolation + secret hygiene as mandatory; this guard is the layer
  * that catches mistakes, not the layer that stops a determined attacker.
  *
- * Applied to mutation routes only. Read routes stay open so public scoreboards
- * can poll state without a service token.
+ * Public reads also require an explicit tenant, but never treat it as a private
+ * read grant: their service path separately verifies publication and active league.
  */
 @Injectable()
 export class TenantScopeGuard implements CanActivate {
