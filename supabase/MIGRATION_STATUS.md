@@ -3,6 +3,16 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **16 October 2026 (Batch 72) - `member_umpires` APPLIED to the remote Supabase
+> project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`.**
+> Local file: `supabase/migrations/20261016180000_member_umpires.sql` (adds
+> `matches.umpire1_id` / `matches.umpire2_id` uuid REFERENCES users(id) ON
+> DELETE SET NULL + column comments; additive/idempotent, no RLS/grant
+> changes, free-text `umpire_1/2` untouched for external officials).
+> Post-apply SQL verified both columns. Assignment enforcement is
+> application-side (locked writer, effective-member candidate check);
+> real-DB acceptance remains staged.
+
 > **16 October 2026 (Batch 71) - `scorer_assignment_approval` APPLIED to the
 > remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
 > `apply_migration`.** Local file:

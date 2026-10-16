@@ -81,6 +81,103 @@ export async function listTenantScorers(tenantId: string) {
 }
 
 /**
+ * Umpire candidate filter (COMP-06): unlike scorers, umpiring is not tied to a
+ * role — any EFFECTIVE membership of the league qualifies (active account,
+ * active membership whose expiry bound, if any, still passes on the server
+ * clock). The locked writer re-derives the same facts under lock.
+ */
+export function umpireMembership(tenantId: string) {
+  return sql`(
+    ${users.isActive} = true AND EXISTS (SELECT 1 FROM ${userTenantRoles}
+      WHERE ${userTenantRoles.userId} = ${users.id}
+        AND ${userTenantRoles.tenantId} = ${tenantId}
+        AND ${userTenantRoles.status} = 'active'
+        AND (${userTenantRoles.expiresAt} IS NULL OR ${userTenantRoles.expiresAt} > now()))
+  )`
+}
+
+export async function listTenantUmpires(tenantId: string) {
+  return db.select({ id: users.id, displayName: users.displayName, email: users.email })
+    .from(users)
+    .where(umpireMembership(tenantId))
+}
+
+/**
+ * Assign or clear a member-bound umpire slot (COMP-06) under the canonical
+ * lock ordering: match -> ordered users -> league (FOR SHARE) -> ordered
+ * memberships. The actor's owner authority is re-verified under lock and the
+ * target must be an EFFECTIVE member of this league (any role; an expired or
+ * suspended membership is rejected). One member can never hold both umpire
+ * slots; free-text umpire_1/2 stay reserved for external officials. The
+ * before/after change is audited.
+ */
+export async function assignUmpireInMatch(input: {
+  userId: string
+  tenantId: string
+  matchId: string
+  slot: "primary" | "secondary"
+  umpireId: string | null
+}): Promise<Match> {
+  const { userId, tenantId, matchId, slot: targetSlot, umpireId } = input
+  return withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const existing = await tx.query.matches.findFirst({ where: key })
+    if (!existing || existing.id !== matchId || existing.tenantId !== tenantId) throw new Error("Match not found")
+    const initialActor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!initialActor) throw new Error("Forbidden: assignment account not found")
+    const ids = [...new Set([initialActor.id, ...(umpireId ? [umpireId] : [])])].sort()
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${inArray(users.id, ids)} ORDER BY ${users.id} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR SHARE`)
+    await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
+      WHERE ${and(eq(userTenantRoles.tenantId, tenantId), inArray(userTenantRoles.userId, ids))}
+      ORDER BY ${userTenantRoles.id} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.id, initialActor.id) })
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, initialActor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!actor || actor.id !== initialActor.id || actor.clerkId !== userId || actor.isActive !== true
+      || !league || league.id !== tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || !membershipGrantsAccess(actorMember) || actorMember.role !== "league_owner") {
+      throw new Error("Forbidden: your umpire-assignment access changed")
+    }
+    if (umpireId) {
+      const account = await tx.query.users.findFirst({ where: eq(users.id, umpireId) })
+      const member = await tx.query.userTenantRoles.findFirst({ where: and(
+        eq(userTenantRoles.userId, umpireId), eq(userTenantRoles.tenantId, tenantId),
+      ) })
+      if (!account || account.id !== umpireId || account.isActive !== true
+        || !member || member.userId !== umpireId || member.tenantId !== tenantId
+        || !membershipGrantsAccess(member)) {
+        throw new Error("Selected user is not an effective member of this league")
+      }
+    }
+    // One person cannot fill both umpire slots.
+    if (umpireId && (targetSlot === "primary" ? existing.umpire2Id : existing.umpire1Id) === umpireId) {
+      throw new Error("The same person cannot be both umpires")
+    }
+    if ((targetSlot === "primary" ? existing.umpire1Id : existing.umpire2Id) === umpireId) return existing
+    const [updated] = await tx.update(matches)
+      .set(targetSlot === "primary"
+        ? { umpire1Id: umpireId, updatedAt: new Date() }
+        : { umpire2Id: umpireId, updatedAt: new Date() })
+      .where(key)
+      .returning()
+    if (!updated) throw new Error("Match changed. Reload before assigning.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id, actorRole: actorMember.role,
+      method: "MATCH_UMPIRE_ASSIGN", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId, slot: targetSlot,
+        before: { umpire1Id: existing.umpire1Id, umpire2Id: existing.umpire2Id },
+        after: { umpire1Id: updated.umpire1Id, umpire2Id: updated.umpire2Id } },
+    })
+    return updated
+  }, { isolationLevel: "read committed" }))
+}
+
+/**
  * Assign or clear a match's primary/backup scorer under the canonical lock
  * ordering: match -> ordered users -> league (FOR SHARE) -> ordered
  * memberships. Member removal never locks matches — its plain reads run after

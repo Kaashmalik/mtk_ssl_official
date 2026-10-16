@@ -12,6 +12,7 @@ import { MatchLifecycleControls } from "@/components/matches/match-lifecycle-con
 import { StreamStartModal } from "@/components/matches/stream-start-modal"
 import { ScorerAssign } from "@/components/matches/scorer-assign"
 import { ScorerApprovalButton } from "@/components/matches/scorer-approval-button"
+import { UmpireAssign } from "@/components/matches/umpire-assign"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
@@ -308,6 +309,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
         <div className="mt-3 space-y-3">
           <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} />
           <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} currentBackupScorerId={match.backupScorerId} />
+          <UmpireAssign matchId={match.id} currentUmpire1Id={match.umpire1Id} currentUmpire2Id={match.umpire2Id} />
           {viewerOccupiesScorerSlot && (
             <div className="flex flex-wrap items-center gap-3">
               <ScorerApprovalButton matchId={match.id} />
@@ -331,6 +333,8 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
             scorerApprovalRequired: match.scorerApprovalRequired,
             scorerApprovedAt: match.scorerApprovedAt,
             umpire1: match.umpire1,
+            umpire1Id: match.umpire1Id,
+            umpire2Id: match.umpire2Id,
             tournamentId: match.tournamentId,
             teamASquadDeclared,
             teamARegistrationApproved,

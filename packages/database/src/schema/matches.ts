@@ -92,6 +92,14 @@ export const matches = pgTable("matches", {
   umpire1: text("umpire_1"),
   umpire2: text("umpire_2"),
   thirdUmpire: text("third_umpire"),
+  /**
+   * Member-bound officials (COMP-06): internal umpires as membership rows.
+   * The person must be an effective member at assignment time (enforced
+   * parent-side locks + writer rules); one member may never hold both slots.
+   * The free-text columns above remain for external officials.
+   */
+  umpire1Id: uuid("umpire1_id").references(() => users.id, { onDelete: "set null" }),
+  umpire2Id: uuid("umpire2_id").references(() => users.id, { onDelete: "set null" }),
   matchReferee: text("match_referee"),
 
   // Live streaming

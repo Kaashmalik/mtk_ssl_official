@@ -82,6 +82,19 @@ describe("match readiness (COMP-06, v2)", () => {
     expect(check(input, "officials").pass).toBe(false)
     expect(result.ready).toBe(true)
   })
+
+  it("the advisory officials check accepts either free text or a member-bound umpire", () => {
+    // Free text alone (legacy) still passes; empty text with no member fails.
+    expect(check({ ...readyFixture }, "officials").pass).toBe(true)
+    expect(check({ ...readyFixture, umpire1: "" }, "officials").pass).toBe(false)
+    expect(check({ ...readyFixture, umpire1: "" }, "officials").label).toBe("Umpire listed or assigned")
+    // A member-bound assignment satisfies it with no free text at all.
+    expect(check({ ...readyFixture, umpire1: "", umpire1Id: T(90) as unknown as string }, "officials").pass).toBe(true)
+    const secondOnly = { ...readyFixture, umpire1: "", umpire2Id: T(91) as unknown as string }
+    expect(check(secondOnly, "officials").pass).toBe(true)
+    // Both forms coexist; assigning a member never rewrites a listing.
+    expect(check({ ...readyFixture, umpire1Id: T(90) as unknown as string }, "officials").pass).toBe(true)
+  })
   it.each(["teamARegistrationApproved", "teamBRegistrationApproved"] as const)("blocks a known non-approved registration on %s", field => {
     const input = { ...readyFixture, tournamentId: T(2), [field]: false }
     expect(computeMatchReadiness(input).ready).toBe(false)

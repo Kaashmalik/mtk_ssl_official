@@ -9,7 +9,7 @@ import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { proxyCompleteMatch } from "@/lib/scoring-service-client"
 import { manageMatch, matchMetadataSchema, streamCommandSchema } from "@/lib/match-management"
-import { assignScorerInMatch, approveScorerAssignmentInMatch, findTenantMatch, listTenantMatches, listTenantScorers,
+import { assignScorerInMatch, approveScorerAssignmentInMatch, assignUmpireInMatch, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
   readMatchFormOptions } from "@/lib/match-records"
 
 const createMatchSchema = matchMetadataSchema.extend({ tenantId: z.string().uuid().optional() }).strict()
@@ -239,6 +239,36 @@ export const getScorersForTenant = withAuth("match:update", async () => {
   if (!tenantId) throw new Error("Tenant not found")
   await requirePermissionServer("match:update", tenantId)
   return listTenantScorers(tenantId)
+})
+
+export const getUmpiresForTenant = withAuth("match:update", async () => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:update", tenantId)
+  return listTenantUmpires(tenantId)
+})
+
+/**
+ * Member-bound umpire assignment (COMP-06): any EFFECTIVE member of the league
+ * may fill an umpire slot (any role; expiry-aware). `null` clears the slot and
+ * one person cannot hold both. Free-text umpire columns remain for external
+ * officials and are untouched by this writer.
+ */
+export const assignUmpire = withAuth("match:update", async (matchId: string, slot: "primary" | "secondary", umpireId: string | null) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(matchId)
+  const targetSlot = z.enum(["primary", "secondary"]).parse(slot)
+  z.string().uuid().nullable().parse(umpireId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:update", tenantId)
+  const match = await assignUmpireInMatch({ userId, tenantId, matchId, slot: targetSlot, umpireId })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/dashboard/matches/${matchId}`)
+  return { success: true as const, match }
 })
 
 export const endStream = withAuth("match:update", async (matchId: string) => {

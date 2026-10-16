@@ -3721,6 +3721,66 @@ Next source work: membership-bound umpire approval, PUB-03 format-qualified
 records, ISO-05 resource-scoped grant design. Release gates still need Batch
 62 evidence + services deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 72 - member-bound umpire assignment (COMP-06 remainder of the
+officials thread)
+
+Umpires to date existed only as free text (`umpire_1/2/3`), which cannot
+reference a member, respect membership effectiveness, or be written under the
+canonical lock/audit rules - the readiness docstring itself recorded member-
+bound umpires as open.
+
+**Migration (applied remotely via MCP).** Additive, idempotent
+`20261016180000_member_umpires.sql`: `matches.umpire1_id` / `umpire2_id` uuid
+REFERENCES users(id) ON DELETE SET NULL + column comments. No RLS/grant
+changes; applied through the Supabase MCP and SQL-verified (columns present
+alongside the free-text columns). Drizzle schema mirrors them. Free text is
+untouched and remains the place for EXTERNAL officials; the two systems
+coexist and an assignment never rewrites a listing.
+
+**Candidate model:** unlike scorers, umpiring is not tied to a role - any
+EFFECTIVE member of the league qualifies (active account + active membership
+whose expiry bound, if any, passes on the server clock). The advisory
+`listTenantUmpires` SELECT filters this (`umpireMembership` predicate), and
+the locked writer re-derives the same facts under the canonical lock ordering
+(match FOR UPDATE -> ordered users FOR UPDATE -> league FOR SHARE -> ordered
+memberships FOR UPDATE): actor owner authority re-checked with
+`membershipGrantsAccess`, candidate rejected on missing/suspended/inactive
+or a passed or unparseable `expiresAt` (\"not an effective member...\"). One
+member can never fill both slots; same-value re-assignment stays a real
+no-op. Audited `MATCH_UMPIRE_ASSIGN` with exact before/after slot state.
+New thin `match:update` action wrappers `assignUmpire` / `getUmpiresForTenant`.
+
+**Readiness + UI.** The advisory officials check becomes \"Umpire listed or
+assigned\" - satisfied by EITHER free text OR a member-bound slot; legacy
+free-text-only matches keep passing. The match page renders the new
+`UmpireAssign` control next to the scorer panel.
+
+Honest limits: umpire CONSENT is not modeled (scorer-style approval is an
+open follow-up); third-umpire stays free text; real-DB lock/candidate-race
+acceptance remains staged (Batch 62 gates unmet); the member slots are a
+structural step, not SCORE-10's immutable XI/substitution model.
+
+New regressions: `umpire-assignment.test.ts` (9 - both-slot assignment with
+audit SQL, lock ordering, any-role-admitted vs expired/unparseable-bound
+rejection, both-slots rejection, no-op, clearing without candidate
+validation, missing/suspended candidate, owner-authority recheck incl.
+expiry, list wrapper) and `match-readiness.test.ts` (+1).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **104** files, **2,542 tests** (+11) |
+| `npx vitest run` (database) | PASS - **13** files, **199 tests** |
+| `tsc --noEmit` (web + database) | **0 + 0 error lines** |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | `member_umpires` applied + SQL-verified |
+
+Next source work: umpire consent (scorer-style approval), PUB-03 format-
+qualified records, ISO-05 resource-scoped grant design. Release gates still
+need Batch 62 evidence + services deployment. Roadmap: **19 checked / 60
+open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

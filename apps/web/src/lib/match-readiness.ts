@@ -15,8 +15,11 @@
  *    is known; legacy competitions (unknown/absent) never fail on this.
  *  - A known non-approved team registration blocks tournament play, matching
  *    the canonical writer. Missing registrations retain the legacy policy.
- *  - An umpire listing is advisory only; umpire assignment remains free-text
- *    listing, not yet membership-bound approval.
+ *  - An umpire listing is advisory only, and is satisfied by EITHER a free
+ *    text listing (external officials) OR a member-bound assignment
+ *    (umpire1Id/umpire2Id, COMP-06). Umpire consent (like scorer approval)
+ *    is not modeled yet. Free text and member slots can coexist; assigning a
+ *    member never rewrites external listings.
  */
 export type MatchReadinessInput = {
   status: string | null
@@ -30,6 +33,9 @@ export type MatchReadinessInput = {
   scorerApprovalRequired?: boolean
   scorerApprovedAt?: Date | string | null
   umpire1?: string | null
+  /** Member-bound officials (COMP-06); satisfied alongside free-text listing. */
+  umpire1Id?: string | null
+  umpire2Id?: string | null
   tournamentId?: string | null
   teamASquadDeclared?: boolean
   teamBSquadDeclared?: boolean
@@ -78,8 +84,10 @@ export function computeMatchReadiness(input: MatchReadinessInput): {
     },
     {
       id: "officials",
-      label: "Umpire listed",
-      pass: input.umpire1 !== null && input.umpire1 !== "",
+      label: "Umpire listed or assigned",
+      pass: (input.umpire1 !== null && input.umpire1 !== "")
+        || input.umpire1Id !== null && input.umpire1Id !== undefined
+        || input.umpire2Id !== null && input.umpire2Id !== undefined,
       blocking: false,
     },
   ]
