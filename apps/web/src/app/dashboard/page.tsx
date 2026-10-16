@@ -1,6 +1,7 @@
 import React, { Suspense } from "react"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
+import Link from "next/link"
 import { unstable_noStore as noStore } from "next/cache"
 import { getDashboardContext } from "@/lib/dashboard-context"
 import { getOwnershipTransfer } from "@/app/actions/ownership"
@@ -28,6 +29,9 @@ export default async function DashboardPage() {
   const transfer = await getOwnershipTransfer(context.tenantId).catch(() => null)
   return <div className="space-y-6">
     <DashboardHeader context={context} />
+    <Link href="/dashboard/account" className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4">
+      Your account — public career visibility
+    </Link>
     {transfer?.viewer === "recipient" && <OwnershipTransferRequest tenantId={context.tenantId} transferId={transfer.id}
       expectedVersion={transfer.version} expiresAt={transfer.expiresAt}
       ownerLabel={transfer.fromDisplayName || transfer.fromEmail} />}

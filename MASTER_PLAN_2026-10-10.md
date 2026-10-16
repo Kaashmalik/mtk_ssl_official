@@ -4099,6 +4099,55 @@ cross-league hub (consumes `mergeConsentedCareer`), release gates (Batch
 62 evidence + services deployment remain unmet).
 Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 78 - PUB-03 consent surface: the personal account page
+
+Batch 77's consent writer shipped without a user-reachable surface (an
+honestly recorded limit); this closes that loop.
+
+**`/dashboard/account`** is a personal surface deliberately OUTSIDE the
+league RBAC matrix: the consent decision belongs to the person, not to any
+league role, so the only gates are the Clerk session and the account's own
+activity (enforced again inside `readMyCareerConsent` - the boundary
+reason matches the writer's). No tenant context is required or read.
+The page renders `CareerConsentCard`, which shows the exact current state
+(`Allowed — since <date>` / `Not allowed`, with an `aria-live` status),
+its copy states the precise scope - the decision gates only cross-league
+merging and "never changes what any single league already publishes" -
+the control is disabled while the write is in flight, and errors surface
+visibly with a retry, never swallowed.
+
+**Discovery without touching the RBAC nav matrix:** the dashboard home
+(now every active member's landing view) adds one link row -
+"Your account — public career visibility". The sidebar stays
+role-matrix-driven; a personal page for people whose role sets are
+heterogeneous did not belong inside it.
+
+**Testing within the repo's constraints:** this suite has no DOM
+reconciler (every existing client component is tsc-exercised only), so
+the card's copy was extracted as PURE label derivations
+(`describeCareerConsent`, `consentControlLabel`) that the card renders
+verbatim, and the tests assert those plus the page→card prop wiring
+(recorded through a stub) and the unauthenticated redirect. The onClick
+transition wiring remains tsc-exercised only - recorded, consistent with
+the rest of the client components here, not claimed otherwise.
+
+New regressions: `account-page.test.tsx` (+6: both card labels verbatim,
+both state wirings incl. null-date passthrough, back-link, redirect).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **106** files, **2,585 tests** (+6) |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply | none needed - no schema change |
+
+Next source work: PUB-02 cross-league hub (consumes
+`mergeConsentedCareer`), COMP-07 remainder (scoped notices / competition
+locks), release gates (Batch 62 evidence + services deployment remain
+unmet). Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
