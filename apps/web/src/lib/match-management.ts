@@ -4,6 +4,7 @@ import { db, matches, users, tenants, userTenantRoles, teams, tournaments, venue
   battingScorecards, bowlingScorecards, fieldingScorecards, checkPlanFeature, type PlanKey } from "@mtk/database"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
+import { findSchedulingConflicts } from "@/lib/rescheduling"
 
 // Accept the existing datetime-local form and ISO timestamps, but never JS's
 // permissive rollover (e.g. February 30), unbounded text or Invalid Date.
@@ -42,6 +43,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Command = { kind: "create"; data: Metadata } | { kind: "update"; id: string; data: Partial<Metadata> }
   | { kind: "cancel" | "stream-end"; id: string }
   | { kind: "stream-start"; id: string; data: z.infer<typeof streamCommandSchema> }
+  | { kind: "reschedule"; id: string; data: { scheduledDate: string; minRestHours?: number } }
 
 async function requireOwner(tx: Tx, clerkId: string, tenantId: string) {
   const initial = await tx.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
@@ -152,6 +154,30 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
         patch = { ...data, ...(scheduledDate !== undefined
           ? { scheduledDate: scheduledDate ? new Date(scheduledDate) : null } : {}) }
         if (Object.keys(data).length === 0 && scheduledDate === undefined) return current
+      } else if (command.kind === "reschedule") {
+        await requireUnstarted(tx, current)
+        const proposed = scheduledDate.parse(command.data.scheduledDate)
+        // COMP-07 conflict/rest checks against the league's other fixtures.
+        const tenantFixtures = await tx.select({
+          matchId: matches.id, teamAId: matches.teamAId, teamBId: matches.teamBId,
+          venueId: matches.venueId, scheduledDate: matches.scheduledDate, status: matches.status,
+        }).from(matches).where(eq(matches.tenantId, tenantId))
+        const conflicts = findSchedulingConflicts({
+          targetMatchId: current.id,
+          teamAId: current.teamAId,
+          teamBId: current.teamBId,
+          venueId: current.venueId,
+          proposedStart: new Date(proposed),
+          fixtures: tenantFixtures,
+          minRestHours: command.data.minRestHours,
+        })
+        if (conflicts.length > 0) {
+          const first = conflicts[0].reason
+          throw new Error(`Rescheduling blocked: ${first === "team_rest"
+            ? "a participating team already has a fixture within the rest window"
+            : "the venue is already in use within the rest window"} (${conflicts.length} conflict${conflicts.length === 1 ? "" : "s"})`)
+        }
+        patch = { scheduledDate: new Date(proposed) }
       } else if (command.kind === "cancel") {
         if (current.status === "cancelled") return current
         await requireUnstarted(tx, current)

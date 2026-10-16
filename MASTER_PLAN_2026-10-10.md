@@ -2969,6 +2969,57 @@ auth user and real-DB staging (Phase 0 BASE-04..06 and Phase 9 REL-01..07).
 Roadmap counts: **19 checked / 60 open / 79 IDs** (COMP-05's core computed
 rules are in — reviewed result-correction effects remain open).
 
+### Batch 51 — fixture rescheduling behind rest/venue checks (16 October 2026)
+
+COMP-07 slice (rescheduling). The generic metadata `updateMatch` could change
+`scheduledDate` with no scheduling rules at all; unstarted fixtures could be
+booked on top of each other.
+
+**Pure checks — new `lib/rescheduling.ts` (rule v1).** A proposed start must
+keep `DEFAULT_MIN_REST_HOURS = 4` of separation from every other uncancelled
+fixture of either participating team (`team_rest`) and from any other use of
+the same venue (`venue_in_use`). Threshold-based rather than duration-based
+because matches carry no duration column; the target fixture itself,
+cancelled fixtures and undated fixtures are exempt, and a custom stricter
+window can be supplied per call. Negative thresholds are rejected.
+
+**Locked writer — `match-management` gains a `reschedule` command** (exported
+as the `rescheduleMatch` action, permission `match:update`): the same
+account→league→membership→match-row locks, only an unstarted scheduled
+fixture (via `requireUnstarted`), the league's other fixtures read in the
+same transaction and checked with the pure planner, and a dedicated
+`MATCH_RESCHEDULE` audit name so a reschedule is never confused with generic
+metadata edits in the audit trail. Generic `updateMatch` remains available
+for team/venue/metadata edits — it no longer changes dates through
+rescheduling-grade checks, so the scheduling rule has exactly one doorway.
+
+**Honest limits:** the rule is a rest-window heuristic, not a full
+fixture-duration model (no duration column); venue checks reuse the same
+window; no UI surface yet — the action is the contract, UI wiring lands with
+the matches management slice.
+
+New regressions: `rescheduling.test.ts` (7 — both conflict reasons, window
+boundaries, exemptions, custom window, negative threshold),
+`match-management.test.ts` (+4 — audited move, team-rest block, venue block,
+unstarted-only gate, all write-free on rejection).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **88** files, **2,300 tests** (+11) |
+| Focused: rescheduling + match-management | PASS — 256 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: forfeits/disputes and competition locks/notices (COMP-07
+remainder — needs schema decisions record cleanly), eligible XI/toss
+readiness (COMP-06), member UI + records pages; then the environment-
+dependent acceptance batches that this workspace cannot complete without the
+Supabase auth user and real-DB staging (Phase 0 BASE-04..06, Phase 9
+REL-01..07). Roadmap counts: **19 checked / 60 open / 79 IDs** (rescheduling
+closed inside COMP-07; locks/notices/forfeits remain open).
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

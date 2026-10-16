@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { matches, auditLogs } from "@mtk/database"
-import { createMatch, updateMatch, deleteMatch, startStream, endStream, getMatch, getMatches, getMatchFormOptions } from "@/app/actions/matches"
+import { createMatch, updateMatch, deleteMatch, rescheduleMatch, startStream, endStream, getMatch, getMatches, getMatchFormOptions } from "@/app/actions/matches"
 import { getFullScorecard } from "@/app/actions/scorecards"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), permission: vi.fn(), fallback: vi.fn(),
@@ -74,6 +74,7 @@ beforeEach(() => {
   mocks.values.mockReturnValue({ returning: mocks.insertReturning })
   mocks.insertReturning.mockImplementation(async () => [{ ...fixture, ...mocks.values.mock.calls[0][0] }])
   mocks.transaction.mockImplementation(async fn => fn({ execute: mocks.execute,
+    select: mocks.select,
     query: { matches: { findFirst: mocks.match }, users: { findFirst: mocks.user }, tenants: { findFirst: mocks.league },
       userTenantRoles: { findFirst: mocks.member }, teams: { findFirst: mocks.team },
       tournaments: { findFirst: mocks.tournament }, venues: { findFirst: mocks.venue },
@@ -405,5 +406,58 @@ describe("Active-league match read and picker boundaries", () => {
     mocks.permission.mockImplementation(async (_permission, tenantId) => { if (tenantId) throw new Error("Forbidden") })
     await expect(read()).rejects.toThrow("Forbidden")
     expect(mocks.select).not.toHaveBeenCalled()
+  })
+})
+
+describe("Reschedule command (COMP-07 conflict/rest checks)", () => {
+  beforeEach(() => {
+    // The reschedule branch reads the league's fixtures through the shared
+    // select harness; the default readWhere resolution carries no fixture
+    // fields, so findSchedulingConflicts sees none (no conflicts).
+  })
+
+  it("moves an unstarted fixture and audits MATCH_RESCHEDULE", async () => {
+    const result = await rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" })
+
+    expect(result).toMatchObject({ success: true })
+    const setValues = mocks.set.mock.calls.at(-1)![0]
+    expect(setValues.scheduledDate).toEqual(new Date("2026-11-01T15:00:00.000Z"))
+    expect(mocks.values.mock.calls.at(-1)![0]).toMatchObject({ method: "MATCH_RESCHEDULE",
+      tenantId: TENANT, actorId: ACTOR, actorRole: "league_owner" })
+    expect(mocks.permission).toHaveBeenCalledWith("match:update", TENANT)
+  })
+
+  it("blocks on team rest conflicts without updating or auditing", async () => {
+    mocks.readWhere.mockReturnValueOnce({
+      then: (resolve: (value: unknown) => unknown) => resolve([{
+        matchId: OTHER, teamAId: A, teamBId: OTHER, venueId: null,
+        scheduledDate: new Date("2026-11-01T16:00:00.000Z"), status: "scheduled",
+      }]),
+    })
+
+    await expect(rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" }))
+      .rejects.toThrow("a participating team already has a fixture within the rest window")
+    noWrites()
+  })
+
+  it("blocks on venue reuse and audits nothing", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, venueId: VENUE })
+    mocks.readWhere.mockReturnValueOnce({
+      then: (resolve: (value: unknown) => unknown) => resolve([{
+        matchId: OTHER, teamAId: OTHER, teamBId: OTHER, venueId: VENUE,
+        scheduledDate: new Date("2026-11-01T15:30:00.000Z"), status: "scheduled",
+      }]),
+    })
+
+    await expect(rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" }))
+      .rejects.toThrow("the venue is already in use within the rest window")
+    noWrites()
+  })
+
+  it("only reschedules an unstarted scheduled fixture", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, status: "completed" })
+    await expect(rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" }))
+      .rejects.toThrow("Only an unstarted scheduled fixture")
+    noWrites()
   })
 })

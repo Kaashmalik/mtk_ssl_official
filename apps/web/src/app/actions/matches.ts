@@ -76,6 +76,28 @@ export const deleteMatch = withAuth("match:delete", async (id: string) => {
   return { success: true, match }
 })
 
+/**
+ * Reschedules an unstarted fixture (COMP-07) behind team-rest and venue-use
+ * conflict checks — a distinct locked command so generic metadata edits can
+ * never bypass the scheduling rules.
+ */
+export const rescheduleMatch = withAuth("match:update", async (id: string, input: {
+  scheduledDate: string
+  minRestHours?: number
+}) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(id)
+  const data = z.object({
+    scheduledDate: z.string().min(1).max(40),
+    minRestHours: z.number().min(0).max(168).optional(),
+  }).strict().parse(input)
+  const tenantId = await requireMatchTenant("match:update")
+  const match = await manageMatch(userId, tenantId, { kind: "reschedule", id, data })
+  revalidateMatch(id)
+  return { success: true, match }
+})
+
 export const getMatch = withAuth("match:read", async (id: string) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
