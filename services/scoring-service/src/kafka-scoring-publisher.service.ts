@@ -68,11 +68,13 @@ export class KafkaScoringPublisher implements OnModuleDestroy {
     const kafka = new Kafka({
       clientId: 'scoring-service-producer',
       brokers: env.KAFKA_BROKERS.split(','),
+      connectionTimeout: 5000,
+      requestTimeout: 10000,
     });
     this.producer = kafka.producer({
       allowAutoTopicCreation: true,
       maxInFlightRequests: 1,
-      retry: { retries: 5 },
+      retry: { retries: 2 },
     });
     this.connect();
   }
@@ -101,63 +103,48 @@ export class KafkaScoringPublisher implements OnModuleDestroy {
   }
 
   async publishBallEvent(event: ScoringBallEventPayload): Promise<void> {
-    try {
-      await this.producer.send({
-        topic: BALL_EVENTS_TOPIC,
-        messages: [
-          {
-            // Partition by match id to preserve in-order delivery per match.
-            key: event.matchId,
-            value: JSON.stringify(event),
-            headers: {
-              'content-type': 'application/json',
-              'idempotency-key': event.eventId,
-            },
+    // Throw on failed/unknown delivery so the durable worker retains this row.
+    await this.producer.send({
+      topic: BALL_EVENTS_TOPIC,
+      acks: -1,
+      timeout: 10000,
+      messages: [
+        {
+          // Partition by match id to preserve in-order delivery per match.
+          key: event.matchId,
+          value: JSON.stringify(event),
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': event.eventId,
           },
-        ],
-      });
-    } catch (err) {
-      this.logger.warn(
-        `Failed to publish ball event ${event.eventId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+        },
+      ],
+    });
   }
 
   /**
    * Publishes a match lifecycle event consumed by the commentary service.
    *
-   * Fails soft for the same reason `publishBallEvent` does: Kafka being down must
-   * never roll back a committed score. A dropped event means a missing intro or
-   * summary, which is recoverable, whereas a 500 here would report a scoring
-   * failure that did not happen.
+   * Called by the outbox worker, not the scoring HTTP transaction. Failures must
+   * propagate to its retry logic, never become a false delivery acknowledgement.
    */
   async publishMatchEvent(event: MatchEventPayload): Promise<void> {
-    try {
-      await this.producer.send({
-        topic: MATCH_EVENTS_TOPIC,
-        messages: [
-          {
-            key: event.matchId,
-            value: JSON.stringify(event),
-            headers: {
-              'content-type': 'application/json',
-              // Deterministic per (match, event type) so a redelivery of the same
-              // logical event carries the same key and can be de-duplicated by a
-              // consumer.
-              'idempotency-key': `${event.matchId}:${event.type}`,
-            },
+    await this.producer.send({
+      topic: MATCH_EVENTS_TOPIC,
+      acks: -1,
+      timeout: 10000,
+      messages: [
+        {
+          key: event.matchId,
+          value: JSON.stringify(event),
+          headers: {
+            'content-type': 'application/json',
+            // Stable across retries/restarts; consumers must deduplicate effects.
+            'idempotency-key': event.eventId,
           },
-        ],
-      });
-      this.logger.debug(`Published ${event.type} for match ${event.matchId}`);
-    } catch (err) {
-      this.logger.warn(
-        `Failed to publish ${event.type} for match ${event.matchId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+        },
+      ],
+    });
+    this.logger.debug(`Published ${event.type} for match ${event.matchId}`);
   }
 }

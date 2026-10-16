@@ -58,6 +58,7 @@ export * from "./schema/league-registrations";
 export * from "./schema/scorecards";
 export * from "./schema/player-ids";
 export * from "./schema/scoring-events";
+export * from "./schema/scoring-outbox";
 export * from "./schema/scorecard-projections";
 export * from "./schema/waitlist";
 export * from "./schema/impersonation-sessions";

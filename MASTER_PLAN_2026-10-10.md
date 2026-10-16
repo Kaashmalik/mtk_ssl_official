@@ -3372,6 +3372,37 @@ are not deployed execution proof. No build, schema/migration operation, remote p
 query, provider action, variable toggle, owner approval or deployment occurred. Release
 acceptance remains open; roadmap **19 checked / 60 open / 79 IDs**.
 
+### Batch 63 — durable transactional scoring outbox (16 October 2026)
+
+SCORE-12 storage/producer half. Scoring previously published ball/intro/end events
+post-commit with swallowed Kafka failures, so a broker outage or crash silently
+lost events for commentary, notifications and live fan-out feeders.
+
+Added an internal `scoring_outbox` journal written atomically with the score or
+result transaction (additive local migration, unapplied): same-league composite FK
+to `matches(id, tenant_id)` via a new `matches_id_tenant_key` index, unique
+`(topic, event_id)` identity for redelivery dedupe, partial pending indexes,
+envelope CHECKs binding tenant/match/event to the row, topic allowlist, RLS
+enabled+forced with every grant revoked from PUBLIC/anon/authenticated and no
+DELETE grant anywhere — pending rows are retained, never purged. The publisher
+now requires all-replica acks (`acks -1`), one in-flight send, bounded retries
+and propagates failures; the new default-paused dispatcher drains per-match
+head-of-line rows with `FOR UPDATE SKIP LOCKED` and a predecessor predicate,
+never locking match/team/actor rows, marks delivered only after a broker ACK,
+retains failures with capped backoff and sanitized error codes, and surfaces
+database unavailability instead of reporting an empty queue. Journaling failure
+rolls back the scoring write/audit/cache invalidation; display names in lifecycle
+events are accepted only from same-league id+tenant rows. Delivery is
+at-least-once: consumers must deduplicate on the stable eventId.
+
+Fresh verification: web **2,482 / 101 files**, database **186 / 12 files**, scoring
+**295 / 12 suites**, release checker **87 tests** — **3,050 passing tests**, all exits 0.
+Web type check exits 0; `git diff --check` clean; both compose YAML files parse.
+Consumer-side idempotence, multi-instance recovery, real PostgreSQL/multi-broker
+drills and applied-migration acceptance remain open; SCORE-12 stays unchecked.
+No migration applied, no remote database/provider/deployment action; release gate
+default-off. Roadmap **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

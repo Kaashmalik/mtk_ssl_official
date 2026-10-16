@@ -29,9 +29,10 @@ import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
 import { z } from 'zod';
 import { env } from './env';
 import { requireScoringWriteAccess, requireDeliveryParticipants, requireMatchTeams } from './scoring-write-access';
+import type { ScoringTransaction } from './scoring-write-access';
+import { BALL_TOPIC, MATCH_TOPIC, enqueueScoringMessage } from './scoring-outbox';
 import { requirePublishedScoringMatch, validatePublicReadIds } from './scoring-public-access';
 import {
-  KafkaScoringPublisher,
   ScoringBallEventPayload,
 } from './kafka-scoring-publisher.service';
 import {
@@ -182,7 +183,7 @@ export class ScoringService {
   private readonly logger = new Logger(ScoringService.name);
   private readonly redis: Redis;
 
-  constructor(private readonly kafkaPublisher: KafkaScoringPublisher) {
+  constructor() {
     const redisUrl = new URL(env.REDIS_URL);
     this.redis = new Redis({
       host: env.REDIS_HOST ?? redisUrl.hostname,
@@ -312,7 +313,7 @@ export class ScoringService {
           });
           if (!existing) throw new ConflictException('This delivery was undone; use a new operation ID');
           return { result: { ballId: existing.id, clientOpId: command.clientOpId,
-            scorecard: scorecardFor(innings), replayed: true } };
+            scorecard: scorecardFor(innings), replayed: true }, recorded: false };
         }
       }
 
@@ -442,9 +443,9 @@ export class ScoringService {
           .where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)));
       }
 
-      // Captured so the `MatchStarted` event is emitted only on the real
-      // scheduled -> live transition, not on every subsequent ball.
-      const becameLive = match.status === 'scheduled';
+      // Capture only the initial scheduled/toss -> live transition, not innings
+      // resumption or every subsequent ball.
+      const becameLive = match.status === 'scheduled' || match.status === 'toss';
 
       // 8. Fetch updated innings for the response scorecard
       const updatedInnings = await tx.query.matchInnings.findFirst({
@@ -542,28 +543,19 @@ export class ScoringService {
         timestamp: new Date().toISOString(),
       };
 
-      return { result, publishData, becameLive, match };
+      // Persist the intro ahead of the first ball in the same match stream.
+      // Both rows roll back with the delivery if any database operation fails.
+      if (becameLive) await this.enqueueMatchStarted(tx, match);
+      await enqueueScoringMessage(tx, { topic: BALL_TOPIC, payload: publishData });
+      return { result, recorded: true };
     }, { isolationLevel: 'read committed' });
 
-    if (!('publishData' in outcome)) return outcome.result;
-    const { result, publishData, becameLive, match } = outcome;
+    if (!outcome.recorded) return outcome.result;
+    const { result } = outcome;
     await this.redis.del(`match:state:${matchId}`).catch((err) =>
       this.logger.warn(`Failed to invalidate match state cache: ${err}`));
 
-    // Publish AFTER commit â€” a slow/failed Kafka broker must never roll back a
-    // recorded ball. KafkaScoringPublisher swallows failures and logs them.
-    this.kafkaPublisher.publishBallEvent(publishData).catch((err) =>
-      this.logger.warn(`Failed to publish ball event after commit: ${err}`),
-    );
-
-    if (becameLive) {
-      // MatchStarted. Fire-and-forget after commit: a missing intro is
-      // recoverable, whereas failing the recorded ball would not be.
-      this.publishMatchStarted(match).catch((err) =>
-        this.logger.warn(`Failed to publish MatchStarted after commit: ${err}`),
-      );
-    }
-
+    // Kafka delivery is owned by the durable worker, never this HTTP response.
     return result;
   }
 
@@ -991,7 +983,7 @@ export class ScoringService {
     const completion = z.object({ winnerId: z.string().uuid().optional(), result: z.string().min(1).max(2000).optional(),
       manOfMatchId: z.string().uuid().optional() }).safeParse({ winnerId, result, manOfMatchId });
     if (!completion.success) throw new BadRequestException('Invalid match completion command');
-    const wasAlreadyComplete = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
         WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
       const match = await tx.query.matches.findFirst({
@@ -1033,6 +1025,7 @@ export class ScoringService {
           before: { status: match.status, winnerId: match.winnerId, result: match.result, manOfMatchId: match.manOfMatchId },
           after: { status: 'completed', winnerId: winnerId || null, result: result || null, manOfMatchId: awardId } },
       });
+      await this.enqueueMatchEnded(tx, matchId, tenantId, winnerId, result, awardId);
       return false;
     }, { isolationLevel: 'read committed' });
 
@@ -1046,82 +1039,67 @@ export class ScoringService {
 
     this.logger.log(`Match ${matchId} marked as completed`);
 
-    if (!wasAlreadyComplete) {
-      // After the write, so consumers cannot observe an end event for a match
-      // that is not yet completed in the database.
-      this.publishMatchEnded(matchId, tenantId, winnerId, result).catch((err) =>
-        this.logger.warn(`Failed to publish MatchEnded after completion: ${err}`),
-      );
-    }
   }
 
   /**
-   * Resolves the display names the `MatchStarted` prompt reads and publishes it.
-   *
-   * Runs post-commit on a path that fires at most once per match, so the extra
-   * lookups are not on the hot path. Names are resolved defensively — a missing
-   * team or venue must degrade the intro wording, not fail the publish.
+   * Snapshot only same-league display names before committing the outbox entry.
+   * Plain reads do not acquire new team/tournament locks after participant locks.
    */
-  private async publishMatchStarted(
+  private async enqueueMatchStarted(
+    tx: ScoringTransaction,
     match: { id: string; tenantId: string; teamAId: string; teamBId: string; tournamentId?: string | null; venueId?: string | null },
   ): Promise<void> {
     const [teamA, teamB, venue, tournament] = await Promise.all([
-      db.query.teams.findFirst({ where: eq(teams.id, match.teamAId) }),
-      db.query.teams.findFirst({ where: eq(teams.id, match.teamBId) }),
+      tx.query.teams.findFirst({ where: and(eq(teams.id, match.teamAId), eq(teams.tenantId, match.tenantId)) }),
+      tx.query.teams.findFirst({ where: and(eq(teams.id, match.teamBId), eq(teams.tenantId, match.tenantId)) }),
       match.venueId
-        ? db.query.venues.findFirst({ where: eq(venues.id, match.venueId) })
+        ? tx.query.venues.findFirst({ where: and(eq(venues.id, match.venueId), eq(venues.tenantId, match.tenantId)) })
         : Promise.resolve(null),
       match.tournamentId
-        ? db.query.tournaments.findFirst({ where: eq(tournaments.id, match.tournamentId) })
+        ? tx.query.tournaments.findFirst({ where: and(eq(tournaments.id, match.tournamentId), eq(tournaments.tenantId, match.tenantId)) })
         : Promise.resolve(null),
     ]);
 
-    await this.kafkaPublisher.publishMatchEvent({
+    await enqueueScoringMessage(tx, { topic: MATCH_TOPIC, payload: {
       type: 'MatchStarted',
       matchId: match.id,
       tenantId: match.tenantId,
       eventId: `${match.id}:MatchStarted`,
       timestamp: new Date().toISOString(),
       data: {
-        teamAName: teamA?.name ?? 'Team A',
-        teamBName: teamB?.name ?? 'Team B',
-        venueName: venue?.name ?? null,
-        tournamentName: tournament?.name ?? null,
+        teamAName: teamA?.id === match.teamAId && teamA.tenantId === match.tenantId ? teamA.name ?? 'Team A' : 'Team A',
+        teamBName: teamB?.id === match.teamBId && teamB.tenantId === match.tenantId ? teamB.name ?? 'Team B' : 'Team B',
+        venueName: venue && venue.id === match.venueId && venue.tenantId === match.tenantId ? venue.name : null,
+        tournamentName: tournament && tournament.id === match.tournamentId && tournament.tenantId === match.tenantId ? tournament.name : null,
       },
-    });
+    } });
   }
 
-  /** Resolves winner / player-of-the-match names and publishes `MatchEnded`. */
-  private async publishMatchEnded(
+  /** Snapshot result metadata and journal the end event with the result/audit. */
+  private async enqueueMatchEnded(
+    tx: ScoringTransaction,
     matchId: string,
     tenantId: string,
     winnerId?: string,
     result?: string,
+    awardId?: string | null,
   ): Promise<void> {
     const [winner, motm] = await Promise.all([
-      winnerId ? db.query.teams.findFirst({ where: eq(teams.id, winnerId) }) : Promise.resolve(null),
-      db.query.matches
-        .findFirst({
-          where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
-        })
-        .then((m) =>
-          m?.manOfMatchId
-            ? db.query.players.findFirst({ where: eq(players.id, m.manOfMatchId) })
-            : null,
-        ),
+      winnerId ? tx.query.teams.findFirst({ where: and(eq(teams.id, winnerId), eq(teams.tenantId, tenantId)) }) : Promise.resolve(null),
+      awardId ? tx.query.players.findFirst({ where: and(eq(players.id, awardId), eq(players.tenantId, tenantId)) }) : Promise.resolve(null),
     ]);
 
-    await this.kafkaPublisher.publishMatchEvent({
+    await enqueueScoringMessage(tx, { topic: MATCH_TOPIC, payload: {
       type: 'MatchEnded',
       matchId,
       tenantId,
       eventId: `${matchId}:MatchEnded`,
       timestamp: new Date().toISOString(),
       data: {
-        winnerName: winner?.name ?? null,
+        winnerName: winner && winner.id === winnerId && winner.tenantId === tenantId ? winner.name ?? null : null,
         result: result ?? null,
-        motmName: motm?.name ?? null,
+        motmName: motm && motm.id === awardId && motm.tenantId === tenantId ? motm.name ?? null : null,
       },
-    });
+    } });
   }
 }

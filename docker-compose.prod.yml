@@ -215,6 +215,7 @@ services:
       # Guards POST /scoring/* write endpoints (fails closed when unset)
       SCORING_SERVICE_TOKEN: ${SCORING_SERVICE_TOKEN}
       SCORING_GATEWAY_TOKEN: ${SCORING_GATEWAY_TOKEN}
+      SCORING_OUTBOX_ENABLED: "${SCORING_OUTBOX_ENABLED:-false}"
     depends_on:
       - redis
       - kafka

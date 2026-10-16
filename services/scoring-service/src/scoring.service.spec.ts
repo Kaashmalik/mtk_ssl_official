@@ -1,9 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import { db, matches, matchBalls, matchInnings, scoringEvents, scorecardProjections, auditLogs } from '@mtk/database';
+import { db, matches, matchBalls, matchInnings, scoringEvents, scorecardProjections, auditLogs, scoringOutbox } from '@mtk/database';
 import { ScoringService, BallEvent } from './scoring.service';
-import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 import type { SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
 
 const TENANT = '00000000-0000-4000-8000-000000000001';
@@ -28,8 +27,10 @@ jest.mock('@mtk/database/client', () => ({ db: {}, queryClient: {}, migrationCli
 jest.mock('@mtk/database', () => ({
   ...jest.requireActual('@mtk/database'),
   db: { transaction: jest.fn(async (fn) => {
+    const before = structuredClone(mockTx.state);
     mockTx.inTransaction = true;
     try { return await fn(mockTx); }
+    catch (error) { Object.assign(mockTx.state, before); throw error; }
     finally { mockTx.inTransaction = false; }
   }) },
 }));
@@ -62,6 +63,7 @@ function createTransaction() {
     registrations: [] as SquadRegistration[],
     events: [] as Array<Record<string, any>>,
     audits: [] as Array<Record<string, any>>,
+    outbox: [] as Array<Record<string, any>>,
     projection: {} as Record<string, any>,
   };
   const tx = {
@@ -81,6 +83,8 @@ function createTransaction() {
         return { id, tenantId: TENANT, isActive: true };
       }) },
       leagueRegistrations: { findMany: jest.fn(async (_options: unknown) => state.registrations) },
+      venues: { findFirst: jest.fn(async () => undefined) },
+      tournaments: { findFirst: jest.fn(async () => undefined) },
       scorecardProjections: { findFirst: jest.fn(async () => state.projection) },
       matchBalls: { findFirst: jest.fn(async ({ where }) => {
         const query = dialect.sqlToQuery(where);
@@ -105,6 +109,10 @@ function createTransaction() {
       if (table === matchBalls) state.balls.push(row);
       if (table === scoringEvents) state.events.push(row);
       if (table === auditLogs) state.audits.push(row);
+      if (table === scoringOutbox) {
+        expect(tx.inTransaction).toBe(true);
+        state.outbox.push(row);
+      }
       if (table === scorecardProjections) state.projection = row;
       if (table === matchInnings) Object.assign(state.innings, row);
       return { returning: async () => [row] };
@@ -141,11 +149,6 @@ function ball(input: Partial<BallEvent> = {}): BallEvent {
 
 describe('Canonical delivery record, replay and undo', () => {
   let service: ScoringService;
-  const publisher = {
-    publishBallEvent: jest.fn().mockResolvedValue(undefined),
-    publishMatchEvent: jest.fn().mockResolvedValue(undefined),
-  };
-
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedis.get.mockReset().mockResolvedValue(null);
@@ -155,7 +158,7 @@ describe('Canonical delivery record, replay and undo', () => {
       expect(mockTx.inTransaction).toBe(false);
       return 1;
     });
-    service = new ScoringService(publisher as unknown as KafkaScoringPublisher);
+    service = new ScoringService();
   });
 
   it('returns complete live metadata from a tenant-scoped consistent read transaction', async () => {
@@ -227,7 +230,7 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(replay).toMatchObject({ ballId: accepted.ballId, clientOpId: input.clientOpId, replayed: true });
     expect(mockTx.state.balls).toHaveLength(1);
     expect(mockTx.state.events).toHaveLength(1);
-    expect(publisher.publishBallEvent).toHaveBeenCalledTimes(1);
+    expect(mockTx.state.outbox).toHaveLength(1);
   });
 
   function registeredMatch() {
@@ -252,7 +255,7 @@ describe('Canonical delivery record, replay and undo', () => {
     await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('approved tournament squad');
     expect(mockTx.insert).not.toHaveBeenCalled();
     expect(mockTx.update).not.toHaveBeenCalled();
-    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
+    expect(mockTx.state.outbox).toHaveLength(0);
   });
 
   it('rejects a withdrawn registration before any new delivery effect', async () => {
@@ -274,7 +277,7 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.balls).toHaveLength(1);
     expect(mockTx.state.events).toHaveLength(1);
     expect(mockTx.state.innings.totalRuns).toBe(1);
-    expect(publisher.publishBallEvent).toHaveBeenCalledTimes(1);
+    expect(mockTx.state.outbox).toHaveLength(1);
   });
 
   it('propagates a squad lookup failure before any delivery write', async () => {
@@ -374,7 +377,7 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.update).not.toHaveBeenCalled();
     expect(mockTx.delete).not.toHaveBeenCalled();
     expect(mockRedis.del).not.toHaveBeenCalled();
-    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
+    expect(mockTx.state.outbox).toHaveLength(0);
     expect(dialect.sqlToQuery(mockTx.execute.mock.calls[0][0]).params).toEqual([MATCH, TENANT]);
   });
   it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])('blocks suspended membership inside the %s transaction before any writes', async (operation) => {
@@ -383,8 +386,7 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.insert).not.toHaveBeenCalled();
     expect(mockTx.update).not.toHaveBeenCalled();
     expect(mockTx.delete).not.toHaveBeenCalled();
-    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
-    expect(publisher.publishMatchEvent).not.toHaveBeenCalled();
+    expect(mockTx.state.outbox).toHaveLength(0);
   });
   it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])('rejects revoked backup inside the %s transaction', async (operation) => {
     mockTx.state.match.scorerId = TEAM_B;
@@ -393,8 +395,7 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.insert).not.toHaveBeenCalled();
     expect(mockTx.update).not.toHaveBeenCalled();
     expect(mockTx.delete).not.toHaveBeenCalled();
-    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
-    expect(publisher.publishMatchEvent).not.toHaveBeenCalled();
+    expect(mockTx.state.outbox).toHaveLength(0);
   });
   it('records, replays and undoes as active backup without changing either assignment', async () => {
     mockTx.state.match.scorerId = TEAM_B;
@@ -498,13 +499,11 @@ describe('Canonical delivery record, replay and undo', () => {
   });
 
   it('serializes match completion and does not overwrite a completed result on retry', async () => {
-    const ended = jest.spyOn(service as any, 'publishMatchEnded').mockImplementation(async () => {
-      expect(mockTx.inTransaction).toBe(false);
-    });
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won by 3 runs');
     const timestamp = mockTx.state.match.updatedAt;
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won by 3 runs');
-    expect(ended).toHaveBeenCalledTimes(1);
+    expect(mockTx.state.outbox).toHaveLength(1);
+    expect(mockTx.state.outbox[0]).toMatchObject({ eventId: `${MATCH}:MatchEnded`, tenantId: TENANT, matchId: MATCH });
     expect(mockTx.state.match.updatedAt).toBe(timestamp);
     await expect(service.completeMatch(TENANT, ACTOR, MATCH, TEAM_B, 'Changed winner')).rejects.toBeInstanceOf(ConflictException);
     expect(mockTx.state.match.winnerId).toBe(TENANT);
@@ -516,7 +515,6 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.match.status).toBe('live');
   });
   it('completes and audits the optional match-team award under the canonical transaction', async () => {
-    const ended = jest.spyOn(service as any, 'publishMatchEnded').mockResolvedValue(undefined);
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BATTER);
     expect(mockTx.state.match.manOfMatchId).toBe(BATTER);
     const lock = dialect.sqlToQuery(mockTx.execute.mock.calls.at(-1)[0]);
@@ -530,7 +528,8 @@ describe('Canonical delivery record, replay and undo', () => {
     // Legacy clients omit the award; a retry must not clear the committed one.
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won');
     expect(mockTx.state.audits).toHaveLength(1);
-    expect(ended).toHaveBeenCalledTimes(1);
+    expect(mockTx.state.outbox).toHaveLength(1);
+    expect(mockTx.state.outbox[0].payload.data.motmName).toBe('Batter');
     await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BOWLER)).rejects.toBeInstanceOf(ConflictException);
     expect(mockTx.state.match.manOfMatchId).toBe(BATTER);
   });
@@ -553,14 +552,89 @@ describe('Canonical delivery record, replay and undo', () => {
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won');
     expect(mockTx.state.match.manOfMatchId).toBe(BATTER);
     expect(mockTx.state.audits[0].payload.after.manOfMatchId).toBe(BATTER);
-    expect(mockTx.query.players.findFirst).toHaveBeenCalledTimes(1);
+    expect(mockTx.query.players.findFirst).toHaveBeenCalledTimes(2);
   });
   it('propagates completion audit failure before cache invalidation or match-ended publication', async () => {
-    const ended = jest.spyOn(service as any, 'publishMatchEnded').mockResolvedValue(undefined);
     mockTx.insert.mockImplementationOnce(() => { throw new Error('Audit unavailable'); });
     await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won')).rejects.toThrow('Audit unavailable');
     expect(mockRedis.del).not.toHaveBeenCalled();
-    expect(ended).not.toHaveBeenCalled();
+    expect(mockTx.state.outbox).toHaveLength(0);
     // This in-memory adapter does not prove PostgreSQL rollback.
+  });
+  it('journals the canonical delivery payload and stable scoring-event identity inside the transaction', async () => {
+    await service.recordBall(TENANT, ACTOR, ball({ runs: 4 }));
+    expect(mockTx.state.outbox).toHaveLength(1);
+    expect(mockTx.state.outbox[0]).toMatchObject({ topic: 'ssl.scoring.ball-events', tenantId: TENANT, matchId: MATCH,
+      eventId: mockTx.state.events[0].id, payload: { type: 'FOUR_HIT', eventId: mockTx.state.events[0].id,
+        data: { tenantId: TENANT, matchId: MATCH, inningsId: INNINGS }, runs: 4, sequenceNumber: 1 } });
+  });
+  it.each(['scheduled', 'toss'])('journals the %s-to-live intro before the first delivery, once only', async status => {
+    mockTx.state.match.status = status;
+    const input = ball();
+    await service.recordBall(TENANT, ACTOR, input);
+    expect(mockTx.state.outbox.map(row => row.payload.type)).toEqual(['MatchStarted', 'BALL_RECORDED']);
+    expect(mockTx.state.outbox[0].eventId).toBe(`${MATCH}:MatchStarted`);
+    await service.recordBall(TENANT, ACTOR, input);
+    expect(mockTx.state.outbox).toHaveLength(2);
+  });
+  it('does not enqueue a second intro when resuming after the innings break', async () => {
+    mockTx.state.match.status = 'innings_break';
+    await service.recordBall(TENANT, ACTOR, ball());
+    expect(mockTx.state.outbox.map(row => row.payload.type)).toEqual(['BALL_RECORDED']);
+  });
+  it('rejects the scoring transaction if durable delivery journaling fails (emulated rollback)', async () => {
+    const original = mockTx.insert.getMockImplementation()!;
+    mockTx.insert.mockImplementation(table => {
+      if (table === scoringOutbox) throw new Error('Outbox storage unavailable');
+      return original(table);
+    });
+    await expect(service.recordBall(TENANT, ACTOR, ball({ runs: 6 }))).rejects.toThrow('Outbox storage unavailable');
+    expect(mockTx.state.balls).toHaveLength(0);
+    expect(mockTx.state.events).toHaveLength(0);
+    expect(mockTx.state.innings.totalRuns).toBe(0);
+    expect(mockRedis.del).not.toHaveBeenCalled();
+  });
+  it('does not complete/audit a result without its durable end event (emulated rollback)', async () => {
+    const original = mockTx.insert.getMockImplementation()!;
+    mockTx.insert.mockImplementation(table => {
+      if (table === scoringOutbox) throw new Error('Outbox storage unavailable');
+      return original(table);
+    });
+    await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won')).rejects.toThrow('Outbox storage unavailable');
+    expect(mockTx.state.match.status).toBe('live');
+    expect(mockTx.state.audits).toHaveLength(0);
+    expect(mockRedis.del).not.toHaveBeenCalled();
+  });
+  it('scopes lifecycle name lookups to the league and never includes foreign display metadata', async () => {
+    mockTx.state.match.status = 'scheduled';
+    mockTx.query.teams.findFirst.mockImplementation(async ({ where }) => {
+      const id = String(dialect.sqlToQuery(where).params[0]);
+      return { id, tenantId: TEAM_B, isActive: true, name: 'Foreign private name' } as never;
+    });
+    // The canonical team ownership check blocks before intro/outbox creation.
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toBeInstanceOf(NotFoundException);
+    expect(mockTx.state.outbox).toHaveLength(0);
+  });
+  it('refuses foreign metadata from a faulty intro reader after valid team/participant checks', async () => {
+    mockTx.state.match.status = 'scheduled';
+    let calls = 0;
+    mockTx.query.teams.findFirst.mockImplementation(async ({ where }) => {
+      const id = String(dialect.sqlToQuery(where).params[0]);
+      calls++;
+      return { id, tenantId: calls <= 2 ? TENANT : TEAM_B, isActive: true, name: 'Foreign name' } as never;
+    });
+    await service.recordBall(TENANT, ACTOR, ball());
+    expect(mockTx.state.outbox[0].payload.data).toMatchObject({ teamAName: 'Team A', teamBName: 'Team B' });
+    for (const [options] of mockTx.query.teams.findFirst.mock.calls) expect(dialect.sqlToQuery(options.where).params[1]).toBe(TENANT);
+  });
+  it('rolls back the first delivery and intro together if its journal metadata lookup fails', async () => {
+    mockTx.state.match.status = 'scheduled';
+    mockTx.state.match.tournamentId = TOURNAMENT;
+    mockTx.query.tournaments.findFirst.mockRejectedValue(new Error('Tournament metadata unavailable'));
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('Tournament metadata unavailable');
+    expect(mockTx.state.match.status).toBe('scheduled');
+    expect(mockTx.state.balls).toHaveLength(0);
+    expect(mockTx.state.events).toHaveLength(0);
+    expect(mockTx.state.outbox).toHaveLength(0);
   });
 });

@@ -108,6 +108,7 @@ services:
       NODE_ENV: development
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      SCORING_OUTBOX_ENABLED: "${SCORING_OUTBOX_ENABLED:-false}"
       DATABASE_URL: postgresql://ssl:ssl_dev_password@postgres:5432/ssl_dev
     depends_on:
       - redis

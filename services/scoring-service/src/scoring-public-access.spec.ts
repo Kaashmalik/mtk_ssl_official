@@ -2,7 +2,6 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { db } from '@mtk/database';
 import { ScoringService } from './scoring.service';
-import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 import { publicMatchRoom } from './scoring-public-access';
 import type { ScoringTransaction } from './scoring-write-access';
 
@@ -39,7 +38,7 @@ describe('Public live scoring reads are exact-league and publication-gated', () 
     jest.clearAllMocks();
     fixture = adapter();
     (db.transaction as jest.Mock).mockImplementation(async callback => callback(fixture.tx));
-    service = new ScoringService({} as KafkaScoringPublisher);
+    service = new ScoringService();
   });
   it('reads the match, active league and same-league parent in a single read-only snapshot', async () => {
     const snapshot = await service.getPublicMatchState(TENANT, MATCH);

@@ -24,6 +24,9 @@ export const env = z
     KAFKA_BROKERS: z.string().default("localhost:9092"),
     DATABASE_URL: prodRequired("DATABASE_URL"),
     SCORING_GATEWAY_TOKEN: prodRequired("SCORING_GATEWAY_TOKEN"),
+    // Enable after the migration, consumer deduplication and staging recovery gates.
+    // Enqueueing is always transactional; pausing dispatch never deletes messages.
+    SCORING_OUTBOX_ENABLED: z.enum(["true", "false"]).default("false"),
   })
   .parse(process.env);
 

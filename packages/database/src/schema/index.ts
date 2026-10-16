@@ -23,6 +23,7 @@ export * from "./scorecards";
 export * from "./player-season-stats";
 export * from "./player-ids";
 export * from "./scoring-events";
+export * from "./scoring-outbox";
 export * from "./scorecard-projections";
 
 // Fan Engagement

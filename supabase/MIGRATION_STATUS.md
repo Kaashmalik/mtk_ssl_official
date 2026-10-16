@@ -11,6 +11,20 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 63 scoring transactional outbox (16 October 2026)
+
+`20261016102316_scoring_transactional_outbox.sql` is a **local migration only**,
+not applied anywhere. It adds an internal `scoring_outbox` delivery journal and a
+`matches_id_tenant_key` unique index (composite `(id, tenant_id)` FK target for
+the journal). All privileges are revoked from `PUBLIC`/`anon`/`authenticated`
+with grants only for `service_role`/`ssl`, RLS enabled and forced, and no DELETE
+grant anywhere — pending rows are retained, not purged. Schema tests assert the
+Drizzle definition and SQL file agree on FK parentage, dedupe identity, envelope
+CHECKs, grants and additive/atomic structure. The migration chain has not been
+executed against any real PostgreSQL database from this session; real apply,
+rollback and RLS acceptance remain open. No remote database was queried or
+written; release evidence requirements from Batch 62 are unchanged and unmet.
+
 ### Batch 62 release evidence and separate schema acceptance (16 October 2026)
 
 Production deployment no longer invokes `drizzle-kit migrate` against the canonical

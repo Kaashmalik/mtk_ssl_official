@@ -8,6 +8,7 @@ import { ScoringController } from './scoring.controller';
 import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 import { CommentaryBridgeController } from './commentary-bridge.controller';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ScoringOutboxDispatcher } from './scoring-outbox-dispatcher.service';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     ScoringService,
     ScoringGateway,
     KafkaScoringPublisher,
+    ScoringOutboxDispatcher,
     {
       provide: APP_FILTER,
       useClass: HttpExceptionFilter,
