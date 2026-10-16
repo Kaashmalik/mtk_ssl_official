@@ -169,6 +169,108 @@ export function planKnockoutFirstRound(slots: string[]): PlannedStructure {
 const HYBRID_MAX_GROUP_SIZE = 4
 
 /**
+ * Knockout bracket advancement (COMP-05). Knockout tournaments progress in
+ * stages whose fixture counts form a chain: for n teams the stage sizes are
+ * n/2, n/4, ..., 2 fixtures. Because a whole stage is always created
+ * atomically by fixture generation/advancement, the total number of existing
+ * fixtures uniquely identifies the bracket size AND how many stages are
+ * complete (the cumulative prefix sums are distinct across all supported
+ * sizes). The next round pairs stage winners by the mirror rule (early
+ * winner against late winner), which keeps top seeds apart classically.
+ */
+const KNOCKOUT_STAGE_LABELS: Record<number, PlannedFixture["matchType"]> = {
+  2: "final", 4: "semi_final", 8: "quarter_final", 16: "knockout", 32: "knockout",
+}
+const KNOCKOUT_STAGE_NAMES: Record<number, string> = {
+  2: "Final", 4: "Semi-finals", 8: "Quarter-finals", 16: "Round of 16", 32: "Preliminary round",
+}
+
+export type AdvancementFixture = {
+  matchNumber: number
+  status: string | null
+  winnerId: string | null
+}
+
+export type AdvancementPlan =
+  | { kind: "stage"; teamsRemaining: number; matchType: PlannedFixture["matchType"]; stageLabel: string; pairs: [string, string][]; winnersByIdentity: string[] }
+  | { kind: "complete" }
+
+function cumulativeStageSums(n: number): number[] {
+  const sums: number[] = []
+  let total = 0
+  for (let size = n / 2; size >= 1; size /= 2) {
+    total += size
+    sums.push(total)
+  }
+  return sums
+}
+
+function matchNumberOrderMismatch(fixtures: AdvancementFixture[]): boolean {
+  for (let index = 1; index < fixtures.length; index++) {
+    if (fixtures[index].matchNumber <= fixtures[index - 1].matchNumber) return true
+  }
+  return false
+}
+
+/**
+ * Plans the next knockout stage from the tournament's existing fixtures.
+ * Throws (fail-closed) when fixtures are absent, out of order, undecided,
+ * no-result, or don't sum to a supported bracket chain. Returns "complete"
+ * when the final is decided — the writer then finishes the tournament.
+ */
+export function planKnockoutAdvancement(fixtures: AdvancementFixture[]): AdvancementPlan {
+  const sorted = [...fixtures].sort((a, b) => a.matchNumber - b.matchNumber)
+  if (sorted.length === 0) throw new Error("Generate fixtures before advancing the knockout")
+  if (matchNumberOrderMismatch(sorted)) throw new Error("Fixture numbering is inconsistent; resolve it before advancing")
+
+  const decided = sorted.map(fixture => {
+    if (fixture.status === "no_result") {
+      throw new Error(`Fixture #${fixture.matchNumber} has no result — resolve or reshape it before advancing`)
+    }
+    if (fixture.status !== "completed" || !fixture.winnerId) {
+      throw new Error(`Fixture #${fixture.matchNumber} is undecided — every fixture needs a decided result before advancing`)
+    }
+    return fixture.winnerId
+  })
+
+  const total = sorted.length
+  let bracketTeams: number | null = null
+  for (const size of [32, 16, 8, 4, 2]) {
+    if (cumulativeStageSums(size).includes(total)) {
+      bracketTeams = size
+      break
+    }
+  }
+  if (bracketTeams === null) {
+    throw new Error("Existing fixtures do not match a supported knockout bracket chain")
+  }
+
+  const sums = cumulativeStageSums(bracketTeams)
+  const doneIndex = sums.findIndex(sum => sum === total)
+  const fullChain = doneIndex === sums.length - 1
+  if (fullChain) return { kind: "complete" }
+
+  // The most recent completed stage has (bracketTeams >> doneIndex) / 2 fixtures.
+  const lastStageFixtureCount = (bracketTeams / 2 ** doneIndex) / 2
+  const blockStart = total - lastStageFixtureCount
+  const winners = decided.slice(blockStart)
+  const teamsRemaining = lastStageFixtureCount // winners count = next bracket size
+  const pairs: [string, string][] = []
+  for (let i = 0; i < lastStageFixtureCount / 2; i++) {
+    pairs.push([winners[i], winners[lastStageFixtureCount - 1 - i]])
+  }
+
+  return {
+    kind: "stage",
+    teamsRemaining,
+    matchType: KNOCKOUT_STAGE_LABELS[teamsRemaining],
+    stageLabel: KNOCKOUT_STAGE_NAMES[teamsRemaining],
+    pairs,
+    winnersByIdentity: winners,
+  }
+}
+
+/**
  * Hybrid (group + knockout) group stage: balanced groups of up to four teams
  * via snake distribution (seed 1 -> group A, 2 -> B, ... then reversed), with
  * a round-robin inside each group. The knockout stage is planned by

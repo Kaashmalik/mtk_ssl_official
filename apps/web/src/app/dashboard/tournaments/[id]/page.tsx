@@ -16,8 +16,10 @@ import { eq, asc, and } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { TournamentSettingsSummary } from "@/components/tournaments/tournament-settings-summary"
+import { AdvanceTournamentButton } from "@/components/tournaments/advance-tournament-button"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { hasPermission } from "@/lib/rbac"
+import { computeStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -100,6 +102,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
     .orderBy(asc(matches.scheduledDate))
 
   // Fetch match details & team names
+  const standingsMatches: StandingsMatchInput[] = []
   const tournamentMatches = await Promise.all(tournamentMatchesRaw.map(async (m) => {
     const [teamA] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(and(eq(teams.id, m.teamAId), eq(teams.tenantId, tournament.tenantId))).limit(1)
     const [teamB] = await db.select({ name: teams.name, shortName: teams.shortName }).from(teams).where(and(eq(teams.id, m.teamBId), eq(teams.tenantId, tournament.tenantId))).limit(1)
@@ -108,6 +111,15 @@ export default async function TournamentDetailPage({ params }: { params: Promise
     const innings = await db.select().from(matchInnings).where(and(eq(matchInnings.matchId, m.id), eq(matchInnings.tenantId, tournament.tenantId)))
     const teamAInn = innings.find(inn => inn.teamId === m.teamAId)
     const teamBInn = innings.find(inn => inn.teamId === m.teamBId)
+
+    standingsMatches.push({
+      matchId: m.id, teamAId: m.teamAId, teamBId: m.teamBId,
+      status: m.status, winnerId: m.winnerId,
+      innings: [
+        ...(teamAInn ? [{ teamId: m.teamAId, runs: teamAInn.totalRuns, balls: teamAInn.totalBalls }] : []),
+        ...(teamBInn ? [{ teamId: m.teamBId, runs: teamBInn.totalRuns, balls: teamBInn.totalBalls }] : []),
+      ],
+    })
 
     const teamAScore = teamAInn ? `${teamAInn.totalRuns}/${teamAInn.totalWickets}` : "—"
     const teamBScore = teamBInn ? `${teamBInn.totalRuns}/${teamBInn.totalWickets}` : "—"
@@ -128,68 +140,11 @@ export default async function TournamentDetailPage({ params }: { params: Promise
     }
   }))
 
-  // Calculate points table (standings)
-  const completedMatches = tournamentMatchesRaw.filter(m => m.status === "completed")
-  const standingsMap = new Map<string, {
-    teamId: string
-    name: string
-    shortName: string
-    played: number
-    won: number
-    lost: number
-    noResult: number
-    points: number
-  }>()
-
-  // Initialize all registered teams with 0 stats
-  registeredTeams.forEach(team => {
-    standingsMap.set(team.id, {
-      teamId: team.id,
-      name: team.name,
-      shortName: team.shortName || team.name.substring(0, 3).toUpperCase(),
-      played: 0,
-      won: 0,
-      lost: 0,
-      noResult: 0,
-      points: 0
-    })
-  })
-
-  // Aggregate stats from completed matches
-  completedMatches.forEach(m => {
-    const statsA = standingsMap.get(m.teamAId)
-    const statsB = standingsMap.get(m.teamBId)
-
-    if (statsA && statsB) {
-      statsA.played += 1
-      statsB.played += 1
-
-      if (m.winnerId === m.teamAId) {
-        statsA.won += 1
-        statsB.lost += 1
-        statsA.points += 2
-      } else if (m.winnerId === m.teamBId) {
-        statsB.won += 1
-        statsA.lost += 1
-        statsB.points += 2
-      } else {
-        statsA.noResult += 1
-        statsB.noResult += 1
-        statsA.points += 1
-        statsB.points += 1
-      }
-    }
-  })
-
-  // Convert map to array and sort
-  const standings = Array.from(standingsMap.values()).sort((a, b) => {
-    if (b.points !== a.points) {
-      return b.points - a.points
-    }
-    if (b.won !== a.won) {
-      return b.won - a.won
-    }
-    return a.name.localeCompare(b.name)
+  // Points table (standings) — shared rule-versioned computation (rules v1:
+  // 2/1/0 for win/no-result/loss, cricket NRR, points -> NRR -> wins -> name).
+  const standings = computeStandings({
+    teams: registeredTeams.map((team) => ({ id: team.id, name: team.name, shortName: team.shortName })),
+    matches: standingsMatches,
   })
 
   const formattedStartDate = tournament.startDate
@@ -254,6 +209,10 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                     tournamentId={id}
                     registrationOpen={Boolean(tournament.registrationOpen)}
                   />
+                )}
+                {tournament.format === "knockout" && tournament.status === "live"
+                  && (hasPermission(context.role, "match:create")) && (
+                  <AdvanceTournamentButton tournamentId={id} />
                 )}
                 {canDelete && (
                   <DeleteButton
@@ -353,6 +312,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                         <th className="py-2 text-center font-medium">W</th>
                         <th className="py-2 text-center font-medium">L</th>
                         <th className="py-2 text-center font-medium">NR</th>
+                        <th className="py-2 text-center font-medium" title="Net run rate">NRR</th>
                         <th className="py-2 text-center font-medium">Pts</th>
                       </tr>
                     </thead>
@@ -369,12 +329,21 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                           <td className="py-3 text-center tabular-nums text-success font-medium">{team.won}</td>
                           <td className="py-3 text-center tabular-nums text-destructive">{team.lost}</td>
                           <td className="py-3 text-center tabular-nums text-muted-foreground">{team.noResult}</td>
+                          <td className="py-3 text-center tabular-nums">
+                            {team.hasNetRunRate ? (
+                              <span className={team.netRunRate >= 0 ? "text-success" : "text-destructive"}>
+                                {formatNetRunRate(team.netRunRate)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
                           <td className="py-3 text-center tabular-nums font-bold text-primary">{team.points}</td>
                         </tr>
                       ))}
                       {standings.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="py-6 text-center text-muted-foreground text-sm">
+                          <td colSpan={8} className="py-6 text-center text-muted-foreground text-sm">
                             No teams registered or standings generated yet.
                           </td>
                         </tr>

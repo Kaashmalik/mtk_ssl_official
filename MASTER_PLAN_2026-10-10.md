@@ -2902,6 +2902,73 @@ toss, rescheduling) or the remaining smaller product IDs. Roadmap counts:
 **19 checked / 60 open / 79 IDs** (COMP-04 partially closed — generation done,
 binding-to-UI surfaces still to wire).
 
+### Batch 50 — standings/NRR/tie-breakers + knockout advancement (16 October 2026)
+
+COMP-05 core. Both tournament pages previously carried separate inline
+standings (the public one didn't even count no-results or break ties by name).
+
+**Pure rules module — new `lib/standings.ts` (rules version 1).** One shared
+computation: a fixture is played when `completed` or `no_result` (abandoned/
+scheduled/live excluded — rescheduling is COMP-07); 2 points win / 1 point
+no-result-or-undecided / 0 loss; cricket NRR = (runs/balls faced) − (runs/
+balls bowled) aggregated over counted fixtures, only when BOTH sides' innings
+rows exist so voided innings can't skew it, with teams lacking evidence
+sorting after evidenced teams at equal points; tie-breaks points → NRR →
+wins → name; `formatNetRunRate` follows broadcast convention (signed, 3
+decimals). The dashboard page now collects match+innings inputs in its
+existing loop and computes via the module (new NRR column with positive/
+negative coloring and "—" without evidence); the public page uses the same
+module (compact P/W/L/Pts columns unchanged, better tie-breaks). Group-wise
+tables need a group column on matches which doesn't exist — computation is
+tournament-wide, recorded honestly.
+
+**Locked advancement writer — new `lib/tournament-advancement.ts`.**
+`planKnockoutAdvancement` (in `fixture-planning.ts`, pure) derives the next
+stage from existing fixtures: a stage is always created atomically, so the
+fixture count uniquely identifies the bracket size and progress (cumulative
+prefix sums are distinct across 2/4/8/16/32 chains) and the next round pairs
+stage winners mirror-wise (early v late), keeping top seeds apart classically.
+Fail-closed on empty/undecided/no-result fixtures, inconsistent numbering and
+non-chain counts. `advanceKnockoutTournament` persists the next stage in one
+`read committed` transaction (same owner→league→tournament-row lock family,
+fail-closed on non-live tournaments, continues match numbering, reuses wizard
+config for format/overs) and — when the final is decided — transitions the
+tournament live → completed via a claim-locked update that can never touch a
+cancelled tournament, all audited as `TOURNAMENT_ADVANCE`. New
+`advanceTournament` action (`match:create`) and an `AdvanceTournamentButton`
+on the dashboard (knockout + live + permission gated) with stage/completion
+toasts.
+
+**Honest limits:** advancement supports knockout format only — hybrid
+group→knockout progression needs persisted group labels (matches has no group
+column); result-correction effects and rescheduling remain COMP-07.
+
+New regressions: `standings.test.ts` (11 — points mapping, excluded statuses,
+NRR aggregation over balls, missing-innings handling, tie-break order,
+formatting), `fixture-planning.test.ts` (+5 — mirror pairings for 8/16-team
+chains, final creation, completion, non-chain/undecided/no-result/numbering
+gates), `tournament-advancement.test.ts` (8 — lock order, gates (draft/
+archived/non-knockout/idempotent-completed/undecided/no-result), next-stage
+creation with continuing numbers + audit, completion transition),
+`tournament-actions.test.ts` (+1 — advance delegation).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **89** files, **2,289 tests** (+24) |
+| Focused: standings/planner/advancement/actions | PASS — 97 tests |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: COMP-06 (eligible XI/official approval, toss, match
+readiness) and COMP-07 (rescheduling, forfeits/disputes, competition locks);
+then member UI + records pages, feed/media, and the environment-dependent
+acceptance batches that this workspace cannot complete without the Supabase
+auth user and real-DB staging (Phase 0 BASE-04..06 and Phase 9 REL-01..07).
+Roadmap counts: **19 checked / 60 open / 79 IDs** (COMP-05's core computed
+rules are in — reviewed result-correction effects remain open).
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

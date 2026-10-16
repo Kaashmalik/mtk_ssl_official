@@ -9,6 +9,7 @@ import { Calendar } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament } from "@/lib/public-visibility"
+import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft", registration: "Registration Open", live: "Live", completed: "Completed", cancelled: "Cancelled",
@@ -52,6 +53,7 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     .where(and(eq(matches.tournamentId, id), eq(matches.tenantId, tenantId)))
     .orderBy(asc(matches.scheduledDate))
 
+  const standingsInputs: StandingsMatchInput[] = []
   const tournamentMatches = await Promise.all(tournamentMatchesRaw.map(async (m) => {
     const [teamA] = await db.select({ name: teams.name }).from(teams)
       .where(and(eq(teams.id, m.teamAId), eq(teams.tenantId, tenantId))).limit(1)
@@ -61,6 +63,14 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       .where(and(eq(matchInnings.matchId, m.id), eq(matchInnings.tenantId, tenantId)))
     const teamAInn = innings.find(inn => inn.teamId === m.teamAId)
     const teamBInn = innings.find(inn => inn.teamId === m.teamBId)
+    standingsInputs.push({
+      matchId: m.id, teamAId: m.teamAId, teamBId: m.teamBId,
+      status: m.status, winnerId: m.winnerId,
+      innings: [
+        ...(teamAInn ? [{ teamId: m.teamAId, runs: teamAInn.totalRuns, balls: teamAInn.totalBalls }] : []),
+        ...(teamBInn ? [{ teamId: m.teamBId, runs: teamBInn.totalRuns, balls: teamBInn.totalBalls }] : []),
+      ],
+    })
     return {
       ...m,
       teamAName: teamA?.name ?? "TBD",
@@ -73,19 +83,12 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     }
   }))
 
-  const completedMatches = tournamentMatchesRaw.filter(m => m.status === "completed")
-  const standingsMap = new Map<string, { name: string; played: number; won: number; lost: number; points: number }>()
-  for (const t of registeredTeams) standingsMap.set(t.id, { name: t.name, played: 0, won: 0, lost: 0, points: 0 })
-  for (const m of completedMatches) {
-    const a = standingsMap.get(m.teamAId)
-    const b = standingsMap.get(m.teamBId)
-    if (!a || !b) continue
-    a.played++; b.played++
-    if (m.winnerId === m.teamAId) { a.won++; a.points += 2; b.lost++ }
-    else if (m.winnerId === m.teamBId) { b.won++; b.points += 2; a.lost++ }
-    else { a.points += 1; b.points += 1 }
-  }
-  const standings = [...standingsMap.values()].sort((a, b) => b.points - a.points || b.won - a.won)
+  // Shared rule-versioned standings (v1: 2/1/0, cricket NRR, points -> NRR ->
+  // wins -> name). The public table shows the compact P/W/L/Pts columns.
+  const standings = computeStandings({
+    teams: registeredTeams.map((team) => ({ id: team.id, name: team.name, shortName: team.shortName })),
+    matches: standingsInputs,
+  })
 
   // Knockout bracket: map match types to rounds. quarter_final -> 1, semi_final -> 2, final -> 3.
   const roundOf: Record<string, number> = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { knockoutStages, planHybridFixtures, planKnockoutFirstRound, planLeagueFixtures,
-  rankApprovedTeamIds, resolveSeededSlots } from "@/lib/fixture-planning"
+import { knockoutStages, planHybridFixtures, planKnockoutFirstRound, planKnockoutAdvancement, planLeagueFixtures,
+  rankApprovedTeamIds, resolveSeededSlots, type AdvancementFixture } from "@/lib/fixture-planning"
 
 const T = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 
@@ -147,5 +147,52 @@ describe("hybrid group-stage planning", () => {
     // c(4,2)*2 + c(3,2) = 6 + 6 + 3 = 15
     expect(plan.fixtures).toHaveLength(15)
     expect(plan.rounds).toEqual(["Group A", "Group B", "Group C"])
+  })
+})
+
+describe("knockout advancement planning", () => {
+  const stage = (count: number, startNumber: number, winners: string[]): AdvancementFixture[] =>
+    Array.from({ length: count }, (_, i) => ({
+      matchNumber: startNumber + i, status: "completed", winnerId: winners[i] ?? T(99),
+    }))
+
+  it("pairs mirror-wise into the next stage: 8-team bracket QF winners -> semis", () => {
+    // QF1 winner T(1), QF2 winner T(2), QF3 winner T(3), QF4 winner T(4).
+    const plan = planKnockoutAdvancement(stage(4, 1, [T(1), T(2), T(3), T(4)]))
+    expect(plan).toMatchObject({ kind: "stage", teamsRemaining: 4, matchType: "semi_final", stageLabel: "Semi-finals" })
+    expect(plan.kind === "stage" && plan.pairs).toEqual([[T(1), T(4)], [T(2), T(3)]])
+  })
+
+  it("continues 16-team brackets: first round done -> four quarter-finals", () => {
+    const winners = Array.from({ length: 8 }, (_, i) => T(i + 1))
+    const plan = planKnockoutAdvancement(stage(8, 1, winners))
+    expect(plan).toMatchObject({ kind: "stage", teamsRemaining: 8, matchType: "quarter_final" })
+    expect(plan.kind === "stage" && plan.pairs[0]).toEqual([T(1), T(8)])
+  })
+
+  it("creates the final from semi-final winners and completes after it", () => {
+    const semisDone = stage(6, 1, [T(1), T(2), T(3), T(4), T(5), T(6)])
+    const plan = planKnockoutAdvancement(semisDone)
+    expect(plan).toMatchObject({ kind: "stage", matchType: "final", stageLabel: "Final" })
+    expect(plan.kind === "stage" && plan.pairs).toEqual([[T(5), T(6)]])
+
+    // Final number 7 decided: chain complete.
+    const finish = planKnockoutAdvancement([...semisDone, { matchNumber: 7, status: "completed", winnerId: T(5) }])
+    expect(finish).toEqual({ kind: "complete" })
+  })
+
+  it("fails closed on empty, undecided, no-result or non-chain fixture sets", () => {
+    expect(() => planKnockoutAdvancement([])).toThrow("Generate fixtures before advancing")
+    expect(() => planKnockoutAdvancement([{ matchNumber: 1, status: "live", winnerId: null }]))
+      .toThrow("Fixture #1 is undecided")
+    expect(() => planKnockoutAdvancement([{ matchNumber: 1, status: "no_result", winnerId: null }]))
+      .toThrow("has no result")
+    // 5 completed fixtures match no supported cumulative chain.
+    expect(() => planKnockoutAdvancement(stage(5, 1, [T(1), T(1), T(1), T(1), T(1)])))
+      .toThrow("do not match a supported knockout bracket chain")
+    expect(() => planKnockoutAdvancement([
+      { matchNumber: 2, status: "completed", winnerId: T(1) },
+      { matchNumber: 2, status: "completed", winnerId: T(1) },
+    ])).toThrow("Fixture numbering is inconsistent")
   })
 })

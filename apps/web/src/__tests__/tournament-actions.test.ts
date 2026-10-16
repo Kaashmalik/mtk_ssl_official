@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { getTenantContext } from "@mtk/database"
 import {
+  advanceTournament,
   closeRegistration,
   createTournament,
   deleteTournament,
@@ -38,9 +39,11 @@ const mocks = vi.hoisted(() => ({
   txInsert: vi.fn(),
   txValues: vi.fn(),
   generate: vi.fn(),
+  advance: vi.fn(),
 }))
 
 vi.mock("@/lib/fixture-generation", () => ({ generateTournamentFixtures: mocks.generate }))
+vi.mock("@/lib/tournament-advancement", () => ({ advanceKnockoutTournament: mocks.advance }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
@@ -540,5 +543,18 @@ describe("Fixture generation action delegation", () => {
     await expect(generateFixtures("not-a-uuid")).rejects.toThrow()
     expect(mocks.generate).not.toHaveBeenCalled()
     expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+
+  it("delegates advance to the knockout advancement writer with the same permission", async () => {
+    mocks.advance.mockResolvedValue({ tournament: { id: TOURNAMENT_ID }, stage: "Semi-finals", created: [] })
+
+    const result = await advanceTournament(TOURNAMENT_ID)
+
+    expect(mocks.authorize).toHaveBeenCalledWith("match:create", ACTIVE_TENANT)
+    expect(mocks.advance).toHaveBeenCalledWith(CLERK_ID, ACTIVE_TENANT, TOURNAMENT_ID)
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ success: true, stage: "Semi-finals" })
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/dashboard/tournaments/${TOURNAMENT_ID}`)
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/matches")
   })
 })
