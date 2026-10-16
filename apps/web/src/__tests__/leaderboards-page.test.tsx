@@ -21,6 +21,15 @@ function collectText(node: unknown, out: string[] = []): string[] {
   return out
 }
 
+function collectElements(node: unknown, type: string): React.ReactElement<Record<string, unknown>>[] {
+  if (!React.isValidElement(node)) return []
+  const props = node.props as { children?: React.ReactNode }
+  return [
+    ...(node.type === type ? [node as React.ReactElement<Record<string, unknown>>] : []),
+    ...React.Children.toArray(props.children).flatMap(child => collectElements(child, type)),
+  ]
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.tenant.mockResolvedValue(TENANT)
@@ -30,10 +39,10 @@ beforeEach(() => {
 
 describe("Public leaderboards are scoped to the request-host league", () => {
   it("reads both leaderboards for the resolved public tenant, never globally", async () => {
-    const tree = await LeaderboardsPage()
+    const tree = await LeaderboardsPage({})
     expect(mocks.tenant).toHaveBeenCalledTimes(1)
-    expect(mocks.batting).toHaveBeenCalledWith(TENANT)
-    expect(mocks.bowling).toHaveBeenCalledWith(TENANT)
+    expect(mocks.batting).toHaveBeenCalledWith(TENANT, { minimumInnings: 0, minimumBalls: 0 })
+    expect(mocks.bowling).toHaveBeenCalledWith(TENANT, { minimumInnings: 0, minimumBalls: 0 })
     const text = collectText(tree)
     expect(text).toContain("Adeel")
     expect(text).toContain("Bilal")
@@ -41,14 +50,52 @@ describe("Public leaderboards are scoped to the request-host league", () => {
 
   it("propagates a no-tenant resolution instead of rendering a global list", async () => {
     mocks.tenant.mockRejectedValue(new Error("No tenant resolved"))
-    await expect(LeaderboardsPage()).rejects.toThrow("No tenant resolved")
+    await expect(LeaderboardsPage({})).rejects.toThrow("No tenant resolved")
     expect(mocks.batting).not.toHaveBeenCalled()
   })
 
   it("renders an honest empty state when the league has no published stats", async () => {
     mocks.batting.mockResolvedValue([])
     mocks.bowling.mockResolvedValue([])
-    const text = collectText(await LeaderboardsPage())
-    expect(text.filter((t) => t === "No stats yet.")).toHaveLength(2)
+    const text = collectText(await LeaderboardsPage({}))
+    expect(text.filter((t) => t === "No published stats meet these minimums.")).toHaveLength(2)
+  })
+
+  it("passes user-selected minimums to both same-league readers", async () => {
+    await LeaderboardsPage({ searchParams: Promise.resolve({ minimumInnings: "3", minimumBalls: "60" }) })
+    expect(mocks.batting).toHaveBeenCalledWith(TENANT, { minimumInnings: 3, minimumBalls: 60 })
+    expect(mocks.bowling).toHaveBeenCalledWith(TENANT, { minimumInnings: 3, minimumBalls: 60 })
+  })
+
+  it.each(["-1", "1.5", "10001", ["1", "2"]])("does not query or fake an empty ranking for invalid input %s", async value => {
+    const text = collectText(await LeaderboardsPage({ searchParams: Promise.resolve({ minimumInnings: value }) }))
+    expect(text.join(" ")).toContain("Enter whole-number minimums")
+    expect(text).not.toContain("No published stats meet these minimums.")
+    expect(mocks.batting).not.toHaveBeenCalled()
+    expect(mocks.bowling).not.toHaveBeenCalled()
+  })
+
+  it("labels the aggregates without claiming verified, format-specific or official records", async () => {
+    const text = collectText(await LeaderboardsPage({})).join(" ")
+    expect(text).toContain("Formats are combined")
+    expect(text).toContain("not verified career records or official awards")
+    expect(text).toContain("Zero means no minimum")
+  })
+
+  it.each(["batting", "bowling"] as const)("propagates a %s failure instead of an empty ranking", async kind => {
+    mocks[kind].mockRejectedValue(new Error("Database unavailable"))
+    await expect(LeaderboardsPage({})).rejects.toThrow("Database unavailable")
+  })
+
+  it("uses a labelled GET form and accessible table headers", async () => {
+    const tree = await LeaderboardsPage({ searchParams: Promise.resolve({ minimumInnings: "2", minimumBalls: "12" }) })
+    expect(collectElements(tree, "form")[0].props.method).toBe("get")
+    expect(collectElements(tree, "input").map(node => node.props)).toMatchObject([
+      { id: "minimum-innings", name: "minimumInnings", min: 0, max: 10_000, defaultValue: 2 },
+      { id: "minimum-balls", name: "minimumBalls", min: 0, max: 10_000, defaultValue: 12 },
+    ])
+    expect(collectElements(tree, "label").map(node => node.props.htmlFor)).toEqual(["minimum-innings", "minimum-balls"])
+    expect(collectElements(tree, "th")).toHaveLength(6)
+    expect(collectElements(tree, "th").every(node => node.props.scope === "col")).toBe(true)
   })
 })

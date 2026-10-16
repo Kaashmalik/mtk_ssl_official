@@ -3209,6 +3209,31 @@ No schema, migration, RLS, grants, providers, remote database or deployment chan
 Next: remaining IAM-02 search/pagination/detail work and PUB-03 format-qualified records.
 The release gate remains default-off; roadmap stays **19 checked / 60 open / 79 IDs**.
 
+### Batch 57 — public leaderboard minimum qualifications (16 October 2026)
+
+PUB-03 partial slice after Batch 56. Public season-stat aggregates have no match-format
+column; this batch does not infer format, certify careers or invent award policies.
+
+`lib/leaderboard-filters.ts` centralizes validated optional minimum innings and balls
+(0–10,000, default zero). Its GET parser rejects ambiguous/duplicate or malformed values;
+the reader validates numeric inputs independently. Public batting/bowling queries retain
+all exact-league/publication joins and predicates, and qualify summed innings/balls via
+`HAVING` before the deterministic aggregate ranking and top-10 limit. Batting uses innings
+batted/balls faced; bowling uses innings bowled/balls bowled.
+
+The page provides a labelled GET form and reset link, validation and qualified-empty
+states, column headers/captions, and an explicit combined-format league-season disclaimer.
+Bad filters skip both ranking reads rather than broadening the query or rendering a fake
+empty ranking; read failures remain visible. Thresholds are user-selected, not official
+league minimums. Verified careers, format-specific records and consent remain open.
+
+Fresh verification: full web **2,390 tests / 94 files passed** (+35), process exit 0.
+Targeted parser/query/page suites passed **64 tests / 3 files**; type checking remains
+at **18 pre-existing errors**, no new diagnostics; `git diff --check` is clean. Added
+coverage: parser 15, query +11, page +9 (35). No schema, migration, RLS/grant, provider,
+remote database or deployment change; mocked aggregate predicates are not real-DB proof.
+Roadmap counts stay **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

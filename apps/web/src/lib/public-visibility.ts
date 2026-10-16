@@ -1,5 +1,6 @@
-import { and, eq, asc, desc, inArray, sum } from "drizzle-orm"
+import { and, eq, asc, desc, inArray, sum, gte } from "drizzle-orm"
 import { db, matches, tournaments, teams, matchInnings, players, playerSeasonStats } from "@mtk/database"
+import { publicLeaderboardFilters, type PublicLeaderboardFilterInput } from "./leaderboard-filters"
 
 /**
  * Publication boundary for the public (unauthenticated) surface.
@@ -107,8 +108,12 @@ export type PublicLeaderboardRow = { playerId: string; playerName: string; total
 async function readPublicLeaderboard(
   tenantId: string,
   metric: "runs" | "wickets",
+  input: PublicLeaderboardFilterInput,
 ): Promise<PublicLeaderboardRow[]> {
+  const filters = publicLeaderboardFilters.parse(input)
   const column = metric === "runs" ? playerSeasonStats.runsScored : playerSeasonStats.wicketsTaken
+  const innings = metric === "runs" ? playerSeasonStats.inningsBatted : playerSeasonStats.inningsBowled
+  const balls = metric === "runs" ? playerSeasonStats.ballsFaced : playerSeasonStats.ballsBowled
   const rows = await db
     .select({
       playerId: playerSeasonStats.playerId,
@@ -129,17 +134,19 @@ async function readPublicLeaderboard(
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(playerSeasonStats.playerId, players.name)
+    // Qualify across the same published, same-league rows before ranking/limiting.
+    .having(and(gte(sum(innings), filters.minimumInnings), gte(sum(balls), filters.minimumBalls)))
     .orderBy(desc(sum(column)), asc(playerSeasonStats.playerId))
     .limit(PUBLIC_LEADERBOARD_LIMIT)
   return rows
 }
 
 /** Batting leaderboard for the public hub, scoped and publication-gated. */
-export function readPublicBattingLeaderboard(tenantId: string) {
-  return readPublicLeaderboard(tenantId, "runs")
+export function readPublicBattingLeaderboard(tenantId: string, input: PublicLeaderboardFilterInput = {}) {
+  return readPublicLeaderboard(tenantId, "runs", input)
 }
 
 /** Bowling leaderboard for the public hub, scoped and publication-gated. */
-export function readPublicBowlingLeaderboard(tenantId: string) {
-  return readPublicLeaderboard(tenantId, "wickets")
+export function readPublicBowlingLeaderboard(tenantId: string, input: PublicLeaderboardFilterInput = {}) {
+  return readPublicLeaderboard(tenantId, "wickets", input)
 }

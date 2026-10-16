@@ -11,6 +11,15 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 57 application-only leaderboard qualification (16 October 2026)
+
+Published league leaderboards now apply user-selected minimum innings/balls to the
+same grouped season-stat rows via aggregate `HAVING`, before ordering and the top-10
+limit. Tenant/publication predicates are retained. No schema, migration, RLS/grants,
+remote database inspection/write, or deployment ran. Format-specific records are not
+claimed: existing season aggregates have no match-format dimension. Real PostgreSQL
+aggregate/plan verification and public-browser acceptance remain open.
+
 ### Batch 56 application-only follow-up (16 October 2026)
 
 Member assignment reads now detect and disclose capped results rather than implying

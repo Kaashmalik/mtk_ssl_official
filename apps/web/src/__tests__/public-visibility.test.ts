@@ -18,7 +18,7 @@ const TOURNAMENT = "00000000-0000-4000-8000-0000000000bb"
 const dialect = new PgDialect()
 
 function selectChain() {
-  const record: any = { params: [], joins: [] }
+  const record: any = { params: [], joins: [], steps: [] }
   mocks.queries.push(record)
   const merge = (where: any) => {
     const q = dialect.sqlToQuery(where)
@@ -28,9 +28,10 @@ function selectChain() {
     from: (table: any) => { record.table = table; return chain },
     innerJoin: (_table: any, where: any) => { record.joins.push(_table); if (where) merge(where); return chain },
     where: (where: any) => { merge(where); return chain },
-    groupBy: () => chain,
-    orderBy: () => chain,
-    limit: (limit: number) => { record.limit = limit; return chain },
+    groupBy: () => { record.steps.push("groupBy"); return chain },
+    having: (where: any) => { record.steps.push("having"); record.having = dialect.sqlToQuery(where); return chain },
+    orderBy: (...order: any[]) => { record.steps.push("orderBy"); record.order = order.map(value => dialect.sqlToQuery(value)); return chain },
+    limit: (limit: number) => { record.steps.push("limit"); record.limit = limit; return chain },
     then: (resolve: any, reject: any) => {
       let rows: any[] = []
       if (record.table === matches) rows = mocks.state.match ? [mocks.state.match] : []
@@ -130,4 +131,38 @@ describe("Public reads are tenant-scoped and publication-gated", () => {
       expect(query.params).not.toContain("cancelled")
       expect(query.limit).toBe(PUBLIC_LEADERBOARD_LIMIT)
     })
+
+  it.each([
+    ["batting", readPublicBattingLeaderboard, "innings_batted", "balls_faced"],
+    ["bowling", readPublicBowlingLeaderboard, "innings_bowled", "balls_bowled"],
+  ] as const)("qualifies the %s aggregate before ranking and limiting", async (_name, read, innings, balls) => {
+    await read(TENANT, { minimumInnings: 3, minimumBalls: 60 })
+    const query = mocks.queries[0]
+    expect(query.having.sql).toContain(`sum("player_season_stats"."${innings}")`)
+    expect(query.having.sql).toContain(`sum("player_season_stats"."${balls}")`)
+    expect(query.having.params).toEqual([3, 60])
+    expect(query.steps).toEqual(["groupBy", "having", "orderBy", "limit"])
+    expect(query.order[1].sql).toContain('"player_season_stats"."player_id" asc')
+    expect(query.limit).toBe(PUBLIC_LEADERBOARD_LIMIT)
+  })
+
+  it("retains no-minimum qualification by default", async () => {
+    await readPublicBattingLeaderboard(TENANT)
+    expect(mocks.queries[0].having.params).toEqual([0, 0])
+  })
+
+  it.each([
+    { minimumInnings: -1 }, { minimumInnings: 0.5 }, { minimumBalls: 10_001 },
+    { minimumBalls: NaN }, { minimumBalls: Infinity }, { minimumBalls: "60" },
+    { unknownFilter: true },
+  ])("rejects invalid qualification %s before issuing a query", async input => {
+    await expect(readPublicBattingLeaderboard(TENANT, input as never)).rejects.toThrow()
+    await expect(readPublicBowlingLeaderboard(TENANT, input as never)).rejects.toThrow()
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
+
+  it("does not hide a leaderboard query failure as an empty ranking", async () => {
+    mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
+    await expect(readPublicBattingLeaderboard(TENANT, { minimumInnings: 1 })).rejects.toThrow("Database unavailable")
+  })
 })
