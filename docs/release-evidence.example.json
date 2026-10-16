@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "commit": null,
+  "target": null,
+  "stagingEnvironment": null,
+  "recordedAt": null,
+  "checks": [
+    { "id": "REL-01/migration-chain", "method": "real-postgres", "status": "blocked", "artifacts": [] },
+    { "id": "REL-01/isolation", "method": "real-postgres", "status": "blocked", "artifacts": [] },
+    { "id": "REL-01/concurrency", "method": "real-postgres", "status": "blocked", "artifacts": [] },
+    { "id": "REL-02/web-journeys", "method": "authenticated-browser", "status": "blocked", "artifacts": [] },
+    { "id": "REL-02/mobile-recovery", "method": "authenticated-device", "status": "blocked", "artifacts": [] },
+    { "id": "REL-03/publication-fanout", "method": "deployed-infrastructure", "status": "blocked", "artifacts": [] },
+    { "id": "REL-03/load-latency-quotas", "method": "deployed-infrastructure", "status": "blocked", "artifacts": [] },
+    { "id": "REL-03/outbox-recovery", "method": "deployed-infrastructure", "status": "blocked", "artifacts": [] },
+    { "id": "REL-04/storage-exports", "method": "authenticated-browser", "status": "blocked", "artifacts": [] },
+    { "id": "REL-04/privacy-retention-abuse", "method": "operator-drill", "status": "blocked", "artifacts": [] },
+    { "id": "REL-05/backup-restore", "method": "operator-drill", "status": "blocked", "artifacts": [] },
+    { "id": "REL-05/migration-rollback", "method": "real-postgres", "status": "blocked", "artifacts": [] },
+    { "id": "REL-05/secret-account-device-recovery", "method": "operator-drill", "status": "blocked", "artifacts": [] },
+    { "id": "REL-06/email-otp", "method": "provider-sandbox", "status": "blocked", "artifacts": [] },
+    { "id": "REL-06/payments", "method": "provider-sandbox", "status": "blocked", "artifacts": [] },
+    { "id": "REL-06/domain-https", "method": "deployed-infrastructure", "status": "blocked", "artifacts": [] },
+    { "id": "REL-07/deploy-rollback", "method": "operator-drill", "status": "blocked", "artifacts": [] },
+    { "id": "REL-07/feature-review", "method": "owner-review", "status": "blocked", "artifacts": [] }
+  ],
+  "ownerApproval": null
+}

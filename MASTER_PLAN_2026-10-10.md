@@ -3343,6 +3343,35 @@ provider, build or deployment changes. Real multi-instance fan-out/withdrawal, b
 consent and private socket grant acceptance are not certified. Other gateways still need
 review. Roadmap **19 checked / 60 open / 79 IDs**; release gate remains default-off.
 
+### Batch 62 — retained release evidence and exact-candidate production guard (16 October 2026)
+
+REL-07 source foundation only. Local Docker/PostgreSQL/Bash remain unavailable, and
+Supabase discovery exposed no project clearly linked to this repository. No project
+schema/data/logs were queried; the rebuild was not re-certified.
+
+Added native Node release-evidence validation: exact SHA/target, distinct staging,
+18 prescribed real acceptance methods, fresh timestamps, subsequent owner approval,
+bounded retained report files with SHA-256 verification, traversal/symlink rejection
+and fail-closed missing/blocked/skipped/waived/mock-method handling. Integrity checks
+cannot prove claims or reviewer identity. Fixtures are explicitly synthetic.
+
+CI/manual production stays default-off, requires retained evidence, and never treats
+a template as approval. CI accepts artifacts only from a successful manually dispatched
+same-repository/main run for the exact SHA; validates before SSH and serializes the
+job. Actual acceptance runner/uploader is still missing. VPS deployment refuses dirty
+work and checks out the reviewed SHA instead of resetting/advancing to newer main.
+Manual production verifies the same evidence before Docker access. Removed the
+automatic Drizzle migration attempt and false success message: canonical SQL-chain
+acceptance and reviewed schema rollout are separate. Removed DB credential-prefix
+logging. Added blocked manifest example, operator contract and historical-guide hold.
+
+Fresh verification: web **2,482 / 101 files**, database **181 / 11 files**, scoring
+**262 / 10 suites**, native checker **87 tests** — **3,012 passing tests**, all exits 0.
+Web type check exits 0; `git diff --check` clean. Both workflow YAML files parse; Bash/source/SSH contracts
+are not deployed execution proof. No build, schema/migration operation, remote project
+query, provider action, variable toggle, owner approval or deployment occurred. Release
+acceptance remains open; roadmap **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

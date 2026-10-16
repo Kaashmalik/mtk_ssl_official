@@ -2,6 +2,15 @@
 
 Complete step-by-step guide to take your project live. Follow these in order.
 
+> **Release hold (16 October 2026):** this is a historical setup guide, not current
+> acceptance evidence. Table counts and “already connected” statements below are
+> historical and unverified here. The authoritative release gates are in
+> [the SaaS plan](docs/SAAS_MASTER_PLAN_2026-10-12.md) and the
+> [release evidence contract](docs/RELEASE_EVIDENCE.md). Production deploys remain
+> default-off and now require exact-commit retained evidence and owner approval.
+> Database migrations are a separate reviewed operation, not run by `deploy-vps.sh`.
+> Do not execute the deployment commands below until those gates pass.
+
 ---
 
 ## ✅ Pre-Completed (Already Done)

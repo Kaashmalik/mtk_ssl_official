@@ -3,6 +3,8 @@
 # SSL Cricket — Production VPS Deployment Script
 # Target: Oracle Cloud Free Tier (Ubuntu 22.04/24.04 ARM or x86)
 # Usage:  bash deploy-vps.sh [--phase core|all|infra|frontend]
+# Production only: requires reviewed retained evidence and explicit release env.
+# See docs/RELEASE_EVIDENCE.md; schema rollout is a separate reviewed operation.
 # ============================================================================
 
 set -euo pipefail
@@ -53,6 +55,24 @@ esac
 
 # ─── Pre-flight checks ──────────────────────────────────────────────────────
 step "Pre-flight checks"
+
+# This script is production-only. Staging acceptance is a separately authorized
+# workflow; never use a fabricated passed manifest to bootstrap a test environment.
+if [[ "${LEAGUE_MEMBERSHIP_CONTROLS_READY:-false}" != "true" ]]; then
+  error "Production release is disabled; complete the reviewed acceptance gates first."
+  exit 1
+fi
+if ! command -v node &> /dev/null; then
+  error "Node.js is required to validate retained release evidence."
+  exit 1
+fi
+if [[ -z "${RELEASE_EVIDENCE_MANIFEST:-}" || -z "${RELEASE_COMMIT:-}" || -z "${RELEASE_TARGET:-}" ]]; then
+  error "RELEASE_EVIDENCE_MANIFEST, RELEASE_COMMIT and RELEASE_TARGET are required."
+  exit 1
+fi
+test "$(git -C "$PROJECT_DIR" rev-parse HEAD)" = "$RELEASE_COMMIT" || { error "Checkout does not match the reviewed candidate."; exit 1; }
+test -z "$(git -C "$PROJECT_DIR" status --porcelain)" || { error "Checkout has local changes; refusing production deployment."; exit 1; }
+node "$PROJECT_DIR/scripts/release-evidence.mjs" --manifest "$RELEASE_EVIDENCE_MANIFEST" --commit "$RELEASE_COMMIT" --target "$RELEASE_TARGET"
 
 if ! command -v docker &> /dev/null; then
   error "Docker is not installed. Install it first:"
@@ -136,7 +156,7 @@ if [[ "$DB_URL" == *"supabase"* || "$DB_URL" == *"@"* && "$DB_URL" != *"@postgre
 fi
 
 if [[ "$USING_EXTERNAL_DB" -eq 1 ]]; then
-  log "External database detected (${DB_URL%%@*}@…); skipping local postgres ✓"
+  log "External database detected; skipping local postgres ✓"
 else
   log "Local postgres detected; enabling selfhosted-db profile"
   SERVICES="postgres $SERVICES"
@@ -160,17 +180,12 @@ log "Waiting for Kafka to be ready..."
 sleep 10
 log "Infrastructure ready ✓"
 
-# ─── Phase 3: Run database migrations ───────────────────────────────────────
-step "Running database migrations"
-
-# Use the local pnpm to run drizzle migrations against Supabase/Postgres
-cd "$PROJECT_DIR"
-if command -v pnpm &> /dev/null; then
-  pnpm --filter @mtk/database migrate || warn "Migration via pnpm failed (may already be applied via Supabase MCP)"
-else
-  warn "pnpm not installed on VPS — ensure migrations were applied via Supabase dashboard/MCP."
-fi
-log "Migrations complete ✓"
+# ─── Phase 3: Database acceptance boundary ───────────────────────────────────
+# Supabase's canonical SQL chain is not a Drizzle journal. Never infer that the
+# schema is current from a skipped/failed/no-op drizzle-kit migrate command.
+# The evidence checker requires real-Postgres migration-chain acceptance; the
+# operator applies/verifies schema separately before authorizing this release.
+log "Database migration-chain attestation validated; no schema changes run by this script."
 
 # ─── Phase 4: Start application services ────────────────────────────────────
 step "Starting application services ($PHASE)"
@@ -293,4 +308,4 @@ echo -e "\nUseful commands:"
 echo -e "  View logs:    ${BLUE}docker compose -f docker-compose.prod.yml logs -f${NC}"
 echo -e "  Restart:      ${BLUE}docker compose -f docker-compose.prod.yml restart${NC}"
 echo -e "  Stop:         ${BLUE}docker compose -f docker-compose.prod.yml down${NC}"
-echo -e "  Update:       ${BLUE}git pull && bash deploy-vps.sh${NC}"
+echo -e "  Update:       ${BLUE}review the next exact candidate and evidence per docs/RELEASE_EVIDENCE.md${NC}"

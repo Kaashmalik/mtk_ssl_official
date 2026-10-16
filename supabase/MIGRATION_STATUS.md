@@ -11,6 +11,17 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 62 release evidence and separate schema acceptance (16 October 2026)
+
+Production deployment no longer invokes `drizzle-kit migrate` against the canonical
+Supabase SQL files or suppresses a migration failure before printing success. A reviewed
+schema rollout is separate; candidate-bound real-Postgres migration-chain evidence is
+required by the new default-off release checker, along with isolation/concurrency and
+other retained acceptance. No schema, migration history, grants or data were queried or
+changed. Accessible MCP projects could not be linked unambiguously to this repository;
+no unrelated project's database was inspected. Local Docker/PostgreSQL remain absent.
+Historical rebuild evidence below was not re-certified; no acceptance/approval claimed.
+
 ### Batch 61 canonical public live-read boundary (16 October 2026)
 
 Canonical public snapshot/history reads now use exact-league publication/active-league

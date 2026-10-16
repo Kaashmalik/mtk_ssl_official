@@ -28,6 +28,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test release evidence checker
+        run: |
+          pnpm test:release
+          bash -n deploy-vps.sh
+
       - name: Database Package Build
         run: pnpm --filter @mtk/database build
 

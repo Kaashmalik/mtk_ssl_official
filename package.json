@@ -17,6 +17,8 @@
     "type-check": "turbo run type-check",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "test:release": "node --test scripts/release-evidence.test.mjs",
+    "release:check": "node scripts/release-evidence.mjs",
     "clean": "turbo run clean && rimraf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\""
