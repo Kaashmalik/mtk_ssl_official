@@ -11,10 +11,12 @@ import { DeleteButton } from "@/components/shared/delete-button"
 import { MatchLifecycleControls } from "@/components/matches/match-lifecycle-controls"
 import { StreamStartModal } from "@/components/matches/stream-start-modal"
 import { ScorerAssign } from "@/components/matches/scorer-assign"
+import { ScorerApprovalButton } from "@/components/matches/scorer-approval-button"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
-import { db, teams, matchInnings, players, venues, leagueRegistrations } from "@mtk/database"
+import { auth } from "@clerk/nextjs/server"
+import { db, teams, matchInnings, players, venues, leagueRegistrations, users } from "@mtk/database"
 import { and, eq, asc, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
@@ -27,6 +29,21 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   const match = await getMatch(id)
   if (!match) {
     notFound()
+  }
+
+  // Official approval (COMP-06): resolve whether the viewer is the assigned
+  // primary/backup scorer so only they see the consent control. The writer
+  // re-verifies the slot under a lock; this read only sizes the button.
+  let viewerOccupiesScorerSlot = false
+  if (match.scorerApprovalRequired && !match.scorerApprovedAt) {
+    const { userId: viewerClerkId } = await auth()
+    if (viewerClerkId) {
+      const [viewer] = await db.select({ id: users.id }).from(users)
+        .where(and(eq(users.clerkId, viewerClerkId), eq(users.isActive, true))).limit(1)
+      if (viewer && (match.scorerId === viewer.id || match.backupScorerId === viewer.id)) {
+        viewerOccupiesScorerSlot = true
+      }
+    }
   }
 
   // Fetch Team A details
@@ -291,6 +308,12 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
         <div className="mt-3 space-y-3">
           <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} />
           <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} currentBackupScorerId={match.backupScorerId} />
+          {viewerOccupiesScorerSlot && (
+            <div className="flex flex-wrap items-center gap-3">
+              <ScorerApprovalButton matchId={match.id} />
+              <p className="text-xs text-muted-foreground">The owner's assignment needs your consent before approval is recorded for you.</p>
+            </div>
+          )}
         </div>
       </MotionWrapper>
 
@@ -305,6 +328,8 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
             tossDecision: match.tossDecision,
             scorerId: match.scorerId,
             backupScorerId: match.backupScorerId,
+            scorerApprovalRequired: match.scorerApprovalRequired,
+            scorerApprovedAt: match.scorerApprovedAt,
             umpire1: match.umpire1,
             tournamentId: match.tournamentId,
             teamASquadDeclared,

@@ -3,7 +3,7 @@ import {
   db, withTenantContext, matches, teams, tournaments, tenants, users, userTenantRoles, auditLogs,
   membershipGrantsAccess,
 } from "@mtk/database"
-import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { scorerMembership } from "@/lib/scorer-membership"
 
 /**
@@ -139,9 +139,18 @@ export async function assignScorerInMatch(input: {
     const otherSlot = targetSlot === "primary" ? existing.backupScorerId : existing.scorerId
     if (scorerId && otherSlot === scorerId) throw new Error("Primary and backup scorer must be different people")
     if ((targetSlot === "primary" ? existing.scorerId : existing.backupScorerId) === scorerId) return existing
+    const nextScorerId = targetSlot === "primary" ? scorerId : existing.scorerId
+    const nextBackupScorerId = targetSlot === "backup" ? scorerId : existing.backupScorerId
+    // Official approval (COMP-06): consent binds to the exact assignment. Any
+    // change to either slot revokes it and, when a slot remains occupied, the
+    // assigned member must approve again (IAM-06 pending acceptance).
     const patch = targetSlot === "primary"
       ? { scorerId, updatedAt: new Date() }
       : { backupScorerId: scorerId, updatedAt: new Date() }
+    Object.assign(patch, {
+      scorerApprovalRequired: nextScorerId !== null || nextBackupScorerId !== null,
+      scorerApprovedAt: null,
+    })
     const [updated] = await tx.update(matches)
       .set(patch)
       .where(key)
@@ -151,9 +160,53 @@ export async function assignScorerInMatch(input: {
       requestId: randomUUID(), tenantId, actorId: actor.id, actorRole: actorMember.role,
       method: "MATCH_SCORER_ASSIGN", path: `/dashboard/matches/${matchId}`, statusCode: "200",
       payload: { matchId, slot: targetSlot,
-        before: { scorerId: existing.scorerId, backupScorerId: existing.backupScorerId },
-        after: { scorerId: updated.scorerId, backupScorerId: updated.backupScorerId } },
+        before: { scorerId: existing.scorerId, backupScorerId: existing.backupScorerId, scorerApprovedAt: existing.scorerApprovedAt },
+        after: { scorerId: updated.scorerId, backupScorerId: updated.backupScorerId, scorerApprovalRequired: updated.scorerApprovalRequired, scorerApprovedAt: updated.scorerApprovedAt } },
     })
     return updated
+  }, { isolationLevel: "read committed" }))
+}
+
+/**
+ * Official approval (COMP-06/IAM-06): the ASSIGNED member (never an owner on
+ * their behalf) consents to their scorer assignment. Fail-closed: effective
+ * scorer membership, an occupied slot containing the actor, an outstanding
+ * approval requirement and a still-pending state are all re-checked under the
+ * match row lock; a concurrent assignment change wins the conditional update
+ * and voids this approval.
+ */
+export async function approveScorerAssignmentInMatch(input: {
+  userId: string
+  tenantId: string
+  matchId: string
+}): Promise<{ matchId: string; slot: "primary" | "backup"; approvedAt: Date }> {
+  const { userId, tenantId, matchId } = input
+  return withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const match = await tx.query.matches.findFirst({ where: key })
+    if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.clerkId} = ${userId} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!actor || actor.clerkId !== userId || actor.isActive !== true) throw new Error("Forbidden: approval account unavailable")
+    const slot: "primary" | "backup" | null = match.scorerId === actor.id
+      ? "primary"
+      : match.backupScorerId === actor.id ? "backup" : null
+    if (!slot) throw new Error("You are not the assigned scorer of this match")
+    if (!match.scorerApprovalRequired) throw new Error("This assignment does not require approval")
+    if (match.scorerApprovedAt) throw new Error("This assignment is already approved")
+    const approvedAt = new Date()
+    const [updated] = await tx.update(matches)
+      .set({ scorerApprovedAt: approvedAt, updatedAt: approvedAt })
+      .where(and(key, eq(matches.scorerApprovalRequired, true), isNull(matches.scorerApprovedAt),
+        slot === "primary" ? eq(matches.scorerId, actor.id) : eq(matches.backupScorerId, actor.id)))
+      .returning({ id: matches.id })
+    if (!updated) throw new Error("Match changed. Reload before approving.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id,
+      method: "SCORER_ASSIGNMENT_APPROVE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId, slot, scorerId: slot === "primary" ? match.scorerId : match.backupScorerId, approvedAt: approvedAt.toISOString() },
+    })
+    return { matchId, slot, approvedAt }
   }, { isolationLevel: "read committed" }))
 }

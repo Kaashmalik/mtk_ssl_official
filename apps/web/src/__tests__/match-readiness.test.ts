@@ -93,3 +93,23 @@ describe("match readiness (COMP-06, v2)", () => {
     expect(computeMatchReadiness(input).ready).toBe(true)
   })
 })
+describe("match readiness - official approval (COMP-06 consent)", () => {
+  it("consent is part of the scorer check only when the requirement is armed", () => {
+    // Legacy matches (requirement absent) keep passing on assignment alone.
+    expect(check({ ...readyFixture }, "scorer").pass).toBe(true)
+    expect(check({ ...readyFixture }, "scorer").label).toBe("Scorer assigned")
+    // Pending consent fails, no matter which slot is occupied.
+    const pending = { ...readyFixture, scorerApprovalRequired: true }
+    expect(check(pending, "scorer").pass).toBe(false)
+    expect(check(pending, "scorer").label).toBe("Scorer assigned and approved")
+    expect(check({ ...pending, scorerId: null, backupScorerId: T(80) as unknown as string }, "scorer").pass).toBe(false)
+    expect(check({ ...pending, scorerApprovalRequired: false }, "scorer").pass).toBe(true)
+  })
+  it("recorded consent satisfies the check for primary and backup alike", () => {
+    const withConsent = { ...readyFixture, scorerApprovalRequired: true, scorerApprovedAt: new Date("2026-10-16T10:00:00Z") }
+    expect(check(withConsent, "scorer").pass).toBe(true)
+    const backup = { ...withConsent, scorerId: null, backupScorerId: T(80) as unknown as string }
+    expect(check(backup, "scorer").pass).toBe(true)
+    expect(check(withConsent, "scorer").blocking).toBe(false)
+  })
+})

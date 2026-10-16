@@ -3,6 +3,19 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **16 October 2026 (Batch 71) - `scorer_assignment_approval` APPLIED to the
+> remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
+> `apply_migration`.** Local file:
+> `supabase/migrations/20261016170000_scorer_assignment_approval.sql` (adds
+> `matches.scorer_approval_required boolean NOT NULL DEFAULT false` and
+> `matches.scorer_approved_at timestamptz` + column comments; additive/
+> idempotent, no RLS/grant/FK changes, legacy rows default false so existing
+> readiness semantics survive without backfill). Post-apply SQL verified both
+> columns. Enforcement is application-side (locked, conditional, audited
+> `approveScorerAssignmentInMatch`); conditional-update/lock-race acceptance
+> remains a staging gate. Batch 62's release-evidence requirements remain
+> unmet.
+
 > **16 October 2026 (Batch 68) - `invite_membership_expiry` APPLIED to the remote
 > Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
 > `apply_migration`.** Local file: `supabase/migrations/20261016150000_invite_membership_expiry.sql`

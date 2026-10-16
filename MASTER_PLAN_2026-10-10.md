@@ -3085,7 +3085,7 @@ badge (`Ready` / `Not playable` / `Almost there`) plus a two-column checklist
 declaration state from the teams' approved registrations in one query.
 
 New regressions: `match-readiness.test.ts` (6 — blocking vs advisory, toss
-gating by status, backup-s scorer satisfaction, squads semantics,
+gating by status, backup-scorer satisfaction, squads semantics,
 empty-string officials).
 
 #### Verification recorded
@@ -3659,6 +3659,67 @@ format-qualified records, ISO-05 resource-scoped grant design. Release gates
 still need Batch 62 evidence + services deployment. Roadmap: **19 checked /
 60 open / 79 IDs** (SCORE-09's source scope now complete; DB-level acceptance
 remains staged).
+
+### Batch 71 - scorer assignment approval (COMP-06 official consent)
+
+COMP-06's "eligible XI/official approval" remainder. An owner's scorer
+assignment was unilateral: the assigned member could start scoring without
+ever acknowledging the assignment, and `match-readiness` documented formal
+official approval as "a separate, still-open capability (schema needed)".
+
+**Migration (applied remotely via MCP).** Additive, idempotent
+`20261016170000_scorer_assignment_approval.sql`: `matches.scorer_approval_
+required boolean NOT NULL DEFAULT false` (legacy rows stay false, so existing
+readiness semantics survive without backfill) and `matches.scorer_approved_at
+timestamptz`. No RLS/grant/FK changes; applied through the Supabase MCP and
+SQL-verified (columns present). Drizzle schema mirrors the columns.
+
+**Consent binds to the exact assignment** (`assignScorerInMatch`): every
+effective change to either slot arms `scorer_approval_required` (any slot
+occupied) and voids `scorer_approved_at`; clearing the last occupied slot
+disarms; a same-value re-assignment remains a no-op that preserves consent.
+The `MATCH_SCORER_ASSIGN` audit now records before/after approval state.
+
+**The approval writer itself** - new locked `approveScorerAssignmentInMatch`
++ `match:score`-gated `approveScorerAssignment` action. Only the ASSIGNED
+member can consent: the match row lock re-derives the actor's slot, requiring
+an occupied slot containing the actor, an armed requirement and a still-
+pending state; a conditional update (`tenant+id`, `approval_required`,
+`approved_at IS NULL`, exact slot = actor) means a concurrent assignment
+change wins and voids the approval. Audited `SCORER_ASSIGNMENT_APPROVE`. An
+owner who occupies no slot can never approve on the scorer's behalf.
+
+**Readiness + UI.** `computeMatchReadiness` folds consent into the (advisory)
+scorer check - "Scorer assigned and approved" when the requirement is armed;
+legacy matches keep passing on assignment alone. The dashboard match page
+resolves whether the viewer occupies a pending slot and only then renders the
+new `ScorerApprovalButton` (server writer re-verifies; the read just sizes
+the button).
+
+Honest limits: umpires remain free-text listing (membership-bound umpire
+approval is still open); immutable XI/substitution remains SCORE-10; lock
+under concurrency is proven by conditional-update regressions, real-DB
+acceptance stays staged (Batch 62 gates unmet).
+
+New regressions: `scorer-assignment.test.ts` (+8: arming/voiding on change,
+disarm on final clear, armed-while-one-slot-occupied, no-op preservation,
+successful approval + audit + conditional SQL, three invalid-state rejections,
+lost race, owner-cannot-approve) and `match-readiness.test.ts` (+2). Two
+exact-shape assertions updated to the new patch/audit payload.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **103** files, **2,531 tests** (+12) |
+| `npx vitest run` (database) | PASS - **13** files, **199 tests** |
+| `tsc --noEmit` (web + database) | **0 + 0 error lines** |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | `scorer_assignment_approval` applied + SQL-verified |
+
+Next source work: membership-bound umpire approval, PUB-03 format-qualified
+records, ISO-05 resource-scoped grant design. Release gates still need Batch
+62 evidence + services deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
 
 ### Definition of done for each batch
 

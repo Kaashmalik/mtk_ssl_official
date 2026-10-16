@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, pgEnum, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, boolean, integer, pgEnum, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { tournaments } from "./tournaments";
@@ -103,6 +103,13 @@ export const matches = pgTable("matches", {
   scorerId: uuid("scorer_id").references(() => users.id, { onDelete: "set null" }),
   /** Backup scorer; may score when the primary is unavailable. Never the same user as scorerId. */
   backupScorerId: uuid("backup_scorer_id").references(() => users.id, { onDelete: "set null" }),
+  /**
+   * Official approval (COMP-06/IAM-06): true once a current assignment write
+   * has occupied a slot; legacy matches stay false and keep legacy readiness.
+   */
+  scorerApprovalRequired: boolean("scorer_approval_required").notNull().default(false),
+  /** When the assigned scorer approved; only the assigned member may set it, any assignment change clears it. */
+  scorerApprovedAt: timestamp("scorer_approved_at", { withTimezone: true }),
 
   // Metadata
   createdBy: text("created_by"),

@@ -5,15 +5,18 @@
  * passes. Rules:
  *  - Date and venue are blocking; the fixture must be playable.
  *  - A scorer is strongly recommended but not blocking (emergency scoring by
- *    an owner is a supported flow).
+ *    an owner is a supported flow). When the match requires official
+ *    approval (`scorerApprovalRequired`), the assigned member's consent
+ *    (`scorerApprovedAt`) is part of this check; legacy matches without the
+ *    requirement keep passing on assignment alone.
  *  - The toss is blocking only once the match has moved past `scheduled`
  *    (status toss/live/innings_break imply the toss must exist).
  *  - Squads are checked for tournament fixtures when their declaration state
  *    is known; legacy competitions (unknown/absent) never fail on this.
  *  - A known non-approved team registration blocks tournament play, matching
  *    the canonical writer. Missing registrations retain the legacy policy.
- *  - An umpire listing is advisory only; formal official approval is a
- *    separate, still-open capability (schema needed).
+ *  - An umpire listing is advisory only; umpire assignment remains free-text
+ *    listing, not yet membership-bound approval.
  */
 export type MatchReadinessInput = {
   status: string | null
@@ -23,6 +26,9 @@ export type MatchReadinessInput = {
   tossDecision: string | null
   scorerId: string | null
   backupScorerId?: string | null
+  /** Official approval (COMP-06): consent state; absent/undefined = legacy match. */
+  scorerApprovalRequired?: boolean
+  scorerApprovedAt?: Date | string | null
   umpire1?: string | null
   tournamentId?: string | null
   teamASquadDeclared?: boolean
@@ -58,8 +64,10 @@ export function computeMatchReadiness(input: MatchReadinessInput): {
     },
     {
       id: "scorer",
-      label: "Scorer assigned",
-      pass: input.scorerId !== null || input.backupScorerId !== null && input.backupScorerId !== undefined,
+      label: input.scorerApprovalRequired ? "Scorer assigned and approved" : "Scorer assigned",
+      pass: (input.scorerId !== null || input.backupScorerId !== null && input.backupScorerId !== undefined)
+        // With the requirement armed, consent binds to the exact assignment.
+        && (!input.scorerApprovalRequired || input.scorerApprovedAt !== null && input.scorerApprovedAt !== undefined),
       blocking: false,
     },
     {

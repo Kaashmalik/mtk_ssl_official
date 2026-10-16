@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { auditLogs, matches } from "@mtk/database"
-import { assignScorer, getScorersForTenant, updateMatch } from "@/app/actions/matches"
+import { assignScorer, approveScorerAssignment, getScorersForTenant, updateMatch } from "@/app/actions/matches"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), permission: vi.fn(), tenant: vi.fn(), myTenant: vi.fn(),
   where: vi.fn(), limit: vi.fn(), set: vi.fn(), updateWhere: vi.fn(), returning: vi.fn(), context: vi.fn(),
@@ -81,13 +81,15 @@ describe("Transactional primary/backup scorer assignment", () => {
     expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith(matches)
     expect(mocks.directUpdate).not.toHaveBeenCalled()
-    expect(mocks.set).toHaveBeenCalledWith({ [field]: SCORER, updatedAt: expect.any(Date) })
+    expect(mocks.set).toHaveBeenCalledWith({ [field]: SCORER, updatedAt: expect.any(Date),
+      scorerApprovalRequired: true, scorerApprovedAt: null })
     expect(dialect.sqlToQuery(mocks.updateWhere.mock.calls[0][0]).params).toEqual([MATCH, TENANT])
     expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, actorId: OWNER,
       actorRole: "league_owner", method: "MATCH_SCORER_ASSIGN", payload: {
-        matchId: MATCH, slot, before: { scorerId: null, backupScorerId: null },
-        after: { scorerId: null, backupScorerId: null, [field]: SCORER },
+        matchId: MATCH, slot,
+        before: { scorerId: null, backupScorerId: null, scorerApprovedAt: undefined },
+        after: { scorerId: null, backupScorerId: null, [field]: SCORER, scorerApprovalRequired: true, scorerApprovedAt: null },
       } }))
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
     expect(mocks.revalidate).toHaveBeenCalledWith(`/matches/${MATCH}/scoring`)
@@ -157,7 +159,9 @@ describe("Transactional primary/backup scorer assignment", () => {
     await assignScorer(MATCH, slot, null)
     expect(mocks.user).toHaveBeenCalledTimes(2) // actor discovery + locked actor only
     expect(mocks.member).toHaveBeenCalledTimes(1)
-    expect(mocks.set).toHaveBeenCalledWith({ [slot === "primary" ? "scorerId" : "backupScorerId"]: null, updatedAt: expect.any(Date) })
+    expect(mocks.set).toHaveBeenCalledWith({ [slot === "primary" ? "scorerId" : "backupScorerId"]: null, updatedAt: expect.any(Date),
+      // The other slot stays occupied, so the requirement stays armed and consent is voided.
+      scorerApprovalRequired: true, scorerApprovedAt: null })
   })
   it("does not rewrite or audit an unchanged, still-authorized assignment", async () => {
     mocks.match.mockResolvedValue({ ...fixture, scorerId: SCORER })
@@ -211,5 +215,80 @@ describe("Generic match edit cannot bypass assignment commands", () => {
     await updateMatch(MATCH, input)
     expect(mocks.set).toHaveBeenCalledExactlyOnceWith({ ...input,
       scheduledDate: new Date(input.scheduledDate), updatedAt: expect.any(Date) })
+  })
+})
+describe("Scorer assignment approval (COMP-06 official consent)", () => {
+  const approved = { ...fixture, scorerId: SCORER, scorerApprovalRequired: true, scorerApprovedAt: new Date("2026-01-02T00:00:00Z") }
+
+  it("any effective assignment change arms the requirement and voids prior consent", async () => {
+    await assignScorer(MATCH, "backup", BACKUP)
+    expect(mocks.set).toHaveBeenLastCalledWith(expect.objectContaining({ scorerApprovalRequired: true, scorerApprovedAt: null }))
+  })
+  it("clearing the last occupied slot disarms the requirement", async () => {
+    mocks.match.mockResolvedValue({ ...approved })
+    await assignScorer(MATCH, "primary", null)
+    expect(mocks.set).toHaveBeenLastCalledWith(expect.objectContaining({ scorerApprovalRequired: false, scorerApprovedAt: null }))
+  })
+  it("clearing one slot while the other stays occupied keeps the requirement armed", async () => {
+    mocks.match.mockResolvedValue({ ...approved, backupScorerId: BACKUP })
+    mocks.set.mockClear()
+    await assignScorer(MATCH, "primary", null)
+    expect(mocks.set).toHaveBeenLastCalledWith(expect.objectContaining({ scorerApprovalRequired: true, scorerApprovedAt: null }))
+  })
+  it("a same-value re-assignment is a no-op that preserves existing consent", async () => {
+    mocks.match.mockResolvedValue({ ...approved })
+    await assignScorer(MATCH, "primary", SCORER)
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it("the assigned scorer approves their pending assignment with a conditional, audited update", async () => {
+    mocks.auth.mockResolvedValue({ userId: "scorer-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "scorer-clerk" ? { id: SCORER, clerkId: "scorer-clerk", isActive: true } : actor
+    })
+    mocks.match.mockResolvedValue({ ...approved, scorerApprovedAt: null })
+    mocks.returning.mockResolvedValueOnce([{ id: MATCH }])
+    const result = await approveScorerAssignment(MATCH)
+    expect(result).toMatchObject({ success: true, matchId: MATCH, slot: "primary" })
+    expect(mocks.set).toHaveBeenLastCalledWith(expect.objectContaining({ scorerApprovedAt: expect.any(Date) }))
+    const where = dialect.sqlToQuery(mocks.updateWhere.mock.calls.at(-1)![0])
+    expect(where.sql).toContain("scorer_approval_required")
+    expect(where.sql).toContain("scorer_approved_at")
+    expect(where.sql).toContain("scorer_id")
+    expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ method: "SCORER_ASSIGNMENT_APPROVE",
+      payload: expect.objectContaining({ matchId: MATCH, slot: "primary" }) }))
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
+  })
+  it.each([
+    ["not occupying a slot", { ...fixture, scorerId: "00000000-0000-4000-8000-000000000008", scorerApprovalRequired: true }],
+    ["no outstanding requirement", { ...fixture, scorerId: SCORER, scorerApprovalRequired: false }],
+    ["already approved", { ...approved }],
+  ])("rejects approval when the match is %s", async (_label, match) => {
+    mocks.auth.mockResolvedValue({ userId: "scorer-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "scorer-clerk" ? { id: SCORER, clerkId: "scorer-clerk", isActive: true } : actor
+    })
+    mocks.match.mockResolvedValue(match)
+    await expect(approveScorerAssignment(MATCH)).rejects.toThrow()
+    expectNoWrites()
+  })
+  it("a concurrent assignment change wins the conditional update and voids the approval", async () => {
+    mocks.auth.mockResolvedValue({ userId: "scorer-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "scorer-clerk" ? { id: SCORER, clerkId: "scorer-clerk", isActive: true } : actor
+    })
+    mocks.match.mockResolvedValue({ ...approved, scorerApprovedAt: null })
+    mocks.returning.mockResolvedValueOnce([])
+    await expect(approveScorerAssignment(MATCH)).rejects.toThrow("Match changed")
+  })
+  it("an owner who occupies no slot can never approve on the scorer's behalf", async () => {
+    mocks.match.mockResolvedValue({ ...approved, scorerApprovedAt: null })
+    await expect(approveScorerAssignment(MATCH)).rejects.toThrow("not the assigned scorer")
+    expectNoWrites()
   })
 })

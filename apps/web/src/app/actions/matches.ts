@@ -9,7 +9,7 @@ import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { proxyCompleteMatch } from "@/lib/scoring-service-client"
 import { manageMatch, matchMetadataSchema, streamCommandSchema } from "@/lib/match-management"
-import { assignScorerInMatch, findTenantMatch, listTenantMatches, listTenantScorers,
+import { assignScorerInMatch, approveScorerAssignmentInMatch, findTenantMatch, listTenantMatches, listTenantScorers,
   readMatchFormOptions } from "@/lib/match-records"
 
 const createMatchSchema = matchMetadataSchema.extend({ tenantId: z.string().uuid().optional() }).strict()
@@ -210,6 +210,26 @@ export const assignScorer = withAuth("match:update", async (matchId: string, slo
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/matches/${matchId}/scoring`)
   return { success: true, match }
+})
+
+/**
+ * Official approval (COMP-06/IAM-06): the assigned primary or backup scorer
+ * consents to their assignment. Gated on `match:score` (not match:update)
+ * and, inside the locked writer, on the actor actually occupying a slot - so
+ * an owner can never approve on the assigned member's behalf. Any later
+ * assignment change clears the consent and re-arms the requirement.
+ */
+export const approveScorerAssignment = withAuth("match:score", async (matchId: string) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(matchId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  const result = await approveScorerAssignmentInMatch({ userId, tenantId, matchId })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/dashboard/matches/${matchId}`)
+  revalidatePath(`/matches/${matchId}/scoring`)
+  return { success: true as const, ...result }
 })
 
 export const getScorersForTenant = withAuth("match:update", async () => {
