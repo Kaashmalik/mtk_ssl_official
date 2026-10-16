@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto"
 import {
   db, userInvites, userTenantRoles, users, teams, tenants, notifications, auditLogs,
-  type InvitationEmailState,
+  membershipGrantsAccess, type InvitationEmailState,
 } from "@mtk/database"
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { assertSupportedInvitationScope, hasVerifiedInvitedEmail } from "@/lib/invitation-policy"
@@ -53,7 +53,7 @@ async function lockInvitationAuthority(
   if (!issuer || issuer.id !== issuerId || issuer.isActive !== true || (issuerClerkId !== undefined && issuer.clerkId !== issuerClerkId)
     || !league || league.id !== tenantId || league.isActive !== true
     || !membership || membership.userId !== issuerId || membership.tenantId !== tenantId
-    || membership.status !== "active" || membership.role !== "league_owner") {
+    || !membershipGrantsAccess(membership) || membership.role !== "league_owner") {
     throw new Error("Invitation authority changed. Contact an active league owner.")
   }
   return { issuer, league }
@@ -248,8 +248,8 @@ export async function claimInvite(input: {
     if (!hasVerifiedInvitedEmail(provider, clerkId, invite.email)) throw new Error("Invitation recipient changed. Verify the invited email.")
     assertSupportedInvitationScope(invite.role, invite.teamId)
     const membership = await tx.query.userTenantRoles.findFirst({ where: and(eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, invite.tenantId)) })
-    if (membership && (membership.userId !== actor.id || membership.tenantId !== invite.tenantId || membership.status !== "active")) {
-      throw new Error("Your membership is suspended or unavailable. Contact the league owner.")
+    if (membership && (membership.userId !== actor.id || membership.tenantId !== invite.tenantId || !membershipGrantsAccess(membership))) {
+      throw new Error("Your membership is suspended, expired or unavailable. Contact the league owner.")
     }
     // Invitation redemption is not a rank-based role promotion or demotion.
     if (membership && membership.role !== invite.role) throw new Error("Existing league role differs. Ask the owner to update Members & access.")

@@ -90,6 +90,8 @@ describe("Notification member context resolves the exact active league", () => {
     ["remapped session", { ...actor, clerkId: "other" }, member, { id: TENANT, isActive: true }],
     ["super-admin-only membership", actor, { ...member, role: "super_admin" }, { id: TENANT, isActive: true }],
     ["suspended membership", actor, { ...member, status: "suspended" }, { id: TENANT, isActive: true }],
+    ["expired membership bound", actor, { ...member, status: "active", expiresAt: "2020-01-01T00:00:00.000Z" }, { id: TENANT, isActive: true }],
+    ["unparseable membership bound", actor, { ...member, status: "active", expiresAt: "not-a-date" }, { id: TENANT, isActive: true }],
     ["missing membership", actor, null, { id: TENANT, isActive: true }],
     ["foreign membership", actor, { ...member, tenantId: "other" }, { id: TENANT, isActive: true }],
     ["inactive league", actor, member, { id: TENANT, isActive: false }],

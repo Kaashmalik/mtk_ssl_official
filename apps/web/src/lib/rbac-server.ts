@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { db, users, userTenantRoles, tenants } from "@mtk/database";
+import { db, users, userTenantRoles, tenants, membershipGrantsAccess } from "@mtk/database";
 import { eq, and } from "drizzle-orm";
 import { Permission, UserRole, hasPermission } from "./rbac";
 import { getTenantFromRequest } from "./tenant";
@@ -30,7 +30,7 @@ export async function getUserRoleForTenant(
     eq(userTenantRoles.userId, user.id), eq(userTenantRoles.tenantId, tenantId),
   ) });
   if (!membership || membership.userId !== user.id || membership.tenantId !== tenantId
-    || membership.status !== "active" || membership.role === "super_admin") return null;
+    || !membershipGrantsAccess(membership) || membership.role === "super_admin") return null;
   const tenant = await db.query.tenants.findFirst({ where: and(eq(tenants.id, tenantId), eq(tenants.isActive, true)) });
   if (!tenant || tenant.id !== tenantId || tenant.isActive !== true) return null;
   return membership.role as UserRole;

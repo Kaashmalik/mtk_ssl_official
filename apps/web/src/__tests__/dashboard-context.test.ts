@@ -25,6 +25,12 @@ describe("Authorized active workspace context", () => {
     expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
     expect(mocks.tenant).not.toHaveBeenCalled()
   })
+  it("denies an active membership whose expiry bound passed or is unparseable (SCORE-09)", async () => {
+    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "league_owner", status: "active", expiresAt: new Date("2020-01-01T00:00:00Z") })
+    expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
+    mocks.membership.mockResolvedValue({ userId: "actor", tenantId: "tenant", role: "league_owner", status: "active", expiresAt: "not-a-date" })
+    expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
+  })
   it("uses the host tenant and its role, not primary membership or global privilege", async () => {
     expect(await getDashboardContext("clerk-session")).toEqual({ status: "ready", context: { actorId: "actor", tenantId: "tenant", tenantName: "League", role: "scorer" } })
     expect(mocks.primary).not.toHaveBeenCalled()

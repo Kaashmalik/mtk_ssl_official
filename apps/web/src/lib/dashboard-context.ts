@@ -1,4 +1,4 @@
-import { db, tenants, users, userTenantRoles } from "@mtk/database"
+import { db, tenants, users, userTenantRoles, membershipGrantsAccess } from "@mtk/database"
 import { and, eq } from "drizzle-orm"
 import { getTenantFromRequest } from "./tenant"
 import { hasPermission, type UserRole } from "./rbac"
@@ -27,7 +27,7 @@ export async function getDashboardContext(clerkId: string): Promise<DashboardAcc
       eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
     ) })
     if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
-      || membership.status !== "active" || membership.role === "super_admin") {
+      || !membershipGrantsAccess(membership) || membership.role === "super_admin") {
       return { status: "denied" }
     }
     const role = membership.role

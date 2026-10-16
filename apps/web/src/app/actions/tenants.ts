@@ -2,9 +2,8 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, getPlanLimits, type PlanKey } from "@mtk/database"
-import { tenants, tenantBranding, subscriptions, users, userTenantRoles } from "@mtk/database"
-import { and, desc, eq, ne, sql } from "drizzle-orm"
+import { db, getPlanLimits, tenants, tenantBranding, subscriptions, users, userTenantRoles, membershipGrantsAccess, type PlanKey } from "@mtk/database"
+import { and, desc, eq, gt, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 import { getTenantFromRequest } from "@/lib/tenant"
@@ -55,7 +54,7 @@ export async function getMyTenant() {
     const membership = await db.query.userTenantRoles.findFirst({ where: and(
       eq(userTenantRoles.userId, user.id), eq(userTenantRoles.tenantId, requestTenant.id),
     ) })
-    return membership?.status === "active" && membership.role !== "super_admin"
+    return membership !== undefined && membershipGrantsAccess(membership) && membership.role !== "super_admin"
       && membership.userId === user.id && membership.tenantId === requestTenant.id
       && requestTenant.isActive === true ? requestTenant : null
   }
@@ -65,6 +64,8 @@ export async function getMyTenant() {
     .from(userTenantRoles)
     .innerJoin(tenants, eq(userTenantRoles.tenantId, tenants.id))
     .where(and(eq(userTenantRoles.userId, user.id), eq(userTenantRoles.status, "active"),
+      // An expired bound is not a selectable workspace: the server clock decides.
+      or(isNull(userTenantRoles.expiresAt), gt(userTenantRoles.expiresAt, sql`now()`)),
       ne(userTenantRoles.role, "super_admin"), eq(tenants.isActive, true)))
     .orderBy(desc(userTenantRoles.isPrimary), desc(userTenantRoles.createdAt))
     .limit(1)

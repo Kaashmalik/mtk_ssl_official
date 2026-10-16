@@ -3,7 +3,7 @@
 import { randomUUID } from "crypto"
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, users, tenants, userTenantRoles, ownershipTransfers, auditLogs } from "@mtk/database"
+import { db, users, tenants, userTenantRoles, ownershipTransfers, auditLogs, membershipGrantsAccess } from "@mtk/database"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getDashboardContext } from "@/lib/dashboard-context"
@@ -106,7 +106,7 @@ export async function initiateOwnershipTransfer(input: OwnershipTransferInitiate
     if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
-      || actorMember.status !== "active" || actorMember.role !== "league_owner"
+      || !membershipGrantsAccess(actorMember) || actorMember.role !== "league_owner"
       // The junction role alone is not enough: only the recorded owner may hand over.
       || league.ownerId !== context.actorId) {
       throw new Error("Forbidden: only the recorded league owner may transfer ownership")
@@ -116,7 +116,7 @@ export async function initiateOwnershipTransfer(input: OwnershipTransferInitiate
     ) })
     const targetAccount = await tx.query.users.findFirst({ where: eq(users.id, recipientUserId) })
     if (!targetMember || targetMember.id !== recipient.id || targetMember.userId !== recipientUserId
-      || targetMember.tenantId !== context.tenantId || targetMember.status !== "active"
+      || targetMember.tenantId !== context.tenantId || !membershipGrantsAccess(targetMember)
       || !targetAccount || targetAccount.id !== recipientUserId || targetAccount.isActive !== true) {
       throw new Error("The selected member is not an active member of this league")
     }
@@ -228,11 +228,11 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
     }
     if (!fromAccount || fromAccount.id !== transfer.fromUserId || fromAccount.isActive !== true
       || !fromMember || fromMember.userId !== transfer.fromUserId || fromMember.tenantId !== context.tenantId
-      || fromMember.status !== "active" || fromMember.role !== "league_owner") {
+      || !membershipGrantsAccess(fromMember) || fromMember.role !== "league_owner") {
       throw new Error("The current owner's access changed. This transfer is no longer valid.")
     }
     if (!toMember || toMember.userId !== transfer.toUserId || toMember.tenantId !== context.tenantId
-      || toMember.status !== "active") {
+      || !membershipGrantsAccess(toMember)) {
       throw new Error("Your membership in this league is no longer active")
     }
     if (!toAccount || toAccount.id !== transfer.toUserId || toAccount.isActive !== true
@@ -337,7 +337,7 @@ export async function cancelOwnershipTransfer(input: OwnershipTransferResolve) {
     if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
-      || actorMember.status !== "active"
+      || !membershipGrantsAccess(actorMember)
       || (context.actorId === transfer.fromUserId && (league.ownerId !== context.actorId || actorMember.role !== "league_owner"))) {
       throw new Error("Forbidden: your transfer-cancellation access changed")
     }

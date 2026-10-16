@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { db, venues, auditLogs, users, tenants, userTenantRoles, type Venue } from "@mtk/database"
+import { db, venues, auditLogs, users, tenants, userTenantRoles, membershipGrantsAccess, type Venue } from "@mtk/database"
 import { and, eq, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 import { isUniqueViolation } from "./db-errors"
@@ -41,7 +41,7 @@ async function lockVenueOwnerContext(tx: Tx, clerkId: string, tenantId: string) 
     eq(userTenantRoles.userId, initial.id), eq(userTenantRoles.tenantId, tenantId)) })
   if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
     || !league || league.id !== tenantId || league.isActive !== true
-    || !member || member.userId !== actor.id || member.tenantId !== tenantId || member.status !== "active"
+    || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
     || member.role !== "league_owner") {
     throw new Error("Forbidden: your venue access changed")
   }

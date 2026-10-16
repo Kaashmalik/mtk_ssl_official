@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto"
 import { db, users, tenants, userTenantRoles, teams, players, tournaments, matches, auditLogs,
-  checkPlanLimit, type PlanKey, type Team, type Player } from "@mtk/database"
+  checkPlanLimit, membershipGrantsAccess, type PlanKey, type Team, type Player } from "@mtk/database"
 import { and, eq, inArray, or, count, sql } from "drizzle-orm"
 import { z } from "zod"
 import { teamInput, teamPatch, playerInput, playerPatch } from "./roster-input"
@@ -30,7 +30,7 @@ async function actorContext(tx: Tx, clerkId: string, tenantId: string, operation
   const mayDelegate = ["TEAM_UPDATE", "ROSTER_ADD", "ROSTER_REMOVE"].includes(operation)
   if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
     || !league || league.id !== tenantId || league.isActive !== true
-    || !member || member.userId !== actor.id || member.tenantId !== tenantId || member.status !== "active"
+    || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
     || !(member.role === "league_owner" || (mayDelegate && member.role === "team_manager"))) {
     throw new Error("Forbidden: your roster access changed")
   }

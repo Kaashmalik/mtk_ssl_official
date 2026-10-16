@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto"
 import {
   db, users, tenants, userTenantRoles, teams, tournaments, players,
-  leagueRegistrations, payments, auditLogs, type LeagueRegistration, type Team, type Tournament,
+  leagueRegistrations, payments, auditLogs, membershipGrantsAccess,
+  type LeagueRegistration, type Team, type Tournament,
 } from "@mtk/database"
 import { and, eq, inArray, count, sql } from "drizzle-orm"
 import { z } from "zod"
@@ -28,7 +29,7 @@ async function actorContext(tx: Tx, clerkId: string, tenantId: string, operation
   const mayDelegate = operation === "REGISTRATION_CREATE" || operation === "REGISTRATION_WITHDRAW"
   if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
     || !league || league.id !== tenantId || league.isActive !== true
-    || !member || member.userId !== actor.id || member.tenantId !== tenantId || member.status !== "active"
+    || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
     || !(member.role === "league_owner" || (mayDelegate && member.role === "team_manager"))) {
     throw new Error("Forbidden: your registration access changed")
   }

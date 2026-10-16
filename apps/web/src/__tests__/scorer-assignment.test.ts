@@ -127,6 +127,7 @@ describe("Transactional primary/backup scorer assignment", () => {
     expectNoWrites()
   })
   it.each([null, { userId: BACKUP }, { tenantId: BACKUP }, { status: "suspended" }, { status: "pending" },
+    { expiresAt: "2020-01-01T00:00:00.000Z" }, { expiresAt: "not-a-date" },
     ...["fan", "coach", "team_manager", "league_owner", "super_admin"].map(role => ({ role }))])(
     "rejects invalid candidate membership %s", async change => {
       mocks.member.mockReset().mockResolvedValueOnce(ownerMember).mockResolvedValueOnce(change === null ? null

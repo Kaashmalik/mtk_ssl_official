@@ -87,7 +87,7 @@ async function changeMember(input: MemberRoleChange | MemberStatusChange, contex
     if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
-      || actorMember.status !== "active" || actorMember.role !== "league_owner") {
+      || !membershipGrantsAccess(actorMember) || actorMember.role !== "league_owner") {
       throw new Error("Forbidden: your member-management access changed")
     }
     const target = await tx.query.userTenantRoles.findFirst({ where: key })
@@ -236,7 +236,7 @@ export async function removeLeagueMember(input: MemberRemoval, context: MemberMa
     if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
       || !league || league.id !== context.tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
-      || actorMember.status !== "active" || actorMember.role !== "league_owner") {
+      || !membershipGrantsAccess(actorMember) || actorMember.role !== "league_owner") {
       throw new Error("Forbidden: your member-management access changed")
     }
     const target = await tx.query.userTenantRoles.findFirst({ where: key })

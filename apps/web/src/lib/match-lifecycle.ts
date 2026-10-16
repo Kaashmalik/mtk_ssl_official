@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { db, matches, users, tenants, userTenantRoles, teams, auditLogs } from "@mtk/database"
+import { db, matches, users, tenants, userTenantRoles, teams, auditLogs, membershipGrantsAccess } from "@mtk/database"
 import { and, eq, inArray, sql } from "drizzle-orm"
 
 type Match = typeof matches.$inferSelect
@@ -28,7 +28,7 @@ export async function mutateMatchLifecycle(clerkId: string, tenantId: string, ma
     ) })
     if (!actor || actor.id !== initialActor.id || actor.isActive !== true || actor.clerkId !== clerkId
       || !league || league.id !== tenantId || league.isActive !== true
-      || !member || member.userId !== actor.id || member.tenantId !== tenantId || member.status !== "active"
+      || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
       || !(member.role === "league_owner" || (member.role === "scorer"
         && (match.scorerId === actor.id || match.backupScorerId === actor.id)))) {
       throw new Error("Forbidden: your match lifecycle access changed")

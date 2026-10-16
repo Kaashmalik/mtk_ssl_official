@@ -3605,6 +3605,61 @@ server-side XI enforcement, PUB-03 format-qualified records. Release gates
 still need Batch 62 evidence + services deployment. Roadmap: **19 checked /
 60 open / 79 IDs**.
 
+### Batch 70 - membership effectiveness across every web gate (SCORE-09 half)
+
+Completes SCORE-09's application-scope remainder ("full membership suspension/
+expiry checks ... queues"). Batches 65-68 enforced expiry only at the scoring
+boundary and the member-admin writers - yet ~20 other web gates still accepted
+`status === "active"` rows alone, so an expired member kept the whole dashboard
+workspace, the notification bell (the account/league queue), the registration
+review queue, league/roster/venue/fan reads and the owner/match/registration/
+roster/tournament/venue writers. Expiry was display-only outside scoring.
+
+**Single-sourcing, not parallel logic.** Every gate on a `user_tenant_roles`
+row now routes through the shared `membershipGrantsAccess` policy
+(`active` AND bound not passed; present-but-unparseable bounds deny) instead
+of its own status comparison. Converted (full-row reads were already loaded,
+so no data-shape changes): `dashboard-context`, `rbac-server`
+(`resolveActiveTenantId` request branch), `notification-reads` (both required
+and non-throwing resolvers - the bell queue), `registration-reads` (review
+queue, 2 resolvers), `league-reads`, `roster-reads`, `venue-reads`,
+`venue-writes`, `fan-follows`, `archive-roster-resource`, `match-records`
+(owner gate AND the match-scoped scorer candidacy gate), `match-lifecycle`,
+`match-management`, `member-management` (2), `registration-management`,
+`roster-management`, `tournament-lifecycle`, `invite-records` (issuer
+authority AND recipient claim), `ownership` (5 transfer gates), and
+`resolveActiveTenantId`'s fallback workspace SELECT now excludes expired
+bounds using the server clock (`expires_at IS NULL OR expires_at > now()`).
+Redemption of an invite by a recipient whose existing membership expired now
+fails closed with an honest "suspended, expired or unavailable" message -
+an expired row is not reactivated through an invite, matching the policy's
+clear-or-extend rule.
+
+Honest limits: the comparison uses the request's clock (`new Date()`) - the
+DB-clock SELECT is the only clock-consistent gate, and row-locked/serializable
+plus RLS acceptance remain the staging gates; `super_admin` platform rows
+stay rejected by the pre-existing role checks (unchanged); player/subscription
+`status` fields are different tables and were deliberately untouched.
+
+New regressions: dashboard-context (expired/unparseable → denied), rbac-server
+(passed/unparseable bound → denied on both read+manage permissions),
+notification-reads (expired/unparseable membership fails closed, +2 cases),
+scorer-assignment (expired/unparseable scorer candidate rejected, +2 cases).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **103** files, **2,519 tests** (+7) |
+| `tsc --noEmit` | **0 error lines** |
+| `git diff --check` | Clean |
+
+Next source work: officials approval + server-side XI enforcement, PUB-03
+format-qualified records, ISO-05 resource-scoped grant design. Release gates
+still need Batch 62 evidence + services deployment. Roadmap: **19 checked /
+60 open / 79 IDs** (SCORE-09's source scope now complete; DB-level acceptance
+remains staged).
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

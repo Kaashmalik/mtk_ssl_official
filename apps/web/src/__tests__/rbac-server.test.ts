@@ -39,6 +39,11 @@ describe("Fail-closed exact-league RBAC", () => {
     mocks.member.mockResolvedValue({ ...member, status })
     expect(await hasPermissionServer("match:score", "A")).toBe(false)
   })
+  it.each([new Date("2020-01-01T00:00:00Z"), "not-a-date"])("an active membership whose bound has passed or is unparseable is denied (SCORE-09)", async expiresAt => {
+    mocks.member.mockResolvedValue({ ...member, status: "active", expiresAt })
+    expect(await hasPermissionServer("match:score", "A")).toBe(false)
+    expect(await hasPermissionServer("user:manage", "A")).toBe(false)
+  })
   it.each([null, { ...member, userId: "other" }, { ...member, tenantId: "B" }, { ...member, role: "super_admin" }])("rejects absent/mismatched/platform membership %s", async membership => {
     mocks.member.mockResolvedValue(membership)
     expect(await hasPermissionServer("user:manage", "A")).toBe(false)

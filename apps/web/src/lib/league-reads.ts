@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server"
 import {
   db, users, userTenantRoles, tenants, players, teams, matches,
   battingScorecards, bowlingScorecards, fieldingScorecards,
+  membershipGrantsAccess,
 } from "@mtk/database"
 import { and, eq, or, desc, asc, inArray, sum, sql } from "drizzle-orm"
 import { z } from "zod"
@@ -23,7 +24,7 @@ export async function requireActiveLeagueContext(permission: Permission): Promis
     eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId)) })
   const league = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
   if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
-    || membership.status !== "active" || membership.role === "super_admin" || !hasPermission(membership.role, permission)
+    || !membershipGrantsAccess(membership) || membership.role === "super_admin" || !hasPermission(membership.role, permission)
     || !league || league.id !== tenantId || league.isActive !== true) {
     throw new Error("Forbidden: league access unavailable")
   }

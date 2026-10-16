@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
-import { db, users, userTenantRoles, tenants, venues } from "@mtk/database"
+import { db, users, userTenantRoles, tenants, venues, membershipGrantsAccess } from "@mtk/database"
 import { and, eq, asc, desc } from "drizzle-orm"
 import { z } from "zod"
 import { resolveActiveTenantId, requirePermissionServer } from "./rbac-server"
@@ -20,7 +20,7 @@ export async function requireVenueReadContext(permission: Permission): Promise<V
     eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId)) })
   const league = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
   if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
-    || membership.status !== "active" || membership.role === "super_admin" || !hasPermission(membership.role, permission)
+    || !membershipGrantsAccess(membership) || membership.role === "super_admin" || !hasPermission(membership.role, permission)
     || !league || league.id !== tenantId || league.isActive !== true) throw new Error("Forbidden: venue access unavailable")
   return { tenantId, actorId: actor.id, clerkId, role: membership.role }
 }

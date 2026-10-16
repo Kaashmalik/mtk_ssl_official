@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { db, users, tenants, userTenantRoles, teams, players, matches, auditLogs } from "@mtk/database"
+import { db, users, tenants, userTenantRoles, teams, players, matches, auditLogs, membershipGrantsAccess } from "@mtk/database"
 import { and, eq, or, inArray, sql } from "drizzle-orm"
 
 /** Archival only: never delete identity/history or detach memberships/rosters.
@@ -21,7 +21,7 @@ export async function archiveRosterResource(clerkId: string, tenantId: string, k
     if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
       || !league || league.id !== tenantId || league.isActive !== true
       || !member || member.userId !== actor.id || member.tenantId !== tenantId
-      || member.status !== "active" || member.role !== "league_owner") throw new Error("Forbidden: your archive access changed")
+      || !membershipGrantsAccess(member) || member.role !== "league_owner") throw new Error("Forbidden: your archive access changed")
 
     // Discover a player's team first, then verify the link again after locking
     // team -> player. Never chase a changed link by taking another team lock.

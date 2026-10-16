@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
-import { db, users, userTenantRoles, tenants, notifications } from "@mtk/database"
+import { db, users, userTenantRoles, tenants, notifications, membershipGrantsAccess } from "@mtk/database"
 import { and, desc, eq, isNull, or } from "drizzle-orm"
 import { z } from "zod"
 import { resolveActiveTenantId } from "./rbac-server"
@@ -26,7 +26,7 @@ export async function requireNotificationMemberContext(): Promise<NotificationMe
     eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId)) })
   const league = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
   if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
-    || membership.status !== "active" || membership.role === "super_admin"
+    || !membershipGrantsAccess(membership) || membership.role === "super_admin"
     || !league || league.id !== tenantId || league.isActive !== true) {
     throw new Error("Forbidden: league access unavailable")
   }
@@ -49,7 +49,7 @@ export async function resolveNotificationMemberContext(): Promise<NotificationMe
   const membership = await db.query.userTenantRoles.findFirst({ where: and(
     eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId)) })
   if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
-    || membership.status !== "active" || membership.role === "super_admin") return null
+    || !membershipGrantsAccess(membership) || membership.role === "super_admin") return null
   const league = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
   if (!league || league.id !== tenantId || league.isActive !== true) return null
   return { tenantId, actorId: actor.id, clerkId, role: membership.role as UserRole }

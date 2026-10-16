@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
 import {
   db, withTenantContext, matches, teams, tournaments, tenants, users, userTenantRoles, auditLogs,
+  membershipGrantsAccess,
 } from "@mtk/database"
 import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { scorerMembership } from "@/lib/scorer-membership"
@@ -120,7 +121,7 @@ export async function assignScorerInMatch(input: {
     if (!actor || actor.id !== initialActor.id || actor.clerkId !== userId || actor.isActive !== true
       || !league || league.id !== tenantId || league.isActive !== true
       || !actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
-      || actorMember.status !== "active" || actorMember.role !== "league_owner") {
+      || !membershipGrantsAccess(actorMember) || actorMember.role !== "league_owner") {
       throw new Error("Forbidden: your scorer-assignment access changed")
     }
     if (scorerId) {
@@ -130,7 +131,7 @@ export async function assignScorerInMatch(input: {
       ) })
       if (!account || account.id !== scorerId || account.isActive !== true
         || !member || member.userId !== scorerId || member.tenantId !== tenantId
-        || member.status !== "active" || member.role !== "scorer") {
+        || !membershipGrantsAccess(member) || member.role !== "scorer") {
         throw new Error("Selected user is not an active scorer in this tenant")
       }
     }

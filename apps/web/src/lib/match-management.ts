@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto"
 import { db, matches, users, tenants, userTenantRoles, teams, tournaments, venues, auditLogs,
   matchInnings, matchBalls, scoringEvents, scorecardProjections,
-  battingScorecards, bowlingScorecards, fieldingScorecards, checkPlanFeature, type PlanKey } from "@mtk/database"
+  battingScorecards, bowlingScorecards, fieldingScorecards, checkPlanFeature, membershipGrantsAccess,
+  type PlanKey } from "@mtk/database"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { findSchedulingConflicts } from "@/lib/rescheduling"
@@ -59,7 +60,7 @@ async function requireOwner(tx: Tx, clerkId: string, tenantId: string) {
   if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
     || !league || league.id !== tenantId || league.isActive !== true
     || !member || member.userId !== actor.id || member.tenantId !== tenantId
-    || member.status !== "active" || member.role !== "league_owner") {
+    || !membershipGrantsAccess(member) || member.role !== "league_owner") {
     throw new Error("Forbidden: your match management access changed")
   }
   return { actor, league, member }

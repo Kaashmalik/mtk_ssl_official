@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { db, users, tenants, userTenantRoles, tournaments, auditLogs, type Tournament } from "@mtk/database"
+import { db, users, tenants, userTenantRoles, tournaments, auditLogs, membershipGrantsAccess, type Tournament } from "@mtk/database"
 import { and, eq, ne, sql } from "drizzle-orm"
 import { z } from "zod"
 
@@ -22,7 +22,7 @@ export async function lockOwnerContext(tx: Tx, clerkId: string, tenantId: string
     eq(userTenantRoles.userId, initial.id), eq(userTenantRoles.tenantId, tenantId)) })
   if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
     || !league || league.id !== tenantId || league.isActive !== true
-    || !member || member.userId !== actor.id || member.tenantId !== tenantId || member.status !== "active"
+    || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
     || member.role !== "league_owner") {
     throw new Error("Forbidden: your tournament access changed")
   }
