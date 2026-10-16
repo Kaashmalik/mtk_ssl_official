@@ -6,7 +6,7 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Separator } from "@mtk/ui/components/ui/separator"
 import { ArrowLeft, TrendingUp } from "lucide-react"
 import {
-  db, teams, players, matches, matchInnings, battingScorecards,
+  db, players, matches, matchInnings, battingScorecards,
   bowlingScorecards, fieldingScorecards,
 } from "@mtk/database"
 import { and, eq, or, desc, inArray } from "drizzle-orm"

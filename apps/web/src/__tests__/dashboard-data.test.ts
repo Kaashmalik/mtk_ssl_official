@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { getTableName } from "drizzle-orm"
+import { getTableName, type Table, type SQL } from "drizzle-orm"
 import { getDashboardStats, getDashboardMatches, getDashboardAttention, loadDashboardSection } from "@/lib/dashboard-data"
 import type { DashboardContext } from "@/lib/dashboard-context"
 
-const mocks = vi.hoisted(() => ({ select: vi.fn(), queries: [] as any[], rows: {} as Record<string, any[]>, fail: "" }))
+interface MockQuery {
+  table: string
+  fields: Record<string, unknown> | undefined
+  where: SQL | undefined
+  order: SQL[]
+  limit: number | null
+}
+const mocks = vi.hoisted(() => ({ select: vi.fn(), queries: [] as MockQuery[], rows: {} as Record<string, any[]>, fail: "" }))
 vi.mock("@mtk/database", async (importOriginal) => ({
   ...await importOriginal<typeof import("@mtk/database")>(), db: { select: mocks.select },
 }))
@@ -17,7 +24,7 @@ beforeEach(() => {
   mocks.fail = ""
   mocks.rows = { matches: [match], teams: [{ id: "a", name: "A" }, { id: "b", name: "B" }], match_innings: [], league_registrations: [] }
   mocks.select.mockImplementation((fields) => {
-    const query: any = { table: "", fields, where: null, order: [], limit: null }
+    const query: MockQuery = { table: "", fields, where: undefined, order: [], limit: null }
     mocks.queries.push(query)
     const result = () => {
       if (mocks.fail === query.table) return Promise.reject(new Error("query unavailable"))
@@ -25,22 +32,27 @@ beforeEach(() => {
       return Promise.resolve(query.limit ? rows.slice(0, query.limit) : rows)
     }
     const chain: any = {
-      from: (table) => { query.table = getTableName(table); return chain },
-      where: (where) => { query.where = where; return chain },
-      orderBy: (...order) => { query.order = order; return chain },
-      limit: (limit) => { query.limit = limit; return chain },
-      then: (resolve, reject) => result().then(resolve, reject),
+      from: (table: Table) => { query.table = getTableName(table); return chain },
+      where: (where: SQL | undefined) => { query.where = where; return chain },
+      orderBy: (...order: SQL[]) => { query.order = order; return chain },
+      limit: (limit: number) => { query.limit = limit; return chain },
+      then: (resolve?: (rows: unknown[]) => unknown, reject?: (reason: unknown) => unknown) => result().then(resolve, reject),
     }
     return chain
   })
 })
-function predicates() { return mocks.queries.map((query) => ({ ...query, ...dialect.sqlToQuery(query.where) })) }
+function predicates() {
+  return mocks.queries.map(query => {
+    if (!query.where) throw new Error("Expected an explicit dashboard query predicate")
+    return { ...query, ...dialect.sqlToQuery(query.where) }
+  })
+}
 
 describe("Scoped bounded dashboard reads", () => {
   it("uses four independent tenant-scoped aggregate counts with active-player filters", async () => {
     expect(await getDashboardStats(context)).toEqual({ teams: 2, players: 1, tournaments: 1, matches: 1 })
     expect(predicates().map((q) => q.params)).toEqual([["tenant", true], ["tenant", true, "active"], ["tenant"], ["tenant"]])
-    expect(mocks.queries.every((q) => q.fields.value)).toBe(true)
+    expect(mocks.queries.every((q) => q.fields?.value)).toBe(true)
   })
   it.each(["live", "upcoming", "recent", "assigned"] as const)("scopes %s matches and both related lookups to the same tenant", async (group) => {
     const result = await getDashboardMatches({ ...context, role: "scorer" }, group)

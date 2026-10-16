@@ -11,7 +11,7 @@ import { unstable_noStore as noStore } from "next/cache"
 
 // ─── Page ─────────────────────────────────────────────────────
 
-export default async function TeamsPage({ searchParams }: { searchParams?: Promise<{ page?: string }> } = {}) {
+export default async function TeamsPage({ searchParams }: { searchParams?: Promise<{ page?: string }> }) {
   noStore()
 
   const { userId } = await auth()

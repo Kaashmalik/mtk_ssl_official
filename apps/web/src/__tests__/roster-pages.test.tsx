@@ -69,7 +69,7 @@ function text(node: any): string {
 }
 function links(node: any) { return elements(node).map(element => element.props.href).filter(Boolean) }
 const routes = [
-  ["team list", () => TeamsPage(), "team:read"], ["player list", () => PlayersPage(), "player:read"],
+  ["team list", () => TeamsPage({}), "team:read"], ["player list", () => PlayersPage({}), "player:read"],
   ["team detail", () => TeamDetailPage(teamParams), "team:read"], ["player detail", () => PlayerDetailPage(playerParams), "player:read"],
   ["new team", () => NewTeamPage(), "team:create"], ["new player", () => NewPlayerPage(), "player:create"],
   ["edit team", () => EditTeamPage(teamParams), "team:update"], ["edit player", () => EditPlayerPage(playerParams), "player:update"],
@@ -110,7 +110,7 @@ describe.each(routes)("%s core roster dashboard route", (_label, render, permiss
 describe("Roster page scope, limits and private-data serialization", () => {
   it.each([TeamsPage, PlayersPage])("redirects anonymous list visits before resolving context", async render => {
     mocks.auth.mockResolvedValue({ userId: null })
-    await expect(render()).rejects.toThrow("redirect:/")
+    await expect(render({})).rejects.toThrow("redirect:/")
     expect(mocks.context).not.toHaveBeenCalled()
   })
   it("scopes lists to the authorized active league and passes only client display fields", async () => {
@@ -132,18 +132,18 @@ describe("Roster page scope, limits and private-data serialization", () => {
     mocks.context.mockResolvedValue({ ...context, role })
     mocks.teams.mockResolvedValue({ data: [], pagination })
     mocks.players.mockResolvedValue({ data: [], pagination })
-    expect(links(await TeamsPage())).not.toContain("/dashboard/teams/new")
-    expect(links(await PlayersPage())).not.toContain("/dashboard/players/new")
+    expect(links(await TeamsPage({}))).not.toContain("/dashboard/teams/new")
+    expect(links(await PlayersPage({}))).not.toContain("/dashboard/players/new")
   })
   it("offers creation links only to the league owner", async () => {
-    expect(links(await TeamsPage())).toContain("/dashboard/teams/new")
-    expect(links(await PlayersPage())).toContain("/dashboard/players/new")
+    expect(links(await TeamsPage({}))).toContain("/dashboard/teams/new")
+    expect(links(await PlayersPage({}))).toContain("/dashboard/players/new")
   })
   it("propagates list query failure instead of a successful empty screen", async () => {
     mocks.players.mockRejectedValue(new Error("Database unavailable"))
     mocks.teams.mockRejectedValue(new Error("Database unavailable"))
-    await expect(PlayersPage()).rejects.toThrow("Database unavailable")
-    await expect(TeamsPage()).rejects.toThrow("Database unavailable")
+    await expect(PlayersPage({})).rejects.toThrow("Database unavailable")
+    await expect(TeamsPage({})).rejects.toThrow("Database unavailable")
   })
   it("rejects invalid route pages before business lists", async () => {
     await expect(PlayersPage({ searchParams: Promise.resolve({ page: "1000001" }) })).rejects.toThrow()

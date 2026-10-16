@@ -11,6 +11,13 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 59 source-quality gate (16 October 2026)
+
+Web TypeScript checking now passes without the historical error baseline. This batch
+changes page signatures, test-adapter typing/imports and pure voice-input normalization;
+no schema/migration, database operation, RLS/grant or deployment change occurred. A green
+type check does not independently validate the historical rebuild or release isolation.
+
 ### Batch 58 application-only member directory (16 October 2026)
 
 Owner-only member readers add literal name/email search, league role/access filters,

@@ -45,6 +45,7 @@ import { queueBall, removeQueuedBall } from "@/lib/offline-ball-queue";
 import { resolveActionError } from "@/lib/plan-limit-error";
 import { useOfflineBallSync } from "@/hooks/use-offline-ball-sync";
 import { hydrateScoringState, type ScoringPageSnapshot } from "@/lib/scoring-hydration";
+import { voiceDeliveryFlags } from "@/lib/scoring-voice-input";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -315,7 +316,8 @@ function ScoringInterface() {
       toast.error("Select a batter and bowler before recording a delivery.");
       return;
     }
-    if (input === "W") {
+    const flags = voiceDeliveryFlags(input);
+    if (!flags) {
       toast.info("Use the wicket button to select the dismissal type.");
       return;
     }
@@ -324,13 +326,7 @@ function ScoringInterface() {
     addBall({
       overNumber,
       ballNumber,
-      input,
-      runs: typeof input === "number" ? input : input === "W" ? 0 : 1,
-      isWicket: input === "W",
-      isWide: input === "WD",
-      isNoBall: input === "NB",
-      isBye: input === "B",
-      isLegBye: input === "LB",
+      ...flags,
       batsmanId: selectedBatsman,
       bowlerId: selectedBowler,
     });

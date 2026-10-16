@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { fanFollows, teams, players, tournaments } from "@mtk/database"
+import { fanFollows } from "@mtk/database"
 import { followEntity, unfollowEntity } from "@/app/actions/follows"
 import {
-  requireFanContext, assertFollowableInLeague, followFanEntity, unfollowFanEntity,
+  requireFanContext, assertFollowableInLeague,
   getFanFollowerCount, isFanFollowing, getMyFollowingFanEntities,
 } from "@/lib/fan-follows"
 

@@ -3260,6 +3260,25 @@ and browser/device acceptance are still separate requirements. Docker/PostgreSQL
 were not available through this environment's PATH/service checks.
 Roadmap counts remain **19 checked / 60 open / 79 IDs**.
 
+### Batch 59 — zero-diagnostic web TypeScript gate (16 October 2026)
+
+Removed all 18 previously carried TypeScript errors without compiler suppression,
+configuration weakening, builds or generated-file edits. Team/player list routes now
+require the framework props object (tests pass `{}`); dashboard query test adapters have
+explicit table/SQL/order/limit/promise types and reject missing predicates; unused imports
+were removed from fan-follow tests and team analytics. A pure voice-delivery normalizer
+keeps bare voice wickets in the dedicated dismissal flow, preserving numeric/extra
+behavior and removing impossible comparisons after type narrowing.
+
+Fresh verification: web **2,456 tests / 99 files**, database **128 / 8 files**, scoring
+**193 / 8 suites** — **2,777 total**, all processes exit 0. `tsc --noEmit` exits **0**,
+zero diagnostics; affected suites **112 tests / 4 files passed**, including 11 new voice
+cases; `git diff --check` clean.
+No schema, migration, RLS/grant, remote database, provider or deployment change.
+This makes type checking usable as a gate; it does not certify real-DB concurrency,
+browser/provider behavior or production rollout. Roadmap stays **19 checked / 60 open /
+79 IDs**; canonical declared-squad enforcement is the next source priority.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
