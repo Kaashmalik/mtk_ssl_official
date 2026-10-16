@@ -24,23 +24,23 @@ const ACTIONS_DIR = join(__dirname, "../app/actions");
 /**
  * Files that are allowed to use direct `db`.
  *
- * "tenants.ts" and "users.ts" are bootstrap flows that run before tenant context exists.
- * The remaining files are NOT YET migrated to the repository layer. As each file
- * is migrated, remove it from this set — the test will then enforce repo-only access.
+ * "tenants.ts" is the only remaining exemption: it reads/provisions the very
+ * first tenant rows before any active-league context can exist. Every other
+ * action file delegates to tenant-scoped readers/writers in lib/; the test
+ * enforces that repo-only shape.
  */
 const ALLOWLIST = new Set([
   // Bootstrap only: tenants.ts provisions the very first tenant/actor rows
-  // before any TenantScopedRepository context can exist; users.ts syncs the
-  // Clerk session into the app schema the same way. Both pre-date resolution
-  // of an active league and are audited accordingly.
+  // before any TenantScopedRepository context can exist. It pre-dates
+  // resolution of an active league and is audited accordingly.
   "tenants.ts",
-  "users.ts",
-  // Every other action file now delegates to tenant-scoped readers/writers in
+  // Every other action file delegates to tenant-scoped readers/writers in
   // lib/ (or scoring-service via its client): notifications.ts (Batch 33),
   // follows.ts/registrations.ts (Batch 36), player-ids.ts (Batch 37),
   // scorecards.ts (Batch 38), users-invites.ts (Batch 39), matches.ts
-  // (Batch 40) and scoring.ts (Batch 41 — reads only; all writes belong to
-  // the scoring-service SoT). The guard enforces repo-only access everywhere.
+  // (Batch 40), scoring.ts (Batch 41 — reads only; writes belong to the
+  // scoring-service SoT) and users.ts (Batch 54 — member management moved to
+  // lib/member-management.ts). The guard enforces repo-only access everywhere.
 ]);
 
 /** Patterns that indicate intentional unscoped access. */
@@ -158,5 +158,17 @@ describe("Tenant Isolation: No Unscoped DB Queries in Server Actions", () => {
     // Must NOT have raw db.select/update/delete/insert (the repo wraps those)
     const findings = scanForUnscopedQueries(tournamentsPath);
     expect(findings.length).toBe(0);
+  });
+
+  it("users.ts delegates member management to the lib (Batch 54 migration verification)", () => {
+    const usersPath = join(ACTIONS_DIR, "users.ts");
+    const content = readFileSync(usersPath, "utf8");
+
+    // Member reads/writes now live in the tenant-scoped lib; the action only
+    // resolves the session/permission, parses input and revalidates.
+    expect(content).toContain("@/lib/member-management");
+    expect(content).not.toContain("from \"@mtk/database\"");
+    // Must NOT have raw db.select/update/delete/insert
+    expect(scanForUnscopedQueries(usersPath).length).toBe(0);
   });
 });

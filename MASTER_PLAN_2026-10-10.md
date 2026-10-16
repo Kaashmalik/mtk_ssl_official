@@ -3103,6 +3103,44 @@ dependent acceptance (Phase 0 BASE-04..06, Phase 9 REL-01..07) still cannot
 close without the Supabase auth user and real-DB staging. Roadmap counts:
 **19 checked / 60 open / 79 IDs**.
 
+### Batch 54 — member management leaves the action tier (16 October 2026)
+
+ISO-04 consolidation. `app/actions/users.ts` was the last action file that still ran
+direct `db` queries; the `no-unscoped-queries` allowlist had recorded it as a "Clerk
+session sync" bootstrap, but the file had become the league member-administration module
+(roster read, role/status change, removal).
+
+That logic moves to a tenant-scoped `lib/member-management.ts`: the bounded
+`readLeagueMembers` roster read (deterministic order, `LIMIT 100`), `updateMemberRole` /
+`toggleMemberStatus` (locked, version-compared, audited `MEMBERSHIP_CHANGE`) and
+`removeLeagueMember` (assignment-aware, audited `MEMBERSHIP_REMOVE`). Lock order is
+unchanged (users → league → membership) and the acting owner is still re-verified inside
+the transaction after the locks. `app/actions/users.ts` keeps its exported names and
+behavior and now only resolves the session/`user:manage` gate, parses input and
+revalidates; the page and `UserListTable` are unchanged.
+
+The `no-unscoped-queries` allowlist is down to `tenants.ts` (the sole genuine bootstrap),
+and a new guard assertion pins `users.ts` to the lib.
+
+New regressions: `member-management.test.ts` (6); `no-unscoped-queries.test.ts` gains the
+migration assertion (19 → 20). No schema, migration, RLS, grant or deployment change, and
+a mocked transaction is not PostgreSQL locking or browser proof. The web suite required the
+gitignored `@mtk/observability` `tsc` output (turbo's `test` → `build` prerequisite), which
+was absent here and was rebuilt with the package's own script — not an app or product build.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **91** files, **2,319 tests** (+7) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: officials approval + server-side XI enforcement (schema /
+scoring-service contracts), COMP-07 remainder (forfeits/disputes, competition locks and
+scoped notices — schema), member UI + records. Roadmap counts: **19 checked / 60 open /
+79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
