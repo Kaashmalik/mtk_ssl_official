@@ -11,9 +11,10 @@ import { DeleteButton } from "@/components/shared/delete-button"
 import { MatchLifecycleControls } from "@/components/matches/match-lifecycle-controls"
 import { StreamStartModal } from "@/components/matches/stream-start-modal"
 import { ScorerAssign } from "@/components/matches/scorer-assign"
+import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
-import { db, teams, matchInnings, players, venues } from "@mtk/database"
+import { db, teams, matchInnings, players, venues, leagueRegistrations } from "@mtk/database"
 import { and, eq, asc, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
@@ -152,7 +153,30 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
 
   const formatText = match.matchFormat ? match.matchFormat.toUpperCase() : "T20"
 
-  const tossWinnerTeam = match.tossWinnerId === teamA.id ? teamA : teamB
+  // Squad declaration state for readiness: a registration that exists but
+// declares no players fails the squads check (owner started, didn't finish);
+// no registration at all is legacy "unknown" and never fails (rule v1).
+let teamASquadDeclared: boolean | undefined
+let teamBSquadDeclared: boolean | undefined
+if (match.tournamentId) {
+  const squadRows = await db.select({
+    teamId: leagueRegistrations.teamId,
+    squadPlayerIds: leagueRegistrations.squadPlayerIds,
+  }).from(leagueRegistrations)
+    .where(and(
+      eq(leagueRegistrations.tenantId, match.tenantId),
+      eq(leagueRegistrations.tournamentId, match.tournamentId),
+      eq(leagueRegistrations.status, "approved"),
+      inArray(leagueRegistrations.teamId, [teamA.id, teamB.id]),
+    ))
+  for (const row of squadRows) {
+    const declared = row.squadPlayerIds !== null && row.squadPlayerIds.length > 0
+    if (row.teamId === teamA.id) teamASquadDeclared = declared
+    if (row.teamId === teamB.id) teamBSquadDeclared = declared
+  }
+}
+
+const tossWinnerTeam = match.tossWinnerId === teamA.id ? teamA : teamB
   const tossDecisionText = match.tossDecision === "bat" ? "elected to bat" : "elected to bowl"
   const tossText = match.tossWinnerId ? `${tossWinnerTeam.name} won toss and ${tossDecisionText}` : "Toss details not entered yet"
 
@@ -258,6 +282,25 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
           <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} />
           <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} currentBackupScorerId={match.backupScorerId} />
         </div>
+      </MotionWrapper>
+
+      {/* Pre-match readiness checklist (COMP-06) */}
+      <MotionWrapper variant="fadeInUp" delay={0.15}>
+        <MatchReadinessCard
+          match={{
+            status: match.status,
+            scheduledDate: match.scheduledDate,
+            venueId: match.venueId,
+            tossWinnerId: match.tossWinnerId,
+            tossDecision: match.tossDecision,
+            scorerId: match.scorerId,
+            backupScorerId: match.backupScorerId,
+            umpire1: match.umpire1,
+            tournamentId: match.tournamentId,
+            teamASquadDeclared,
+            teamBSquadDeclared,
+          }}
+        />
       </MotionWrapper>
 
       {/* Scorecards */}

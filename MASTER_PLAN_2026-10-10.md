@@ -3063,6 +3063,46 @@ environment-dependent acceptance batches (Phase 0 BASE-04..06, Phase 9
 REL-01..07) still cannot close without the Supabase auth user and real-DB
 staging. Roadmap counts: **19 checked / 60 open / 79 IDs**.
 
+### Batch 53 — match readiness checklist (16 October 2026)
+
+COMP-06 slice (readiness dashboard). The match detail page showed status and
+controls but nothing told an owner whether a fixture was actually playable:
+missing venue/date, no scorer, a half-declared squad or a missing toss all
+surfaced only as surprises.
+
+**Pure rules — new `lib/match-readiness.ts` (rule v1).** Six computed checks:
+date and venue are blocking (the fixture must be playable); the toss blocks
+once the match has moved past `scheduled`; scorer assignment, umpire listing
+and — for tournament fixtures — squad declaration are advisory in v1. Squad
+declaration semantics match Batch 52: a registration that exists but declares
+no players fails the check (owner started, didn't finish); no registration at
+all is legacy "unknown" and never fails. `ready` = every blocking check
+passes. Formal official APPROVAL remains open (schema decision).
+
+**UI wiring — new `MatchReadinessCard`** on the dashboard match detail page:
+badge (`Ready` / `Not playable` / `Almost there`) plus a two-column checklist
+(pass / blocking-fail / advisory-recommended icons). The page resolves squad
+declaration state from the teams' approved registrations in one query.
+
+New regressions: `match-readiness.test.ts` (6 — blocking vs advisory, toss
+gating by status, backup-s scorer satisfaction, squads semantics,
+empty-string officials).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **90** files, **2,312 tests** (+6) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: officials approval + server-side XI enforcement (schema /
+scoring-service contracts), COMP-07 remainder (forfeits/disputes, competition
+locks and scoped notices — schema), member UI + records. Environment-
+dependent acceptance (Phase 0 BASE-04..06, Phase 9 REL-01..07) still cannot
+close without the Supabase auth user and real-DB staging. Roadmap counts:
+**19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
