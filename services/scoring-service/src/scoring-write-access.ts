@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations } from '@mtk/database';
-import { membershipGrantsAccess } from '@mtk/database/lib/membership-effectiveness';
+import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations, membershipGrantsAccess } from '@mtk/database';
+import { scorerSlotGrant } from '@mtk/database';
 import { matchRegistrationMap, registrationAllowsPlayer, type SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
 import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
@@ -45,7 +45,8 @@ export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId
   }
   const role = membership.role;
   if (role === 'league_owner') return;
-  if (role !== 'scorer' || (match.scorerId !== actorId && match.backupScorerId !== actorId)) {
+  // ISO-05 resource grant: the slot pointer on the match row itself.
+  if (role !== 'scorer' || scorerSlotGrant(match, actorId) === null) {
     throw new ForbiddenException('You are not authorized to score this match');
   }
 }

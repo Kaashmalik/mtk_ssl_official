@@ -1,4 +1,5 @@
 import { db, tenants, users, userTenantRoles, membershipGrantsAccess } from "@mtk/database"
+import { isPlatformRole } from "@mtk/database/lib/resource-grants"
 import { and, eq } from "drizzle-orm"
 import { getTenantFromRequest } from "./tenant"
 import { hasPermission, type UserRole } from "./rbac"
@@ -27,7 +28,7 @@ export async function getDashboardContext(clerkId: string): Promise<DashboardAcc
       eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
     ) })
     if (!membership || membership.userId !== actor.id || membership.tenantId !== tenantId
-      || !membershipGrantsAccess(membership) || membership.role === "super_admin") {
+      || !membershipGrantsAccess(membership) || isPlatformRole(membership.role)) {
       return { status: "denied" }
     }
     const role = membership.role

@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server"
 import { db, users, userTenantRoles, tenants, leagueRegistrations, teams, tournaments, players, membershipGrantsAccess } from "@mtk/database"
+import { teamManagementGrant } from "@mtk/database/lib/resource-grants"
 import { and, eq, asc, desc, count } from "drizzle-orm"
 import { z } from "zod"
 import { resolveActiveTenantId, requirePermissionServer } from "./rbac-server"
@@ -53,7 +54,7 @@ export async function resolveRegistrationReviewAccess(): Promise<RegistrationRea
 
 export function canWithdrawRegistration(context: RegistrationReadContext, team: { isActive: boolean; managerId: string | null; captainId: string | null }) {
   return team.isActive && (context.role === "league_owner" || (context.role === "team_manager"
-    && (team.managerId === context.actorId || team.captainId === context.actorId)))
+    && teamManagementGrant(team, context.actorId) !== null))
 }
 
 // Explicit projections: ordinary review reads never fetch the off-platform payment

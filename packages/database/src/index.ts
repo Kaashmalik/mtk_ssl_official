@@ -18,6 +18,8 @@ export * from "./lib/plan-guard";
 
 // Shared membership-effectiveness policy (expiry/suspension, SCORE-09)
 export * from "./lib/membership-effectiveness";
+// Shared resource-scoped grant design (ISO-05): scorer slots + team grants
+export * from "./lib/resource-grants";
 
 // DB Errors
 export * from "./lib/db-errors";

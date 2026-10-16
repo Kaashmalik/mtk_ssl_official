@@ -3901,6 +3901,69 @@ Next source work: ISO-05 resource-scoped grant design, verified-records/
 consent design. Release gates still need Batch 62 evidence + services
 deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 75 - resource-scoped grant design (ISO-05), zero behavior change
+
+ISO-05's remaining halves after the membership status/expiry work (Batches
+62-70, SCORE-09): an authoritative RESOURCE-GRANT design and platform-role
+separation. The repo already had the right grant pointers - the model was
+just improvised per writer.
+
+**The design** (new shared pure module
+`packages/database/src/lib/resource-grants.ts`, docstring is the record):
+a role is a league-wide capability CLASS; a resource grant is a durable,
+audited pointer on the resource ROW ITSELF (`matches.scorer_id`/
+`backup_scorer_id`, `teams.manager_id`/`captain_id`), created and revoked
+only by that resource's locked audited writer, so no side table can drift.
+A decision composes: role permits the class AND (owner scope OR grant held),
+always with `membershipGrantsAccess` under the caller's lock - a suspended
+or expired membership voids its grants (SCORE-09). Platform roles
+(`super_admin`) are NOT league roles: no grants, denied at league surfaces.
+Pure derivations: `scorerSlotGrant` ("primary"/"backup"/null),
+`teamManagementGrant` ("manager"/"captain"/null), `PLATFORM_ROLES` +
+`isPlatformRole`. Now also root-exported from `@mtk/database`.
+
+**Consolidation - seven decision sites, decisions and messages identical:**
+scoring-service `requireScoringWriteAccess` slot check, web
+`canScoreMatch`, `match-lifecycle` gate, roster `requireTeamAuthority`,
+registration `delegateAuthority`, `canWithdrawRegistration`, and both
+context gates (`rbac-server`, `dashboard-context`) now use the shared
+derivations instead of inline pointer comparisons. Display/assignment/
+detection logic (member-assignments, member-management, invite-records)
+deliberately untouched.
+
+**Build-hygiene fix discovered en route:** the scoring-service's 13-error
+`tsc` baseline (dating back several batches) was a stale `@mtk/database`
+`dist` plus a missing `paths` mapping - its tsconfig resolved `lib/*`
+subpaths to a stale build while the rest of the monorepo resolves source.
+Rebuilt the database package and added the same `@mtk/database` /
+`@mtk/database/*` source mappings to the scoring-service tsconfig:
+**scoring-service `tsc` is now 0 errors** (was 13 pre-existing), going
+forward a real gate.
+
+Honest limits: no new schema (the pointers ARE the grants); grants are
+per-team/per-match, not a general ACL table (a future need would extend this
+module first); race acceptance for grant writers stays staged (Batch 62
+unmet).
+
+New regressions: `resource-grants.test.ts` (8 - slot/team derivations,
+primary-wins on corrupt double-slot rows, strict identity matching,
+platform-role enumeration).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **104** files, **2,572 tests** (+0 net) |
+| `npx vitest run` (database) | PASS - **14** files, **208 tests** (+9) |
+| `npx jest` (scoring-service) | PASS - **12** suites, **304 tests** |
+| `tsc --noEmit` (web + database + scoring-service) | **0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | none needed - no schema change |
+
+Next source work: ISO-05 remainder (verified consented career linkage sits
+with PUB-03), release gates (Batch 62 evidence + services deployment).
+Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

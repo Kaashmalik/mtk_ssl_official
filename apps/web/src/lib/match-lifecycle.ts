@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
 import { db, matches, users, tenants, userTenantRoles, teams, auditLogs, membershipGrantsAccess } from "@mtk/database"
+import { scorerSlotGrant } from "@mtk/database/lib/resource-grants"
 import { and, eq, inArray, sql } from "drizzle-orm"
 
 type Match = typeof matches.$inferSelect
@@ -30,7 +31,7 @@ export async function mutateMatchLifecycle(clerkId: string, tenantId: string, ma
       || !league || league.id !== tenantId || league.isActive !== true
       || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
       || !(member.role === "league_owner" || (member.role === "scorer"
-        && (match.scorerId === actor.id || match.backupScorerId === actor.id)))) {
+        && scorerSlotGrant(match, actor.id) !== null))) {
       throw new Error("Forbidden: your match lifecycle access changed")
     }
     if (match.teamAId === match.teamBId) throw new Error("Match requires two distinct teams")

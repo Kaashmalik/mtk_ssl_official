@@ -1,4 +1,5 @@
 import { db, matches, users } from "@mtk/database"
+import { scorerSlotGrant } from "@mtk/database/lib/resource-grants"
 import { and, eq } from "drizzle-orm"
 import { getUserRoleForTenant, requirePermissionServer } from "./rbac-server"
 import { z } from "zod"
@@ -20,7 +21,8 @@ export async function canScoreMatch(clerkId: string, tenantId: string, match: { 
   if (!["league_owner", "scorer"].includes(role ?? "")) return false
   const user = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
   if (!user || user.isActive !== true) return false
-  return role === "league_owner" || match.scorerId === user.id || match.backupScorerId === user.id
+  // ISO-05 resource grant: the slot pointer on the match row itself.
+  return role === "league_owner" || scorerSlotGrant(match, user.id) !== null
 }
 
 /** Role checks and assignment checks must use the exact mutation tenant. */

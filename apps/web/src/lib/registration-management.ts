@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto"
+import { teamManagementGrant } from "@mtk/database/lib/resource-grants"
 import {
   db, users, tenants, userTenantRoles, teams, tournaments, players,
   leagueRegistrations, payments, auditLogs, membershipGrantsAccess,
@@ -68,7 +69,9 @@ async function findRegistration(tx: Tx, tenantId: string, id: string) {
   return row
 }
 function delegateAuthority(context: Context, team: Team) {
-  if (context.member.role !== "league_owner" && team.managerId !== context.actor.id && team.captainId !== context.actor.id) {
+  if (context.member.role === "league_owner") return
+  // ISO-05 resource grant: the manager/captain pointers on the team row itself.
+  if (teamManagementGrant(team, context.actor.id) === null) {
     throw new Error("Only the league owner or this team's manager/captain can manage it")
   }
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
 import { db, users, tenants, userTenantRoles, teams, players, tournaments, matches, auditLogs,
   checkPlanLimit, membershipGrantsAccess, type PlanKey, type Team, type Player } from "@mtk/database"
+import { teamManagementGrant } from "@mtk/database/lib/resource-grants"
 import { and, eq, inArray, or, count, sql } from "drizzle-orm"
 import { z } from "zod"
 import { teamInput, teamPatch, playerInput, playerPatch } from "./roster-input"
@@ -51,7 +52,9 @@ async function lockedTeams(tx: Tx, tenantId: string, ids: string[]) {
   return rows
 }
 function requireTeamAuthority(context: Context, team: Team) {
-  if (context.member.role !== "league_owner" && team.managerId !== context.actor.id && team.captainId !== context.actor.id) {
+  if (context.member.role === "league_owner") return
+  // ISO-05 resource grant: the manager/captain pointers on the team row itself.
+  if (teamManagementGrant(team, context.actor.id) === null) {
     throw new Error("You can only manage the team currently assigned to you")
   }
 }
