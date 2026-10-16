@@ -3020,6 +3020,49 @@ Supabase auth user and real-DB staging (Phase 0 BASE-04..06, Phase 9
 REL-01..07). Roadmap counts: **19 checked / 60 open / 79 IDs** (rescheduling
 closed inside COMP-07; locks/notices/forfeits remain open).
 
+### Batch 52 — squad eligibility on the scoring player list (16 October 2026)
+
+COMP-06 slice. Toss decisions were already complete (pre-match `setTossResult`
+plus in-scoring flow — covered by earlier regression suites); officials
+approval and a match-readiness dashboard need schema decisions, so they stay
+open. The reachable gap was squad enforcement: tournaments declare
+`squadPlayerIds` at registration approval, but the scoring player selectors
+still offered every active roster player.
+
+**Rule v1 — new pure `lib/squad-eligibility.ts`.** When an approved
+registration declares a NON-EMPTY squad, the team's scoring player list is
+filtered to it; empty/null squads (legacy approvals) and non-tournament
+friendlies keep the full active roster. Ordering preserved; fail-safe by
+design so legacy competitions stay playable.
+
+**Read wiring — `readMatchPlayersForScoring`** now resolves the match's
+tournament link, reads both sides' approved registrations (tenant- and
+tournament-scoped, `inArray` team sides) and applies the filter per side
+before returning. Selection-time enforcement is where scorers actually pick
+players; the delivery writers' accept-anything behaviour is recorded honestly
+as a remaining server-side-enforcement gap (needs the scoring-service
+contract, not a UI fix).
+
+New regressions: `squad-eligibility.test.ts` (6 — declared-squad filtering
+per side, friendly matches, legacy empty squads, missing approvals,
+not-found, plus the pure filter cases).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **89** files, **2,306 tests** (+6) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work (COMP-06 remainder): officials approval + match-readiness
+dashboard (schema decisions needed), server-side XI enforcement in delivery
+writers (scoring-service contract); COMP-07 remainder: forfeits/disputes,
+competition locks and scoped notices (schema). Then member UI + records; the
+environment-dependent acceptance batches (Phase 0 BASE-04..06, Phase 9
+REL-01..07) still cannot close without the Supabase auth user and real-DB
+staging. Roadmap counts: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
