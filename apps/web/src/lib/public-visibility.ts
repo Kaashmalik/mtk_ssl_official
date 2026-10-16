@@ -1,6 +1,6 @@
-import { and, eq, asc, desc, inArray, sum, gte } from "drizzle-orm"
-import { db, matches, tournaments, teams, matchInnings, players, playerSeasonStats } from "@mtk/database"
-import { publicLeaderboardFilters, type PublicLeaderboardFilterInput } from "./leaderboard-filters"
+import { and, asc, count, desc, eq, gte, inArray, sum } from "drizzle-orm"
+import { db, matches, tournaments, teams, matchInnings, players, playerSeasonStats, battingScorecards, bowlingScorecards } from "@mtk/database"
+import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
@@ -87,6 +87,12 @@ export type PublicLeaderboardRow = { playerId: string; playerName: string; total
  * tournament, so season stats still attached to a draft/cancelled competition
  * are never published, and no other league's players can appear. Results are
  * bounded and deterministically ordered (ties break on playerId).
+ *
+ * Format-aware (PUB-03): with a `format` filter the rows aggregate from the
+ * same per-innings scorecard rows the scoring pipeline wrote, joined through
+ * the innings to the match's canonical `match_format` - never inferred from a
+ * tournament-level total. Without it the combined-format season aggregates
+ * (player_season_stats) are used, unchanged from the combined view.
  */
 async function readPublicLeaderboard(
   tenantId: string,
@@ -94,6 +100,7 @@ async function readPublicLeaderboard(
   input: PublicLeaderboardFilterInput,
 ): Promise<PublicLeaderboardRow[]> {
   const filters = publicLeaderboardFilters.parse(input)
+  if (filters.format) return readFormatQualifiedLeaderboard(tenantId, metric, filters)
   const column = metric === "runs" ? playerSeasonStats.runsScored : playerSeasonStats.wicketsTaken
   const innings = metric === "runs" ? playerSeasonStats.inningsBatted : playerSeasonStats.inningsBowled
   const balls = metric === "runs" ? playerSeasonStats.ballsFaced : playerSeasonStats.ballsBowled
@@ -122,6 +129,72 @@ async function readPublicLeaderboard(
     .orderBy(desc(sum(column)), asc(playerSeasonStats.playerId))
     .limit(PUBLIC_LEADERBOARD_LIMIT)
   return rows
+}
+
+/**
+ * Format-qualified aggregation over the per-innings base rows (PUB-03). The
+ * match's declared `matchFormat` is the only format authority; the match must
+ * still sit under a published same-league tournament, so unpublished and
+ * out-of-league fixtures can never qualify. Innings qualification counts the
+ * per-innings rows themselves (one batting/bowling row per player per innings,
+ * unique-constrained); balls qualification stays a summed aggregate.
+ */
+async function readFormatQualifiedLeaderboard(
+  tenantId: string,
+  metric: "runs" | "wickets",
+  filters: PublicLeaderboardFilters,
+): Promise<PublicLeaderboardRow[]> {
+  const published = inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES])
+  if (metric === "runs") {
+    return db
+      .select({
+        playerId: battingScorecards.playerId,
+        playerName: players.name,
+        total: sum(battingScorecards.runs).mapWith(Number),
+      })
+      .from(battingScorecards)
+      .innerJoin(players, and(eq(players.id, battingScorecards.playerId), eq(players.tenantId, tenantId)))
+      .innerJoin(matchInnings, and(eq(matchInnings.id, battingScorecards.inningsId), eq(matchInnings.tenantId, tenantId)))
+      .innerJoin(matches, and(eq(matches.id, matchInnings.matchId), eq(matches.tenantId, tenantId)))
+      .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
+      .where(and(
+        eq(battingScorecards.tenantId, tenantId),
+        // The metric-only caller guarantees a declared format; see the guard in readPublicLeaderboard.
+        eq(matches.matchFormat, filters.format!),
+        published,
+      ))
+      .groupBy(battingScorecards.playerId, players.name)
+      .having(and(
+        gte(count(battingScorecards.id), filters.minimumInnings),
+        gte(sum(battingScorecards.ballsFaced), filters.minimumBalls),
+      ))
+      .orderBy(desc(sum(battingScorecards.runs)), asc(battingScorecards.playerId))
+      .limit(PUBLIC_LEADERBOARD_LIMIT)
+  }
+  return db
+    .select({
+      playerId: bowlingScorecards.playerId,
+      playerName: players.name,
+      total: sum(bowlingScorecards.wickets).mapWith(Number),
+    })
+    .from(bowlingScorecards)
+    .innerJoin(players, and(eq(players.id, bowlingScorecards.playerId), eq(players.tenantId, tenantId)))
+    .innerJoin(matchInnings, and(eq(matchInnings.id, bowlingScorecards.inningsId), eq(matchInnings.tenantId, tenantId)))
+    .innerJoin(matches, and(eq(matches.id, matchInnings.matchId), eq(matches.tenantId, tenantId)))
+    .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
+    .where(and(
+      eq(bowlingScorecards.tenantId, tenantId),
+      // The metric discriminant guarantees a declared format here.
+      eq(matches.matchFormat, filters.format!),
+      published,
+    ))
+    .groupBy(bowlingScorecards.playerId, players.name)
+    .having(and(
+      gte(count(bowlingScorecards.id), filters.minimumInnings),
+      gte(sum(bowlingScorecards.ballsBowled), filters.minimumBalls),
+    ))
+    .orderBy(desc(sum(bowlingScorecards.wickets)), asc(bowlingScorecards.playerId))
+    .limit(PUBLIC_LEADERBOARD_LIMIT)
 }
 
 /** Batting leaderboard for the public hub, scoped and publication-gated. */

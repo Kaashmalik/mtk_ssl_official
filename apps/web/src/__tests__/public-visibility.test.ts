@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { matches, tournaments, playerSeasonStats, matchInnings, teams } from "@mtk/database"
+import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, battingScorecards, bowlingScorecards } from "@mtk/database"
+import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 import {
   isTournamentPublished, isMatchPublished, readPublishedTournament, readPublishedMatch,
   readPublishedMatchTeams, matchHasInnings, readPublicBattingLeaderboard,
@@ -149,6 +150,37 @@ describe("Public reads are tenant-scoped and publication-gated", () => {
   it("retains no-minimum qualification by default", async () => {
     await readPublicBattingLeaderboard(TENANT)
     expect(mocks.queries[0].having.params).toEqual([0, 0])
+  })
+
+  it.each([[readPublicBattingLeaderboard, battingScorecards, "batting"], [readPublicBowlingLeaderboard, bowlingScorecards, "bowling"]] as const)(
+    "switches the %s ranking to per-innings base rows filtered on the match's declared format", async (read, rowsTable, _name) => {
+      await read(TENANT, { minimumInnings: 3, minimumBalls: 60, format: "t20" })
+      const query = mocks.queries[0]
+      expect(query.table).toBe(rowsTable)
+      // match -> published same-league tournament join, format pinned on the match.
+      expect(query.joins).toEqual([players, matchInnings, matches, tournaments])
+      // The declared format is a bound parameter of the same-league, published predicate.
+      expect(query.params).toContain("t20")
+      expect(query.params.filter((p: unknown) => p === TENANT)).toHaveLength(5)
+      expect(query.params).toContain("registration")
+      expect(query.params).toContain("completed")
+      expect(query.params).not.toContain("draft")
+      expect(query.having.sql).toContain("count(")
+      expect(query.having.sql).toContain(rowsTable === battingScorecards ? 'sum("batting_scorecards"."balls_faced")' : 'sum("bowling_scorecards"."balls_bowled")')
+      expect(query.having.params).toEqual([3, 60])
+      expect(query.limit).toBe(PUBLIC_LEADERBOARD_LIMIT)
+      // Every canonical format value is accepted by the reader tier.
+      for (const f of PUBLIC_LEADERBOARD_FORMATS) {
+        await read(TENANT, { format: f })
+        expect(mocks.queries.at(-1)!.params).toContain(f)
+      }
+    })
+
+  it("keeps the combined season aggregates untouched when no format is selected", async () => {
+    await readPublicBattingLeaderboard(TENANT, { minimumInnings: 1, minimumBalls: 6 })
+    const query = mocks.queries[0]
+    expect(query.table).toBe(playerSeasonStats)
+    expect(query.joins).toEqual([players, tournaments])
   })
 
   it.each([

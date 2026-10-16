@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { unstable_noStore as noStore } from "next/cache"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublicBattingLeaderboard, readPublicBowlingLeaderboard } from "@/lib/public-visibility"
-import { parsePublicLeaderboardSearch, PUBLIC_LEADERBOARD_MAX_MINIMUM, type PublicLeaderboardSearch } from "@/lib/leaderboard-filters"
+import { parsePublicLeaderboardSearch, PUBLIC_LEADERBOARD_MAX_MINIMUM, PUBLIC_LEADERBOARD_FORMATS, publicLeaderboardFormatLabel, type PublicLeaderboardSearch } from "@/lib/leaderboard-filters"
 
 export default async function LeaderboardsPage({ searchParams }: { searchParams?: Promise<PublicLeaderboardSearch> }) {
   noStore()
@@ -19,11 +19,20 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
     readPublicBowlingLeaderboard(tenantId, parsed.data),
   ]) : [[], []]
 
+  const format = parsed.success ? parsed.data.format : undefined
+  const formatLabel = publicLeaderboardFormatLabel(format)
   return (
     <div className="max-w-4xl mx-auto space-y-6 p-4">
       <h1 className="text-2xl font-bold">Leaderboards</h1>
-      <p className="text-sm text-muted-foreground">Published competition season totals in this league only. Formats are combined; these are not verified career records or official awards.</p>
+      <p className="text-sm text-muted-foreground">{formatLabel ? `Published ${formatLabel}-format totals for this league only, aggregated from the per-innings scorecards of matches declared ${formatLabel}.` : "Published competition season totals in this league only. Formats are combined when no format filter is selected."} These are not verified career records or official awards.</p>
       <form method="get" className="flex flex-wrap items-end gap-4">
+        <div className="space-y-1">
+          <label htmlFor="format" className="block text-sm font-medium">Match format</label>
+          <select id="format" name="format" defaultValue={format ?? ""} className="min-h-11 w-40 rounded-md border bg-background px-3">
+            <option value="">All formats (combined)</option>
+            {PUBLIC_LEADERBOARD_FORMATS.map(f => <option key={f} value={f}>{publicLeaderboardFormatLabel(f)}</option>)}
+          </select>
+        </div>
         <div className="space-y-1">
           <label htmlFor="minimum-innings" className="block text-sm font-medium">Minimum innings</label>
           <input id="minimum-innings" name="minimumInnings" type="number" min={0} max={PUBLIC_LEADERBOARD_MAX_MINIMUM} step={1} defaultValue={parsed.success ? parsed.data.minimumInnings : 0} className="min-h-11 w-32 rounded-md border bg-background px-3" />
@@ -36,14 +45,14 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
         <a href="/leaderboards" className="inline-flex min-h-11 items-center underline">Reset filters</a>
       </form>
       <p className="text-sm text-muted-foreground">Minimums apply to innings batted / balls faced for batting, and innings bowled / balls bowled for bowling. Zero means no minimum. User-selected filters do not set league award eligibility.</p>
-      {!parsed.success ? <p role="alert" className="text-destructive">Enter whole-number minimums from 0 to 10,000. Repeated or invalid filter values are not accepted.</p> : <>
-      <p className="text-sm">Qualification: at least {parsed.data.minimumInnings} innings and {parsed.data.minimumBalls} balls. Top 10 per category.</p>
+      {!parsed.success ? <p role="alert" className="text-destructive">Enter whole-number minimums from 0 to 10,000 and a valid match format. Repeated or invalid filter values are not accepted.</p> : <>
+      <p className="text-sm">Qualification{formatLabel ? ` (${formatLabel})` : ""}: at least {parsed.data.minimumInnings} innings and {parsed.data.minimumBalls} balls. Top 10 per category.</p>
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><CardTitle>Top Run Scorers</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Top Run Scorers{formatLabel ? ` — ${formatLabel}` : ""}</CardTitle></CardHeader>
           <CardContent>
             <table className="w-full text-sm">
-              <caption className="sr-only">Qualified published league batting totals</caption>
+              <caption className="sr-only">Qualified published league batting totals{formatLabel ? `, ${formatLabel} format only` : ""}</caption>
               <thead><tr><th scope="col" className="text-left">Rank</th><th scope="col" className="text-left">Player</th><th scope="col" className="text-right">Runs</th></tr></thead>
               <tbody>
                 {topRuns.map((r, i) => (
@@ -59,10 +68,10 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Top Wicket Takers</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Top Wicket Takers{formatLabel ? ` — ${formatLabel}` : ""}</CardTitle></CardHeader>
           <CardContent>
             <table className="w-full text-sm">
-              <caption className="sr-only">Qualified published league bowling totals</caption>
+              <caption className="sr-only">Qualified published league bowling totals{formatLabel ? `, ${formatLabel} format only` : ""}</caption>
               <thead><tr><th scope="col" className="text-left">Rank</th><th scope="col" className="text-left">Player</th><th scope="col" className="text-right">Wickets</th></tr></thead>
               <tbody>
                 {topWickets.map((r, i) => (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parsePublicLeaderboardSearch, publicLeaderboardFilters } from "@/lib/leaderboard-filters"
+import { parsePublicLeaderboardSearch, publicLeaderboardFilters, PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 
 describe("Public leaderboard qualification filters", () => {
   it("defaults to no minimum without inventing an official qualification policy", () => {
@@ -19,6 +19,28 @@ describe("Public leaderboard qualification filters", () => {
     })
 
   it("ignores unrelated query parameters without treating them as policy", () => {
-    expect(parsePublicLeaderboardSearch({ format: "t20", minimumInnings: "2" })).toMatchObject({ success: true, data: { minimumInnings: 2, minimumBalls: 0 } })
+    expect(parsePublicLeaderboardSearch({ minimumInnings: "2" })).toMatchObject({ success: true, data: { minimumInnings: 2, minimumBalls: 0 } })
   })
+
+  it("defaults to no format filter (combined season aggregates)", () => {
+    expect(parsePublicLeaderboardSearch({})).toMatchObject({ success: true, data: { format: undefined } })
+    expect(publicLeaderboardFilters.parse({})).toEqual({ minimumInnings: 0, minimumBalls: 0, format: undefined })
+  })
+
+  it.each(PUBLIC_LEADERBOARD_FORMATS)("parses the canonical match format %s", format => {
+    expect(parsePublicLeaderboardSearch({ format })).toMatchObject({ success: true, data: { format } })
+  })
+
+  it("an empty-string format resets to the combined view instead of erroring", () => {
+    // The unselected <select> option submits "" - it must not brick the form.
+    expect(parsePublicLeaderboardSearch({ format: "" })).toMatchObject({ success: true, data: { format: undefined } })
+    // The reader tier stays strict: callers cannot pass "" through directly.
+    expect(publicLeaderboardFilters.safeParse({ minimumInnings: 0, minimumBalls: 0, format: "" }).success).toBe(false)
+  })
+
+  it.each(["T20", "t20 ", "twenty20", "ODI", ["t20", "odi"], "t20;drop"])(
+    "rejects an invalid or repeated format %s instead of broadening results", value => {
+      expect(parsePublicLeaderboardSearch({ format: value as never }).success).toBe(false)
+      expect(publicLeaderboardFilters.safeParse({ minimumInnings: 0, minimumBalls: 0, format: value }).success).toBe(false)
+    })
 })

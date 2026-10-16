@@ -67,6 +67,30 @@ describe("Public leaderboards are scoped to the request-host league", () => {
     expect(mocks.bowling).toHaveBeenCalledWith(TENANT, { minimumInnings: 3, minimumBalls: 60 })
   })
 
+  it("passes a format-qualified filter through and labels it as format-specific, never as official records", async () => {
+    const tree = await LeaderboardsPage({ searchParams: Promise.resolve({ format: "t20", minimumInnings: "3", minimumBalls: "60" }) })
+    expect(mocks.batting).toHaveBeenCalledWith(TENANT, { minimumInnings: 3, minimumBalls: 60, format: "t20" })
+    expect(mocks.bowling).toHaveBeenCalledWith(TENANT, { minimumInnings: 3, minimumBalls: 60, format: "t20" })
+    const text = collectText(tree).join(" ")
+    expect(text).toContain("T20-format")
+    expect(text).toContain("Top Run Scorers")
+    expect(text).toContain("— T20")
+    expect(text).toContain("not verified career records or official awards")
+  })
+
+  it("keeps the combined labels when the format filter is left unselected", async () => {
+    const tree = await LeaderboardsPage({ searchParams: Promise.resolve({ format: "", minimumInnings: "3", minimumBalls: "60" }) })
+    expect(mocks.batting).toHaveBeenCalledWith(TENANT, { minimumInnings: 3, minimumBalls: 60 })
+    expect(collectText(tree).join(" ")).toContain("Formats are combined")
+  })
+
+  it("does not query or fake an empty ranking for an invalid or repeated format", async () => {
+    const text = collectText(await LeaderboardsPage({ searchParams: Promise.resolve({ format: ["t20", "odi"] }) })).join(" ")
+    expect(text).toContain("a valid match format")
+    expect(mocks.batting).not.toHaveBeenCalled()
+    expect(mocks.bowling).not.toHaveBeenCalled()
+  })
+
   it.each(["-1", "1.5", "10001", ["1", "2"]])("does not query or fake an empty ranking for invalid input %s", async value => {
     const text = collectText(await LeaderboardsPage({ searchParams: Promise.resolve({ minimumInnings: value }) }))
     expect(text.join(" ")).toContain("Enter whole-number minimums")
@@ -94,7 +118,7 @@ describe("Public leaderboards are scoped to the request-host league", () => {
       { id: "minimum-innings", name: "minimumInnings", min: 0, max: 10_000, defaultValue: 2 },
       { id: "minimum-balls", name: "minimumBalls", min: 0, max: 10_000, defaultValue: 12 },
     ])
-    expect(collectElements(tree, "label").map(node => node.props.htmlFor)).toEqual(["minimum-innings", "minimum-balls"])
+    expect(collectElements(tree, "label").map(node => node.props.htmlFor)).toEqual(["format", "minimum-innings", "minimum-balls"])
     expect(collectElements(tree, "th")).toHaveLength(6)
     expect(collectElements(tree, "th").every(node => node.props.scope === "col")).toBe(true)
   })

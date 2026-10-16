@@ -3845,6 +3845,62 @@ Next source work: PUB-03 format-qualified records, ISO-05 resource-scoped
 grant design. Release gates still need Batch 62 evidence + services
 deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 74 - format-qualified public leaderboards (PUB-03 slice)
+
+Batch 57 delivered minimum qualifications but honestly recorded the format
+gap: `player_season_stats` carries no match-format dimension, and inferring
+one from tournament-level totals would be unsafe. The format authority
+already exists one level down - `matches.match_format` (canonical enum
+t20/odi/test/t10/custom) - so this batch aggregates the per-innings base
+rows instead of denormalizing (**no migration needed**; nothing to apply via
+MCP this time).
+
+**Filter layer** (`lib/leaderboard-filters.ts`): optional `format` joins the
+qualification filters. Unknown values, repeated query params and non-
+canonical names fail visibly without querying; the singleton empty string -
+what the unselected "All formats (combined)" option submits - resets to the
+combined view instead of erroring, so applying the defaults never bricks the
+form. The reader tier (`publicLeaderboardFilters`) stays strict: a caller
+bypassing the page parser cannot pass "" or junk through.
+
+**Reader layer** (`lib/public-visibility.ts`): with a format selected,
+ranking switches to `batting_scorecards` / `bowling_scorecards` joined
+innings -> match -> published same-league tournament: same tenant
+predicates, the same published-status set, HAVING qualification (innings =
+COUNT of the unique per-player-per-innings rows, balls = SUM of balls faced/
+bowled), playerId tie-break and top-10 bound, with the declared match format
+pinned as a bound parameter. Without a format the combined season-aggregate
+path is untouched (byte-identical SQL shape).
+
+**Page** (`/leaderboards`): labelled format select, format-qualified
+headings/captions ("Top Run Scorers — T20", "Published T20-format totals
+..."), shareable GET URL preserved; copy keeps the honest boundary - a
+user-selected format is a display filter, still not verified career records
+or award eligibility.
+
+Honest limits: real-DB aggregate acceptance stays staged (no live
+PostgreSQL/browser run); verified cross-league linkage/consent and a
+dedicated verified-records model remain open (PUB-03's headline).
+
+New regressions: `leaderboard-filters.test.ts` (+7), `public-visibility.test.ts`
+(+2: base-row switch with SQL shape/join list/format params across all five
+canonical values, plus combined-path invariance), `leaderboards-page.test.tsx`
+(+4); the labels assertion gains the format control.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **104** files, **2,572 tests** (+19) |
+| `npx vitest run` (database) | PASS - **13** files, **199 tests** |
+| `tsc --noEmit` (web + database) | **0 + 0 error lines** |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | none needed - no schema change |
+
+Next source work: ISO-05 resource-scoped grant design, verified-records/
+consent design. Release gates still need Batch 62 evidence + services
+deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
