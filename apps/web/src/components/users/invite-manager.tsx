@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Copy, UserPlus } from "lucide-react"
 import { createInvite, getInvites, resendInvite, revokeInvite } from "@/app/actions/users-invites"
 import { getTeams } from "@/app/actions/teams"
+import { computeMembershipBound, formatMembershipBound, invitationBoundPresets } from "@/lib/invite-expiry-options"
 
 interface InviteRow {
   id: string
@@ -20,6 +21,7 @@ interface InviteRow {
   status: string
   teamId: string | null
   expiresAt: Date | string
+  membershipExpiresAt?: Date | string | null
   createdAt: Date | string
   emailState: string | null
   emailAttemptedAt: Date | string | null
@@ -65,6 +67,7 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
   const [email, setEmail] = useState("")
   const [role, setRole] = useState("team_manager")
   const [teamId, setTeamId] = useState("none")
+  const [bound, setBound] = useState("none")
   const [lastLink, setLastLink] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -100,10 +103,12 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
           email,
           role: role as "team_manager" | "coach" | "scorer",
           teamId: teamId === "none" ? null : teamId,
+          membershipExpiresAt: computeMembershipBound(bound)?.toISOString() ?? null,
         })
         if (currentIdentity.current !== identityKey) return
         setLastLink(res.link)
         setEmail("")
+        setBound("none")
         if (res.emailState === "provider_accepted") {
           toast.success("Invitation created — email provider accepted it; delivery is not confirmed")
         } else if (res.emailState === "unknown") {
@@ -177,7 +182,19 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
               </SelectContent>
             </Select>
           </div>}
+          <div>
+            <Label>Membership bound</Label>
+            <Select disabled={isPending} value={bound} onValueChange={setBound}>
+              <SelectTrigger className="mt-1.5" aria-label="Membership bound for the invited member"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {invitationBoundPresets.map((preset) => (
+                  <SelectItem key={preset.value} value={preset.value}>{preset.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+        <p className="text-xs text-muted-foreground">The membership bound is separate from the link expiry: it bounds the accepted member's league access itself and must be extended by an owner to last longer. A bound is applied at acceptance with you recorded as the granting owner; no bound leaves access unbounded.</p>
         <p className="text-xs text-muted-foreground">Coach and scorer invitations grant a league role only. Scorers still need an explicit match assignment. Team-scoped coach/scorer grants are not available.</p>
         <Button onClick={submit} disabled={isPending || !!loadError || !email || (role === "team_manager" && teamId === "none")}>
           {isPending ? "Creating..." : "Create Invitation"}
@@ -230,6 +247,7 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
                     </td>
                     <td className="py-2 text-xs text-muted-foreground">
                       {new Date(r.expiresAt).toLocaleDateString()}
+                      {r.membershipExpiresAt && <span className="block">Access bound: {formatMembershipBound(r.membershipExpiresAt)}</span>}
                     </td>
                     <td className="py-2 text-right">
                       {r.status === "pending" && (

@@ -3564,6 +3564,47 @@ queue-scoping half, officials approval + server-side XI enforcement, PUB-03
 format-qualified records. Release gates still need Batch 62 evidence +
 services deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 69 - invite-form membership-bound control (16 October 2026)
+
+Completes Batch 68's honest limit: the server contract accepted a proposed
+membership bound, but the owner-facing invite form had no control for it.
+Pure presets + thin wiring, no schema/read changes.
+
+**New `lib/invite-expiry-options.ts` (rule v1).** `invitationBoundPresets`
+(none / 30 / 90 / 180 / 365), `computeMembershipBound(value, now)` returning
+the strictly-future instant or null (no bound; unknown values never invent
+one), and `formatMembershipBound` for list/detail rendering. The server
+action re-validates the serialized instant; presentation never decides truth.
+
+**`invite-manager.tsx`.** "Membership bound" select defaults to no bound and
+resets after a successful creation; `createInvite` receives the computed ISO
+instant (or explicit null). The helper copy states the two expiries are
+separate - the link dies in 7 days, the bound governs the accepted access
+and must be extended by an owner - and that a bound applies at acceptance
+with the issuer recorded as granting owner. The management list renders
+"Access bound: <date>" under the link expiry for rows that carry one.
+
+Honest limits: presets are day-granularity only (no custom instants in the
+form; the action still accepts any valid ISO instant for API callers); the
+accept-page disclosure and redemption semantics were Batch 68's work and are
+unchanged here.
+
+New regressions: `invite-expiry-options.test.ts` (3), `invitation-view.test.tsx`
+(+2 - preset select/copy SSR, submit/reset/access-bound source contracts).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **103** files, **2,512 tests** (+5) |
+| `tsc --noEmit` | **0 error lines** (one test-side nullability fix during the pass) |
+| `git diff --check` | Clean |
+
+Next source work: SCORE-09 queue-scoping half, officials approval +
+server-side XI enforcement, PUB-03 format-qualified records. Release gates
+still need Batch 62 evidence + services deployment. Roadmap: **19 checked /
+60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

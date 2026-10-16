@@ -50,6 +50,20 @@ describe("Invitation verification/UI contracts (SSR and source, not browser/OTP 
     expect(html).toContain("acceptance is not proof of delivery")
     expect(html).toContain('aria-label="Team for invited manager"')
   })
+  it("offers membership-bound presets that are separate from the 7-day link expiry", () => {
+    const html = renderToStaticMarkup(<InviteManager tenantId="league" />)
+    expect(html).toContain('aria-label="Membership bound for the invited member"')
+    expect(html).toContain("No membership bound")
+    expect(html).toContain("separate from the link expiry")
+    expect(html).toContain("recorded as the granting owner")
+  })
+  it("submits the chosen membership bound, resets after success and shows access bounds in the list", () => {
+    const source = readFileSync(new URL("../components/users/invite-manager.tsx", import.meta.url), "utf8")
+    expect(source).toContain("membershipExpiresAt: computeMembershipBound(bound)?.toISOString() ?? null")
+    expect(source).toContain('setBound("none")')
+    expect(source).toContain("Access bound:")
+    expect(source).toContain("formatMembershipBound(r.membershipExpiresAt)")
+  })
   it("clear failure/conflict handling replaces silently retained private invitation data", () => {
     const source = readFileSync(new URL("../components/users/invite-manager.tsx", import.meta.url), "utf8")
     expect(source).toContain("setRows([])")
