@@ -1,7 +1,9 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { teams, matches, matchInnings, venues, players } from "@mtk/database"
+import { teams, matches, matchInnings, venues, players, leagueRegistrations } from "@mtk/database"
+import type { SquadRegistration } from "@mtk/database/lib/registered-squad-eligibility"
+import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import MatchesPage from "@/app/dashboard/matches/page"
 import MatchDetailPage from "@/app/dashboard/matches/[id]/page"
 import NewMatchPage from "@/app/dashboard/matches/new/page"
@@ -9,7 +11,7 @@ import EditMatchPage from "@/app/dashboard/matches/[id]/edit/page"
 import { DeleteButton } from "@/components/shared/delete-button"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), permission: vi.fn(), match: vi.fn(),
-  options: vi.fn(), scorecard: vi.fn(), select: vi.fn(), predicates: [] as any[] }))
+  options: vi.fn(), scorecard: vi.fn(), select: vi.fn(), predicates: [] as any[], registrations: [] as SquadRegistration[], registrationFailure: false }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: (href: string) => { throw new Error(`redirect:${href}`) },
   notFound: () => { throw new Error("not-found") } }))
@@ -31,6 +33,7 @@ const A = "00000000-0000-4000-8000-000000000003"
 const B = "00000000-0000-4000-8000-000000000004"
 const PLAYER = "00000000-0000-4000-8000-000000000005"
 const VENUE = "00000000-0000-4000-8000-000000000006"
+const TOURNAMENT = "00000000-0000-4000-8000-000000000007"
 const fixture = { id: MATCH, tenantId: TENANT, teamAId: A, teamBId: B, venueId: VENUE, manOfMatchId: PLAYER,
   status: "scheduled", scheduledDate: null, matchFormat: "t20", matchType: "friendly", totalOvers: 20 }
 const dialect = new PgDialect()
@@ -43,6 +46,8 @@ function elements(node: any): React.ReactElement<any>[] {
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.predicates.length = 0
+  mocks.registrations = []
+  mocks.registrationFailure = false
   mocks.auth.mockResolvedValue({ userId: "clerk" })
   mocks.tenant.mockResolvedValue(TENANT)
   mocks.permission.mockResolvedValue(undefined)
@@ -52,14 +57,20 @@ beforeEach(() => {
     fielderId: A, dismissalType: "caught" }], bowling: [{ inningsId: "innings", playerId: B }] })
   mocks.select.mockImplementation(() => ({ from: (table: any) => ({ where: (where: any) => {
     const query = dialect.sqlToQuery(where)
-    mocks.predicates.push({ table, ...query })
+    const record = { table, ...query, limit: undefined as number | undefined }
+    mocks.predicates.push(record)
     let rows: any[] = []
     if (table === matches) rows = [fixture]
     if (table === teams) rows = [{ id: query.params[0], name: query.params[0] === A ? "A" : "B" }]
     if (table === venues) rows = [{ name: "Ground", city: "City" }]
     if (table === players) rows = [{ id: PLAYER, name: "Player" }]
     if (table === matchInnings) rows = [{ id: "innings", teamId: A, inningsNumber: 1, totalBalls: 0, totalRuns: 0, totalWickets: 0 }]
-    const chain: any = { limit: async () => rows, orderBy: () => chain, then: (resolve: any) => resolve(rows) }
+    if (table === leagueRegistrations) rows = mocks.registrations
+    const chain: any = { limit: async (limit: number) => {
+      record.limit = limit
+      if (table === leagueRegistrations && mocks.registrationFailure) throw new Error("Registration read unavailable")
+      return rows
+    }, orderBy: () => chain, then: (resolve: any) => resolve(rows) }
     return chain
   } }) }))
 })
@@ -125,5 +136,27 @@ describe("Match dashboard route boundaries", () => {
     expect(tree.some(e => e.type === DeleteButton)).toBe(false)
     await expect(EditMatchPage(params)).rejects.toThrow(`redirect:/dashboard/matches/${MATCH}`)
     expect(mocks.options).not.toHaveBeenCalled()
+  })
+  it("passes known non-approved registrations to readiness instead of hiding them as legacy unknowns", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    mocks.registrations = [{ tenantId: TENANT, tournamentId: TOURNAMENT, teamId: A, status: "withdrawn", squadPlayerIds: [PLAYER] }]
+    const tree = elements(await MatchDetailPage(params))
+    const readiness = tree.find(element => element.type === MatchReadinessCard)!.props.match
+    expect(readiness.teamARegistrationApproved).toBe(false)
+    expect(readiness.teamBRegistrationApproved).toBeUndefined()
+    const query = mocks.predicates.find(row => row.table === leagueRegistrations)
+    expect(query.params).toEqual([TENANT, TOURNAMENT, A, B])
+    expect(query.limit).toBe(3)
+  })
+  it("does not render arbitrary readiness for duplicate registration rows", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    const row = { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: A, status: "approved", squadPlayerIds: [PLAYER] }
+    mocks.registrations = [row, row]
+    await expect(MatchDetailPage(params)).rejects.toThrow("require review")
+  })
+  it("propagates a readiness registration read outage", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    mocks.registrationFailure = true
+    await expect(MatchDetailPage(params)).rejects.toThrow("Registration read unavailable")
   })
 })

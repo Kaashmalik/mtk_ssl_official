@@ -11,6 +11,17 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 60 registered-squad validation (16 October 2026)
+
+Canonical scoring now reads/locks existing `league_registrations` rows with exact
+tenant/tournament/team predicates, deterministic order and a three-row corruption
+bound. Shared code validates approved declared squads and rejects known non-approved
+registration states; the web selector/readiness model agrees. No schema, migration,
+RLS/grant, remote database inspection/write or deployment change occurred. Existing
+row locks do not serialize absent-row inserts; real two-session status/squad races,
+legacy fallback migration and rollback behavior still need disposable-DB acceptance.
+The historical rebuild evidence below is unchanged and was not revalidated here.
+
 ### Batch 59 source-quality gate (16 October 2026)
 
 Web TypeScript checking now passes without the historical error baseline. This batch

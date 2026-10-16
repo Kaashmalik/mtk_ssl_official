@@ -18,7 +18,7 @@ const readyFixture = {
 const check = (input: Parameters<typeof computeMatchReadiness>[0], id: string) =>
   computeMatchReadiness(input).checks.find(c => c.id === id)!
 
-describe("match readiness (COMP-06, v1)", () => {
+describe("match readiness (COMP-06, v2)", () => {
   it("a fully prepared scheduled match is ready", () => {
     const result = computeMatchReadiness(readyFixture)
     expect(result.ready).toBe(true)
@@ -81,5 +81,15 @@ describe("match readiness (COMP-06, v1)", () => {
     const result = computeMatchReadiness(input)
     expect(check(input, "officials").pass).toBe(false)
     expect(result.ready).toBe(true)
+  })
+  it.each(["teamARegistrationApproved", "teamBRegistrationApproved"] as const)("blocks a known non-approved registration on %s", field => {
+    const input = { ...readyFixture, tournamentId: T(2), [field]: false }
+    expect(computeMatchReadiness(input).ready).toBe(false)
+    expect(check(input, "registration")).toMatchObject({ pass: false, blocking: true })
+  })
+  it("preserves approved and missing-registration legacy readiness", () => {
+    const input = { ...readyFixture, tournamentId: T(2), teamARegistrationApproved: true }
+    expect(check(input, "registration")).toMatchObject({ pass: true, blocking: true })
+    expect(computeMatchReadiness(input).ready).toBe(true)
   })
 })

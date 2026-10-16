@@ -18,6 +18,7 @@ import { db, teams, matchInnings, players, venues, leagueRegistrations } from "@
 import { and, eq, asc, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
+import { matchRegistrationMap } from "@mtk/database/lib/registered-squad-eligibility"
 
 export default async function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   noStore()
@@ -153,30 +154,39 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
 
   const formatText = match.matchFormat ? match.matchFormat.toUpperCase() : "T20"
 
-  // Squad declaration state for readiness: a registration that exists but
-// declares no players fails the squads check (owner started, didn't finish);
-// no registration at all is legacy "unknown" and never fails (rule v1).
-let teamASquadDeclared: boolean | undefined
-let teamBSquadDeclared: boolean | undefined
-if (match.tournamentId) {
-  const squadRows = await db.select({
-    teamId: leagueRegistrations.teamId,
-    squadPlayerIds: leagueRegistrations.squadPlayerIds,
-  }).from(leagueRegistrations)
-    .where(and(
-      eq(leagueRegistrations.tenantId, match.tenantId),
-      eq(leagueRegistrations.tournamentId, match.tournamentId),
-      eq(leagueRegistrations.status, "approved"),
-      inArray(leagueRegistrations.teamId, [teamA.id, teamB.id]),
-    ))
-  for (const row of squadRows) {
-    const declared = row.squadPlayerIds !== null && row.squadPlayerIds.length > 0
-    if (row.teamId === teamA.id) teamASquadDeclared = declared
-    if (row.teamId === teamB.id) teamBSquadDeclared = declared
+  // Missing rows preserve legacy unknowns; a known non-approved registration
+  // blocks readiness just as it blocks a new canonical delivery (rule v2).
+  let teamASquadDeclared: boolean | undefined
+  let teamBSquadDeclared: boolean | undefined
+  let teamARegistrationApproved: boolean | undefined
+  let teamBRegistrationApproved: boolean | undefined
+  if (match.tournamentId) {
+    const squadRows = await db.select({
+      tenantId: leagueRegistrations.tenantId,
+      tournamentId: leagueRegistrations.tournamentId,
+      teamId: leagueRegistrations.teamId,
+      status: leagueRegistrations.status,
+      squadPlayerIds: leagueRegistrations.squadPlayerIds,
+    }).from(leagueRegistrations)
+      .where(and(
+        eq(leagueRegistrations.tenantId, match.tenantId),
+        eq(leagueRegistrations.tournamentId, match.tournamentId),
+        inArray(leagueRegistrations.teamId, [teamA.id, teamB.id]),
+      )).orderBy(asc(leagueRegistrations.id)).limit(3)
+    const registrations = matchRegistrationMap(squadRows, match.tenantId, match.tournamentId, [teamA.id, teamB.id])
+    const a = registrations.get(teamA.id)
+    const b = registrations.get(teamB.id)
+    if (a) {
+      teamASquadDeclared = Boolean(a.squadPlayerIds?.length)
+      teamARegistrationApproved = a.status === "approved"
+    }
+    if (b) {
+      teamBSquadDeclared = Boolean(b.squadPlayerIds?.length)
+      teamBRegistrationApproved = b.status === "approved"
+    }
   }
-}
 
-const tossWinnerTeam = match.tossWinnerId === teamA.id ? teamA : teamB
+  const tossWinnerTeam = match.tossWinnerId === teamA.id ? teamA : teamB
   const tossDecisionText = match.tossDecision === "bat" ? "elected to bat" : "elected to bowl"
   const tossText = match.tossWinnerId ? `${tossWinnerTeam.name} won toss and ${tossDecisionText}` : "Toss details not entered yet"
 
@@ -298,6 +308,8 @@ const tossWinnerTeam = match.tossWinnerId === teamA.id ? teamA : teamB
             umpire1: match.umpire1,
             tournamentId: match.tournamentId,
             teamASquadDeclared,
+            teamARegistrationApproved,
+            teamBRegistrationApproved,
             teamBSquadDeclared,
           }}
         />

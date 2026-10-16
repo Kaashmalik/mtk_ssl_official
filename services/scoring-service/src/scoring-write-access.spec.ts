@@ -12,8 +12,9 @@ const BATTER = '00000000-0000-4000-8000-000000000009';
 const BOWLER = '00000000-0000-4000-8000-000000000010';
 const FIELDER = '00000000-0000-4000-8000-000000000011';
 const NONSTRIKER = '00000000-0000-4000-8000-000000000012';
+const TOURNAMENT = '00000000-0000-4000-8000-000000000013';
 const dialect = new PgDialect();
-const match = { tenantId: TENANT, scorerId: ACTOR, teamAId: TEAM_A, teamBId: TEAM_B };
+const match = { tenantId: TENANT, tournamentId: null, scorerId: ACTOR, teamAId: TEAM_A, teamBId: TEAM_B };
 const command = { matchId: TENANT, inningsId: TEAM_A, clientOpId: 'op', over: 0, ball: 1, runs: 0, batsmanId: BATTER, bowlerId: BOWLER };
 function adapter() {
   const roster = new Map([
@@ -28,6 +29,7 @@ function adapter() {
     tenants: { findFirst: jest.fn().mockResolvedValue({ id: TENANT, isActive: true }) },
     teams: { findFirst: jest.fn(async ({ where }) => ({ id: dialect.sqlToQuery(where).params[0], tenantId: TENANT, isActive: true })) },
     players: { findFirst: jest.fn(async ({ where }) => roster.get(String(dialect.sqlToQuery(where).params[0]))) },
+    leagueRegistrations: { findMany: jest.fn().mockResolvedValue([]) },
   } };
   return { mock, tx: mock as unknown as ScoringTransaction, roster };
 }
@@ -122,6 +124,93 @@ describe('Transactional actor membership and assignment', () => {
     await expect(requireScoringWriteAccess(tx, TENANT, undefined as never, match)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...match, tenantId: TEAM_B })).rejects.toBeInstanceOf(ForbiddenException);
     expect(mock.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('Canonical registered-squad participant enforcement', () => {
+  const tournamentMatch = { ...match, tournamentId: TOURNAMENT };
+  const squads = () => [
+    { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: TEAM_A, status: 'approved', squadPlayerIds: [BATTER, NONSTRIKER] },
+    { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: TEAM_B, status: 'approved', squadPlayerIds: [BOWLER, FIELDER] },
+  ];
+
+  it('does not treat a missing tournament column as an explicitly parentless friendly', async () => {
+    const { mock, tx } = adapter();
+    await expect(requireDeliveryParticipants(tx, TENANT, { ...match, tournamentId: undefined } as never, TEAM_A, command)).rejects.toThrow('tournament context unavailable');
+    expect(mock.execute).not.toHaveBeenCalled();
+  });
+
+  it('permits all four participants only after registration locks and before player locks', async () => {
+    const { mock, tx } = adapter();
+    mock.query.leagueRegistrations.findMany.mockResolvedValue(squads());
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, {
+      ...command, wicket: { type: 'run_out', playerId: NONSTRIKER, fielderId: FIELDER },
+    })).resolves.toBeUndefined();
+    const locks = mock.execute.mock.calls.map(([query]) => dialect.sqlToQuery(query));
+    expect(locks).toHaveLength(3);
+    expect(locks[0].sql).toContain('FROM "teams"');
+    expect(locks[1].sql).toContain('FROM "league_registrations"');
+    expect(locks[1].sql).toContain('ORDER BY');
+    expect(locks[1].sql).toContain('LIMIT 3 FOR SHARE');
+    expect(locks[1].params).toEqual([TENANT, TOURNAMENT, ...[TEAM_A, TEAM_B].sort()]);
+    expect(locks[2].sql).toContain('FROM "players"');
+    expect(locks.every(lock => !lock.sql.includes('FROM "tournaments"'))).toBe(true);
+    const options = mock.query.leagueRegistrations.findMany.mock.calls[0][0];
+    expect(dialect.sqlToQuery(options.where).params).toEqual(locks[1].params);
+    expect(options.limit).toBe(3);
+  });
+
+  it.each(['batter', 'bowler', 'dismissed', 'fielder'] as const)('refuses an undeclared %s even when on the active team roster', async participant => {
+    const { mock, tx } = adapter();
+    const rows = squads();
+    const id = { batter: BATTER, bowler: BOWLER, dismissed: NONSTRIKER, fielder: FIELDER }[participant];
+    for (const row of rows) row.squadPlayerIds = row.squadPlayerIds.filter(player => player !== id);
+    mock.query.leagueRegistrations.findMany.mockResolvedValue(rows);
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, {
+      ...command, wicket: { type: 'run_out', playerId: NONSTRIKER, fielderId: FIELDER },
+    })).rejects.toThrow('outside the approved tournament squad');
+    expect(mock.query.players.findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each(['pending', 'withdrawn', 'rejected', 'waitlisted'])('denies an existing %s registration rather than using a legacy fallback', async status => {
+    const { mock, tx } = adapter();
+    const rows = squads();
+    rows[0].status = status;
+    mock.query.leagueRegistrations.findMany.mockResolvedValue(rows);
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, command)).rejects.toThrow('approved tournament squad');
+  });
+
+  it.each([{ squadPlayerIds: null }, { squadPlayerIds: [] }])('permits approved legacy squad $squadPlayerIds while retaining roster checks', async ({ squadPlayerIds }) => {
+    const { mock, tx } = adapter();
+    mock.query.leagueRegistrations.findMany.mockResolvedValue(squads().map(row => ({ ...row, squadPlayerIds })));
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, command)).resolves.toBeUndefined();
+    expect(mock.query.players.findFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not query registrations for a friendly and preserves missing-registration legacy matches', async () => {
+    const { mock, tx } = adapter();
+    await requireDeliveryParticipants(tx, TENANT, match, TEAM_A, command);
+    expect(mock.query.leagueRegistrations.findMany).not.toHaveBeenCalled();
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, command)).resolves.toBeUndefined();
+  });
+
+  it.each([{ tenantId: TEAM_B }, { tournamentId: TEAM_B }, { teamId: ACTOR }])('rejects a remapped registration %s', async change => {
+    const { mock, tx } = adapter();
+    mock.query.leagueRegistrations.findMany.mockResolvedValue([{ ...squads()[0], ...change }]);
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, command)).rejects.toThrow('require review');
+  });
+
+  it('rejects duplicate registration rows', async () => {
+    const { mock, tx } = adapter();
+    mock.query.leagueRegistrations.findMany.mockResolvedValue([squads()[0], squads()[0]]);
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, command)).rejects.toThrow('require review');
+  });
+
+  it('does not treat a registration read outage as legacy eligibility', async () => {
+    const { mock, tx } = adapter();
+    mock.query.leagueRegistrations.findMany.mockRejectedValue(new Error('Registration read unavailable'));
+    await expect(requireDeliveryParticipants(tx, TENANT, tournamentMatch, TEAM_A, command)).rejects.toThrow('Registration read unavailable');
+    expect(mock.query.players.findFirst).not.toHaveBeenCalled();
   });
 });
 

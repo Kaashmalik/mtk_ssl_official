@@ -1,11 +1,12 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { and, eq, inArray, sql } from 'drizzle-orm';
-import { db, users, userTenantRoles, tenants, teams, players } from '@mtk/database';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations } from '@mtk/database';
+import { matchRegistrationMap, registrationAllowsPlayer, type SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
 import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
 
 export type ScoringTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type ScoringMatch = { tenantId: string; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string };
+export type ScoringMatch = { tenantId: string; tournamentId: string | null; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string };
 
 /** Call AFTER the tenant-filtered match lock, BEFORE replay or any write. */
 export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId: string,
@@ -56,9 +57,11 @@ export async function requireMatchTeams(tx: ScoringTransaction, tenantId: string
   }
 }
 
-/** Current roster eligibility only; playing-XI/substitution rules are separate. */
+/** Current roster + registered squad eligibility; immutable XI/substitutions remain separate. */
 export async function requireDeliveryParticipants(tx: ScoringTransaction, tenantId: string,
   match: ScoringMatch, battingTeamId: string, command: DeliveryCommand) {
+  // An explicitly null parent is a friendly. A missing selected column is not.
+  if (match.tournamentId === undefined) throw new BadRequestException('Match tournament context unavailable');
   await requireMatchTeams(tx, tenantId, match);
   if (![match.teamAId, match.teamBId].includes(battingTeamId)) {
     throw new BadRequestException('Innings team does not belong to this match');
@@ -75,6 +78,33 @@ export async function requireDeliveryParticipants(tx: ScoringTransaction, tenant
   }
   if (command.wicket && command.wicket.type !== 'run_out' && command.wicket.playerId !== command.batsmanId) {
     throw new BadRequestException('This dismissal must refer to the striker');
+  }
+  if (match.tournamentId) {
+    const where = and(eq(leagueRegistrations.tenantId, tenantId),
+      eq(leagueRegistrations.tournamentId, match.tournamentId),
+      inArray(leagueRegistrations.teamId, [match.teamAId, match.teamBId].sort()));
+    // Match -> actor/league/membership -> teams -> registrations -> players.
+    // Never acquire a tournament lock after team rows: registration writers use
+    // tournament -> team -> registration. Lock existing rows, including withdrawn
+    // registrations, so a status/squad change cannot race the eligibility check.
+    // Missing-row legacy fallback is not a predicate lock or immutable XI proof.
+    await tx.execute(sql`SELECT ${leagueRegistrations.id} FROM ${leagueRegistrations}
+      WHERE ${where} ORDER BY ${leagueRegistrations.id} LIMIT 3 FOR SHARE`);
+    const rows = await tx.query.leagueRegistrations.findMany({ where,
+      columns: { tenantId: true, tournamentId: true, teamId: true, status: true, squadPlayerIds: true },
+      orderBy: [asc(leagueRegistrations.id)], limit: 3,
+    });
+    let registrations: Map<string, SquadRegistration>;
+    try {
+      registrations = matchRegistrationMap(rows, tenantId, match.tournamentId, [match.teamAId, match.teamBId]);
+    } catch {
+      throw new BadRequestException('Tournament registrations require review');
+    }
+    for (const [id, teamId] of participants) {
+      if (!registrationAllowsPlayer(registrations.get(teamId), id)) {
+        throw new BadRequestException('Player is outside the approved tournament squad');
+      }
+    }
   }
   const ids = [...participants.keys()].sort();
   await tx.execute(sql`SELECT ${players.id} FROM ${players}

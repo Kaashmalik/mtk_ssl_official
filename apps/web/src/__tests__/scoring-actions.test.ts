@@ -128,7 +128,7 @@ describe("Scoring action explicit command bridge", () => {
   })
 
   it("offers only active, available players from the two tenant-scoped teams", async () => {
-    mocks.limit.mockResolvedValueOnce([{ teamAId: input().batsmanId, teamBId: input().bowlerId }])
+    mocks.limit.mockResolvedValueOnce([{ teamAId: input().batsmanId, teamBId: input().bowlerId, tournamentId: null }])
     await getMatchPlayersForScoring(MATCH)
     const queries = mocks.where.mock.calls.slice(1).map(([where]) => new PgDialect().sqlToQuery(where))
     expect(queries.map((query) => query.params)).toEqual([

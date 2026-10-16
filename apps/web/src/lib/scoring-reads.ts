@@ -1,6 +1,7 @@
 import { db, matches, matchInnings, matchBalls, players, teams, tenants, leagueRegistrations } from "@mtk/database"
 import { eq, and, desc, asc, inArray } from "drizzle-orm"
-import { applySquadEligibility } from "@/lib/squad-eligibility"
+import { applyRegistrationEligibility } from "@/lib/squad-eligibility"
+import { matchRegistrationMap, type SquadRegistration } from "@mtk/database/lib/registered-squad-eligibility"
 
 /**
  * Scoring feature reads. Every function is predicated on an explicit,
@@ -70,10 +71,10 @@ export async function readMatchScoringBatch(matchId: string, teamAId: string, te
 /**
  * Both teams' active players for the scoring selectors. Returns null when the
  * match is not in the league; the two player reads are predicated on the same
- * tenant as the match lookup. For tournament matches, approved squads
- * (leagueRegistrations.squadPlayerIds) filter each side's list when declared
- * (lib/squad-eligibility, rule v1) — friendlies and legacy squads without
- * player lists keep the full active roster.
+ * tenant as the match lookup. Registered-squad rule v2 matches the canonical
+ * delivery writer: existing unapproved registrations deny eligibility; approved
+ * nonempty squads restrict it. Friendlies, absent registrations and approved
+ * legacy empty/null squads retain active-roster eligibility.
  */
 export async function readMatchPlayersForScoring(matchId: string, tenantId: string) {
   const [match] = await db.select({ teamAId: matches.teamAId, teamBId: matches.teamBId,
@@ -83,21 +84,22 @@ export async function readMatchPlayersForScoring(matchId: string, tenantId: stri
     .limit(1)
   if (!match) return null
 
-  let squadByTeam = new Map<string, string[]>()
+  if (match.tournamentId === undefined) throw new Error("Match tournament context unavailable")
+  let registrationByTeam = new Map<string, SquadRegistration>()
   if (match.tournamentId) {
     const squads = await db.select({
+      tenantId: leagueRegistrations.tenantId,
+      tournamentId: leagueRegistrations.tournamentId,
       teamId: leagueRegistrations.teamId,
+      status: leagueRegistrations.status,
       squadPlayerIds: leagueRegistrations.squadPlayerIds,
     }).from(leagueRegistrations)
       .where(and(
         eq(leagueRegistrations.tenantId, tenantId),
         eq(leagueRegistrations.tournamentId, match.tournamentId),
-        eq(leagueRegistrations.status, "approved"),
         inArray(leagueRegistrations.teamId, [match.teamAId, match.teamBId]),
-      ))
-    // squadPlayerIds is nullable at the schema level; an approval made before
-  // squads existed reads as null and rule v1 treats it as "no declared squad".
-  squadByTeam = new Map(squads.map(squad => [squad.teamId, squad.squadPlayerIds ?? []]))
+      )).orderBy(asc(leagueRegistrations.id)).limit(3)
+    registrationByTeam = matchRegistrationMap(squads, tenantId, match.tournamentId, [match.teamAId, match.teamBId])
   }
 
   const [teamAPlayers, teamBPlayers] = await Promise.all([
@@ -113,8 +115,8 @@ export async function readMatchPlayersForScoring(matchId: string, tenantId: stri
       .orderBy(asc(players.name)),
   ])
   return {
-    teamA: applySquadEligibility(teamAPlayers, squadByTeam.get(match.teamAId)),
-    teamB: applySquadEligibility(teamBPlayers, squadByTeam.get(match.teamBId)),
+    teamA: applyRegistrationEligibility(teamAPlayers, registrationByTeam.get(match.teamAId)),
+    teamB: applyRegistrationEligibility(teamBPlayers, registrationByTeam.get(match.teamBId)),
   }
 }
 

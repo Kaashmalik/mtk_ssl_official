@@ -1,8 +1,8 @@
 /**
- * Match readiness (COMP-06, v1) — pure computation over a fixture row plus
+ * Match readiness (COMP-06, v2) — pure computation over a fixture row plus
  * optionally-known registration facts. A check is `blocking` when the match
  * should not proceed without it; `ready` is true when every blocking check
- * passes. Rule v1:
+ * passes. Rules:
  *  - Date and venue are blocking; the fixture must be playable.
  *  - A scorer is strongly recommended but not blocking (emergency scoring by
  *    an owner is a supported flow).
@@ -10,6 +10,8 @@
  *    (status toss/live/innings_break imply the toss must exist).
  *  - Squads are checked for tournament fixtures when their declaration state
  *    is known; legacy competitions (unknown/absent) never fail on this.
+ *  - A known non-approved team registration blocks tournament play, matching
+ *    the canonical writer. Missing registrations retain the legacy policy.
  *  - An umpire listing is advisory only; formal official approval is a
  *    separate, still-open capability (schema needed).
  */
@@ -25,6 +27,8 @@ export type MatchReadinessInput = {
   tournamentId?: string | null
   teamASquadDeclared?: boolean
   teamBSquadDeclared?: boolean
+  teamARegistrationApproved?: boolean
+  teamBRegistrationApproved?: boolean
 }
 
 export type ReadinessCheck = {
@@ -79,6 +83,12 @@ export function computeMatchReadiness(input: MatchReadinessInput): {
       // Unknown declaration state (legacy tournament) never blocks.
       pass: (input.teamASquadDeclared ?? true) && (input.teamBSquadDeclared ?? true),
       blocking: false,
+    })
+    checks.push({
+      id: "registration",
+      label: "Known team registrations approved",
+      pass: (input.teamARegistrationApproved ?? true) && (input.teamBRegistrationApproved ?? true),
+      blocking: true,
     })
   }
 

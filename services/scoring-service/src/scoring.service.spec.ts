@@ -4,6 +4,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import { db, matches, matchBalls, matchInnings, scoringEvents, scorecardProjections, auditLogs } from '@mtk/database';
 import { ScoringService, BallEvent } from './scoring.service';
 import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
+import type { SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
 
 const TENANT = '00000000-0000-4000-8000-000000000001';
 const MATCH = '00000000-0000-4000-8000-000000000002';
@@ -12,6 +13,7 @@ const BATTER = '00000000-0000-4000-8000-000000000004';
 const BOWLER = '00000000-0000-4000-8000-000000000005';
 const ACTOR = '00000000-0000-4000-8000-000000000006';
 const TEAM_B = '00000000-0000-4000-8000-000000000007';
+const TOURNAMENT = '00000000-0000-4000-8000-000000000008';
 const dialect = new PgDialect();
 const mockRedis = { del: jest.fn().mockResolvedValue(1), get: jest.fn(), set: jest.fn() };
 let mockTx: ReturnType<typeof createTransaction>;
@@ -47,7 +49,7 @@ function createTransaction() {
       totalBalls: 0, extras: 0, byes: 0, legByes: 0, wides: 0, noBalls: 0,
       updatedAt: new Date('2026-10-12T12:00:00.000Z'),
     },
-    match: { id: MATCH, tenantId: TENANT, scorerId: ACTOR as string | null, backupScorerId: null as string | null, teamAId: TENANT, teamBId: TEAM_B,
+    match: { id: MATCH, tenantId: TENANT, tournamentId: null as string | null, scorerId: ACTOR as string | null, backupScorerId: null as string | null, teamAId: TENANT, teamBId: TEAM_B,
       winnerId: null as string | null, result: null as string | null, manOfMatchId: null as string | null,
       status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
@@ -57,6 +59,7 @@ function createTransaction() {
       [BOWLER, { id: BOWLER, tenantId: TENANT, teamId: TEAM_B, isActive: true, status: 'active', name: 'Bowler' }],
     ]),
     balls: [] as Array<Record<string, any>>,
+    registrations: [] as SquadRegistration[],
     events: [] as Array<Record<string, any>>,
     audits: [] as Array<Record<string, any>>,
     projection: {} as Record<string, any>,
@@ -77,6 +80,7 @@ function createTransaction() {
         const id = String(dialect.sqlToQuery(where).params[0]);
         return { id, tenantId: TENANT, isActive: true };
       }) },
+      leagueRegistrations: { findMany: jest.fn(async (_options: unknown) => state.registrations) },
       scorecardProjections: { findFirst: jest.fn(async () => state.projection) },
       matchBalls: { findFirst: jest.fn(async ({ where }) => {
         const query = dialect.sqlToQuery(where);
@@ -224,6 +228,61 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.balls).toHaveLength(1);
     expect(mockTx.state.events).toHaveLength(1);
     expect(publisher.publishBallEvent).toHaveBeenCalledTimes(1);
+  });
+
+  function registeredMatch() {
+    mockTx.state.match.tournamentId = TOURNAMENT;
+    mockTx.state.registrations = [
+      { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: TENANT, status: 'approved', squadPlayerIds: [BATTER] },
+      { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: TEAM_B, status: 'approved', squadPlayerIds: [BOWLER] },
+    ];
+  }
+
+  it('records a delivery using the approved declared tournament squads', async () => {
+    registeredMatch();
+    await service.recordBall(TENANT, ACTOR, ball({ runs: 4 }));
+    expect(mockTx.state.balls).toHaveLength(1);
+    expect(mockTx.state.events).toHaveLength(1);
+    expect(mockTx.state.innings.totalRuns).toBe(4);
+  });
+
+  it.each([0, 1])('rejects an undeclared participant on side %s before ball/event/projection writes', async side => {
+    registeredMatch();
+    mockTx.state.registrations[side].squadPlayerIds = [ACTOR];
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('approved tournament squad');
+    expect(mockTx.insert).not.toHaveBeenCalled();
+    expect(mockTx.update).not.toHaveBeenCalled();
+    expect(publisher.publishBallEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects a withdrawn registration before any new delivery effect', async () => {
+    registeredMatch();
+    mockTx.state.registrations[0].status = 'withdrawn';
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('approved tournament squad');
+    expect(mockTx.state.balls).toHaveLength(0);
+    expect(mockTx.state.events).toHaveLength(0);
+    expect(mockTx.state.innings.totalBalls).toBe(0);
+  });
+
+  it('acknowledges an accepted operation after withdrawal but blocks a new operation', async () => {
+    registeredMatch();
+    const input = ball({ runs: 1 });
+    const accepted = await service.recordBall(TENANT, ACTOR, input);
+    mockTx.state.registrations[0].status = 'withdrawn';
+    expect(await service.recordBall(TENANT, ACTOR, input)).toMatchObject({ ballId: accepted.ballId, replayed: true });
+    await expect(service.recordBall(TENANT, ACTOR, ball({ ball: 2 }))).rejects.toThrow('approved tournament squad');
+    expect(mockTx.state.balls).toHaveLength(1);
+    expect(mockTx.state.events).toHaveLength(1);
+    expect(mockTx.state.innings.totalRuns).toBe(1);
+    expect(publisher.publishBallEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates a squad lookup failure before any delivery write', async () => {
+    registeredMatch();
+    mockTx.query.leagueRegistrations.findMany.mockRejectedValue(new Error('Squad lookup unavailable'));
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('Squad lookup unavailable');
+    expect(mockTx.insert).not.toHaveBeenCalled();
+    expect(mockTx.update).not.toHaveBeenCalled();
   });
 
   it('rejects reuse of an operation ID with changed contents', async () => {

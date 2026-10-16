@@ -3279,6 +3279,37 @@ This makes type checking usable as a gate; it does not certify real-DB concurren
 browser/provider behavior or production rollout. Roadmap stays **19 checked / 60 open /
 79 IDs**; canonical declared-squad enforcement is the next source priority.
 
+### Batch 60 — canonical registered-squad enforcement (16 October 2026)
+
+COMP-06 source slice. Declared squad filtering previously existed only in web selectors,
+so a crafted canonical delivery could use an active team player outside that squad.
+The shared pure `registered-squad-eligibility` policy now governs both web selection
+and canonical participant validation. Existing non-approved registration states deny
+eligibility rather than re-enabling the whole roster. Friendly/missing-registration and
+approved null/empty legacy squads preserve the established compatibility behavior.
+
+The canonical transaction locks side registrations by stable ID after team rows and
+before player rows, with exact tenant/tournament/side predicates and a third-row corruption
+bound. No tournament lock is acquired after teams. All four participant roles are checked
+before effects; duplicate/mis-scoped rows and read failures fail closed. Accepted replay
+still resolves its original effect before current-roster/squad checks, while a new command
+after withdrawal is denied. Selectors and readiness now use the same registration state,
+including known withdrawals; readiness blocks known non-approved registrations.
+
+Missing tournament context also fails closed in writer/selector code; only an explicit
+null parent means a friendly. The new shared helper requires the normal workspace package
+artifact build at rollout, with web and service deployed together.
+
+Fresh verification: web **2,473 tests / 99 files**, database **146 / 9 files**, scoring
+**217 / 8 suites** — **2,836 passing tests** (+59), all processes exit 0. Web type check
+also exits **0**; `git diff --check` clean. New coverage: web +17, shared policy +18,
+canonical scoring +24.
+No build/schema/migration, RLS/grant, remote database, provider or deployment changes.
+Mocked transactions/SQL ordering are not real PostgreSQL locking or rollback evidence;
+missing-row legacy fallback is not a predicate lock or immutable XI declaration.
+Official approval, frozen XI/substitution history and real-DB/browser acceptance remain
+open. Roadmap stays **19 checked / 60 open / 79 IDs**, release gate default-off.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
