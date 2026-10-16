@@ -3964,6 +3964,65 @@ Next source work: ISO-05 remainder (verified consented career linkage sits
 with PUB-03), release gates (Batch 62 evidence + services deployment).
 Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 76 - legacy `users.role` / `users.tenantIds` fallback retired (ISO-06)
+
+The last legacy authorization carriers are retired. Inventory first, data
+second, code third, schema last - in that order, so nothing was dropped
+while a reader still used it.
+
+**Remote data reconciliation (Supabase MCP `execute_sql`):** `users.role`
+held exactly **one** row, `super_admin` (platform staff); zero league-role
+rows anywhere. `users.tenant_ids` was non-empty on one row whose single
+entry is already superseded by that user's `user_tenant_roles` membership.
+No data rewrite was needed - only enforcement.
+
+**Code retirement (writes first):** `createTenant` no longer synchronizes
+the legacy `tenantIds` array (the authoritative membership row was already
+written inside the same transaction; a queued-row regression now proves
+`tx.update` is never called, including when stale `tenantIds` data is
+present). The unused `tenantIds` projection left the read too. The admin
+console's tenant list now counts users from **membership rows**
+(`countDistinct(userTenantRoles.userId)`) instead of
+`ANY(users.tenantIds)`, and its user-directory role filter accepts platform
+roles only (`super_admin`/`fan`) - a league-role filter is a visible 400,
+never a silent zero-result miss.
+
+**Schema enforcement (MCP migration
+`retire_legacy_user_authorization`, applied remotely):**
+`ALTER TABLE ... ADD CONSTRAINT users_role_platform_only CHECK (role IN
+('super_admin','fan'))` - the enum keeps league values for data
+compatibility but they are now unwritable at this column - plus column
+comments marking `users.role` platform-only and `users.tenant_ids`
+deprecated. Drizzle mirror updated to match (docstrings + `check`).
+`supabase/MIGRATION_STATUS.md` updated; local SQL mirror added.
+
+**Kept, deliberately:** `users.role = 'super_admin'` remains the platform
+console's login check (`verifySuperAdmin`, `isSuperAdmin`) and the
+`protectedAccess` guard on member directory/management - these are
+platform-identity reads, not league authorization. The Clerk webhook still
+seeds `role: "fan"` (a platform value). `super-admin.ts`'s DEV-only email
+fallback retains its loud warning and production guard.
+
+Honest limits: the PG enum still contains league values (PG cannot drop
+enum values; the CHECK makes them unreachable); `tenant_ids` column itself
+stays (commented deprecated) until a future destructive migration once
+staging confirms no tooling reads it; admin routes are exercised by tsc
+only (no admin test harness exists - recorded, not claimed).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **104** files, **2,573 tests** (+1) |
+| `npx vitest run` (database) | PASS - **14** files, **208 tests** |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | `retire_legacy_user_authorization` - pre-flight 0 league roles, post-apply constraint verified |
+
+Next source work: release gates (Batch 62 evidence + services deployment
+remain the unmet close-out), PUB-03 verified-records/consent design.
+Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

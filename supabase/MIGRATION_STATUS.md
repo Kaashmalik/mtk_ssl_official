@@ -3,6 +3,19 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **16 October 2026 (Batch 76) - `retire_legacy_user_authorization` APPLIED to
+> the remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
+> `apply_migration`.** ISO-06: adds `users_role_platform_only`
+> `CHECK (role IN ('super_admin','fan'))` (blocks legacy writers from putting
+> league roles on `users.role`; pre-flight verified 0 league-role rows, so no
+> violation) + column comments marking `users.role` as a platform-role-only
+> carrier and `users.tenant_ids` as a deprecated write-disabled fallback.
+> Authoritative league membership remains `user_tenant_roles` (SCORE-09
+> status/expiry). Code retirement in the same batch: `createTenant` no longer
+> writes the `tenant_ids` array, and the admin console counts tenant users
+> from membership rows. Post-apply SQL verified the constraint definition and
+> remote data (1 super_admin user, membership row present).
+
 > **16 October 2026 (Batch 73) - `umpire_assignment_approval` APPLIED to the remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`.** Local file: `supabase/migrations/20261016190000_umpire_assignment_approval.sql` (adds `matches.umpire_approval_required boolean NOT NULL DEFAULT false` and `matches.umpire_approved_at timestamptz` + column comments; additive/idempotent, no RLS/grant changes, member-umpire and free-text-only matches stay false so existing readiness semantics survive without backfill). Post-apply SQL verified all six umpire columns together. Consent enforcement is application-side (locked, conditional, audited `approveUmpireAssignmentInMatch` with a SCORE-09 effective-membership re-check, also retrofitted to the scorer-consent writer); real-DB acceptance remains staged. Batch 62's release-evidence requirements remain unmet.
 
 > **16 October 2026 (Batch 72) - `member_umpires` APPLIED to the remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`.**

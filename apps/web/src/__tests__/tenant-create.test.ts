@@ -54,7 +54,7 @@ function txMock({ owned = null as unknown, insertError = null as unknown } = {})
   const update = vi.fn(() => ({ set: () => ({ where: async () => {} }) }))
   ;(db as any).transaction = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
     cb({ execute, select: txSelect, insert, update }))
-  return { execute, txSelect, recheckConds, insert, returning }
+  return { execute, txSelect, recheckConds, insert, update, returning }
 }
 
 beforeEach(() => {
@@ -63,14 +63,20 @@ beforeEach(() => {
 })
 
 describe("createTenant serializes the one-league cap", () => {
-  it("locks the actor row and re-checks ownership inside the transaction before writing", async () => {
-    queueOuterSelects([[{ id: USER, tenantIds: [], isActive: true }], [], []])
+  it.each([
+    ["no tenantIds in the projection", [[{ id: USER, isActive: true }], [], []]],
+    ["tenantIds data present is still ignored", [[{ id: USER, tenantIds: ["stale-tenant"], isActive: true }], [], []]],
+  ])("%s: locks the actor row and re-checks ownership inside the transaction before writing", async (_name, rows) => {
+    queueOuterSelects(rows)
     const tx = txMock()
 
     const response = await createTenant({ name: "My League", slug: "my-league" })
 
     expect(response.success).toBe(true)
     expect(response.tenant).toEqual(CREATED)
+    // ISO-06 regression: the legacy users.tenant_ids array is write-disabled;
+    // only the authoritative user_tenant_roles membership row is written.
+    expect(tx.update).not.toHaveBeenCalled()
     // The cap is enforced under a row lock, not only by the racy pre-check.
     expect(tx.execute).toHaveBeenCalledTimes(1)
     const locked = dialect.sqlToQuery(tx.execute.mock.calls[0][0])

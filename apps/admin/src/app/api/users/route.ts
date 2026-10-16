@@ -3,6 +3,12 @@ import { verifySuperAdmin } from "@/lib/admin-auth";
 import { db, users } from "@mtk/database";
 import { desc, ilike, eq, and, type SQL } from "drizzle-orm";
 
+// The platform console lists platform-role carriers only. users.role no
+// longer carries league roles (ISO-06): those live exclusively in
+// user_tenant_roles and are managed per league, so filtering this
+// platform-wide directory by them is a visible 400, never a silent miss.
+const PLATFORM_ROLE_FILTERS = ["super_admin", "fan"] as const;
+
 export async function GET(request: Request) {
   const adminId = await verifySuperAdmin();
   if (!adminId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -15,7 +21,15 @@ export async function GET(request: Request) {
 
     const conditions: SQL[] = [];
     if (search) conditions.push(ilike(users.email, `%${search}%`));
-    if (role) conditions.push(eq(users.role, role as typeof users.role.enumValues[number]));
+    if (role) {
+      if (!(PLATFORM_ROLE_FILTERS as readonly string[]).includes(role)) {
+        return NextResponse.json(
+          { error: "League roles are managed per league; filter by a platform role (super_admin, fan)" },
+          { status: 400 },
+        );
+      }
+      conditions.push(eq(users.role, role as (typeof PLATFORM_ROLE_FILTERS)[number]));
+    }
     if (status === "active") conditions.push(eq(users.isActive, true));
     if (status === "suspended") conditions.push(eq(users.isActive, false));
 

@@ -2,8 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from "next/server";
 import { verifySuperAdmin } from "@/lib/admin-auth";
-import { db, tenants, tenantBranding, tournaments, teams, users } from "@mtk/database";
-import { desc, eq, sql, count } from "drizzle-orm";
+import { db, tenants, tenantBranding, tournaments, teams, userTenantRoles } from "@mtk/database";
+import { desc, eq, count, countDistinct } from "drizzle-orm";
 
 // GET /api/tenants - List all tenants
 export async function GET() {
@@ -36,11 +36,12 @@ export async function GET() {
           .from(teams)
           .where(eq(teams.tenantId, tenant.id));
 
-        // For users, tenant.id is in users.tenantIds array
+        // Authoritative membership linkage (ISO-06): user_tenant_roles rows,
+        // not the retired users.tenant_ids fallback array.
         const usersCountResult = await db
-          .select({ count: count() })
-          .from(users)
-          .where(sql`${tenant.id} = ANY(${users.tenantIds})`);
+          .select({ count: countDistinct(userTenantRoles.userId) })
+          .from(userTenantRoles)
+          .where(eq(userTenantRoles.tenantId, tenant.id));
 
         return {
           ...tenant,

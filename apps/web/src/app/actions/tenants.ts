@@ -117,7 +117,7 @@ export async function createTenant(input: CreateTenantInput) {
   // Tenant ownership uses the database UUID. Clerk IDs are strings and must not
   // be written into or compared directly with the UUID owner_id column.
   const [dbUser] = await db
-    .select({ id: users.id, tenantIds: users.tenantIds, isActive: users.isActive })
+    .select({ id: users.id, isActive: users.isActive })
     .from(users)
     .where(eq(users.clerkId, userId))
     .limit(1)
@@ -206,15 +206,8 @@ export async function createTenant(input: CreateTenantInput) {
         target: [userTenantRoles.userId, userTenantRoles.tenantId],
       })
 
-      // Keep the legacy membership array synchronized until all consumers have
-      // moved to user_tenant_roles. Do not set the user's global role here.
-      await tx
-        .update(users)
-        .set({
-          tenantIds: [...(Array.isArray(dbUser.tenantIds) ? dbUser.tenantIds : []), createdTenant.id],
-          updatedAt: now,
-        })
-        .where(eq(users.id, dbUser.id))
+      // The tenant-scoped membership row above is the authoritative linkage;
+      // the legacy users.tenant_ids fallback is no longer written (ISO-06).
 
       return createdTenant
     } catch (error) {
