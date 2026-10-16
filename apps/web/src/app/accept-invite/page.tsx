@@ -62,6 +62,7 @@ export default function AcceptInvitePage() {
         {loaded && <Button variant="outline" disabled={isPending} onClick={() => setReloadKey(key => key + 1)}>Recheck invitation</Button>}
         {preview && identityLoaded && <>
           <p className="text-sm">Invited mailbox: <b>{preview.recipientHint}</b></p>
+          {preview.membershipExpiresAt && <p className="rounded-md border px-3 py-2 text-sm" role="note">This membership is bounded: access in {preview.tenantName} expires on <b>{new Date(preview.membershipExpiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</b>. Extending it afterwards requires the league owner.</p>}
           {!isSignedIn ? <div className="space-y-2">
             <Button asChild className="w-full"><Link href={`/sign-in?redirect_url=${encodeURIComponent(returnPath)}`}>Sign in to verify and accept</Link></Button>
             <Button asChild variant="outline" className="w-full"><Link href={`/sign-up?redirect_url=${encodeURIComponent(returnPath)}`}>Create an account</Link></Button>

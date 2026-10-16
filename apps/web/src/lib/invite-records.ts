@@ -83,6 +83,7 @@ export async function readLeagueInvites(tenantId: string) {
   return db.select({ id: userInvites.id, email: userInvites.email, role: userInvites.role,
     status: sql<string>`CASE WHEN ${userInvites.status} = 'pending' AND ${userInvites.expiresAt} <= clock_timestamp() THEN 'expired' ELSE ${userInvites.status} END`,
     teamId: userInvites.teamId, expiresAt: userInvites.expiresAt, acceptedAt: userInvites.acceptedAt, createdAt: userInvites.createdAt,
+    membershipExpiresAt: userInvites.membershipExpiresAt,
     emailState: userInvites.emailState, emailAttemptedAt: userInvites.emailAttemptedAt,
   }).from(userInvites).where(eq(userInvites.tenantId, tenantId)).orderBy(desc(userInvites.createdAt)).limit(100)
 }
@@ -114,7 +115,8 @@ export async function findPendingInvitePreview(tokenHash: string) {
     if (!team || team.id !== invite.teamId || team.tenantId !== invite.tenantId || team.isActive !== true) return null
     teamName = team.name
   }
-  return { recipientEmail: invite.email, role: invite.role, leagueName: league.name, teamName, expiresAt: invite.expiresAt }
+  return { recipientEmail: invite.email, role: invite.role, leagueName: league.name, teamName, expiresAt: invite.expiresAt,
+    membershipExpiresAt: invite.membershipExpiresAt }
 }
 
 /**
@@ -131,8 +133,13 @@ export async function issueInviteInLeague(input: {
   teamId: string | null
   tokenHash: string
   expiresAt: Date
+  /** Optional membership bound proposed at invite time; must strictly postdate now. */
+  membershipExpiresAt: Date | null
 }): Promise<InviteAuthority & { invite: { id: string } }> {
-  const { tenantId, actorId, clerkId, email, role, teamId, tokenHash, expiresAt } = input
+  const { tenantId, actorId, clerkId, email, role, teamId, tokenHash, expiresAt, membershipExpiresAt } = input
+  if (membershipExpiresAt !== null && !(membershipExpiresAt.getTime() > Date.now())) {
+    throw new Error("The proposed membership expiry must be in the future")
+  }
   return db.transaction(async tx => {
     const authority = await lockInvitationAuthority(tx, tenantId, actorId, undefined, true, clerkId)
     if (teamId) {
@@ -148,10 +155,11 @@ export async function issueInviteInLeague(input: {
     ) })
     if (duplicate) throw new Error("A live pending invite already exists. Revoke it before creating a replacement.")
     const [invite] = await tx.insert(userInvites).values({ tenantId, email, role,
-      teamId, tokenHash, status: "pending", invitedBy: actorId, expiresAt,
+      teamId, tokenHash, status: "pending", invitedBy: actorId, expiresAt, membershipExpiresAt,
     }).returning({ id: userInvites.id })
     if (!invite) throw new Error("Could not save invitation")
-    await auditInvite(tx, tenantId, actorId, "INVITE_CREATE", { inviteId: invite.id, role, teamId })
+    await auditInvite(tx, tenantId, actorId, "INVITE_CREATE", { inviteId: invite.id, role, teamId,
+      membershipExpiresAt: membershipExpiresAt ? membershipExpiresAt.toISOString() : null })
     return { invite, ...authority }
   })
 }
@@ -258,7 +266,23 @@ export async function claimInvite(input: {
       eq(userInvites.status, "pending"), sql`${userInvites.expiresAt} > clock_timestamp()`,
     )).returning({ id: userInvites.id })
     if (!claimed) throw new Error("Invitation expired, revoked or already used")
-    if (!membership) await tx.insert(userTenantRoles).values({ userId: actor.id, tenantId: invite.tenantId, role: invite.role, isPrimary: false })
+    // Apply the invited membership bound (SCORE-09): new memberships carry it
+    // with the issuing owner as provenance; an existing active membership of
+    // the same role has its bound replaced (issuer is a verified active owner,
+    // and this write is audited below). No proposed bound leaves membership
+    // rows untouched - redemption is never an unbound-ing.
+    const proposedBound = invite.membershipExpiresAt ?? null
+    if (!membership) {
+      const membershipValues: typeof userTenantRoles.$inferInsert = { userId: actor.id, tenantId: invite.tenantId, role: invite.role, isPrimary: false }
+      if (proposedBound) {
+        membershipValues.expiresAt = proposedBound
+        membershipValues.delegatedByUserId = invite.invitedBy
+      }
+      await tx.insert(userTenantRoles).values(membershipValues)
+    } else if (proposedBound) {
+      await tx.update(userTenantRoles).set({ expiresAt: proposedBound, delegatedByUserId: invite.invitedBy })
+        .where(and(eq(userTenantRoles.id, membership.id), eq(userTenantRoles.tenantId, invite.tenantId)))
+    }
     if (invite.teamId) {
       const [assigned] = await tx.update(teams).set({ managerId: actor.id, updatedAt: new Date() }).where(and(
         eq(teams.id, invite.teamId), eq(teams.tenantId, invite.tenantId), eq(teams.isActive, true), or(isNull(teams.managerId), eq(teams.managerId, actor.id)),
@@ -266,9 +290,12 @@ export async function claimInvite(input: {
       if (!assigned) throw new Error("Team assignment changed")
     }
     await auditInvite(tx, invite.tenantId, actor.id, "INVITE_ACCEPT", { inviteId: invite.id, issuerId: invite.invitedBy,
-      role: invite.role, teamId: invite.teamId, membershipCreated: !membership })
+      role: invite.role, teamId: invite.teamId, membershipCreated: !membership,
+      membershipExpiresAt: proposedBound ? proposedBound.toISOString() : null, membershipBoundApplied: proposedBound !== null })
     await tx.insert(notifications).values({ tenantId: invite.tenantId, userId: actor.id, type: "invite_accepted", channel: "in_app",
-      title: "Invitation accepted", body: `You joined as ${invite.role.replaceAll("_", " ")}.`, status: "delivered", deliveredAt: new Date() })
+      title: "Invitation accepted", body: proposedBound
+        ? `You joined as ${invite.role.replaceAll("_", " ")}. Your access is bounded until ${proposedBound.toISOString().slice(0, 10)}.`
+        : `You joined as ${invite.role.replaceAll("_", " ")}.`, status: "delivered", deliveredAt: new Date() })
     return { role: invite.role, tenantId: invite.tenantId }
   })
 }

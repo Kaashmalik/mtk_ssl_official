@@ -16,6 +16,8 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const createInviteSchema = z.object({
   tenantId: z.string().uuid(), email: z.string().trim().email("Enter a valid email address"),
   role: invitationRole, teamId: z.string().uuid().optional().nullable(),
+  /** Optional membership bound proposed at invite time (SCORE-09); absent/NULL proposes none. */
+  membershipExpiresAt: z.string().datetime({ offset: true }).nullable().optional(),
 }).strict()
 export type CreateInviteInput = z.infer<typeof createInviteSchema>
 export type { InvitationEmailState }
@@ -66,6 +68,7 @@ export async function createInvite(input: CreateInviteInput) {
     tenantId: context.tenantId, actorId: context.actorId, clerkId: context.clerkId,
     email, role: validated.role, teamId, tokenHash: hashToken(token),
     expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    membershipExpiresAt: validated.membershipExpiresAt ? new Date(validated.membershipExpiresAt) : null,
   })
   const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
   const emailState = await sendInviteEmail(result.invite.id, `league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link)
@@ -124,7 +127,8 @@ export async function getInvitePreview(token: string) {
   const provider = userId ? await currentUser() : null
   const matches = provider?.id === userId && provider.emailAddresses.some(address => normalizeInvitationEmail(address.emailAddress) === normalizeInvitationEmail(preview.recipientEmail))
   return { recipientHint: invitationRecipientHint(preview.recipientEmail), recipientEmail: matches ? preview.recipientEmail : null,
-    role: preview.role, tenantName: preview.leagueName, teamName: preview.teamName, status: "pending" as const, expiresAt: preview.expiresAt }
+    role: preview.role, tenantName: preview.leagueName, teamName: preview.teamName, status: "pending" as const, expiresAt: preview.expiresAt,
+    membershipExpiresAt: preview.membershipExpiresAt }
 }
 
 export async function acceptInvite(token: string) {

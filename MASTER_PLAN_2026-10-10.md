@@ -3505,6 +3505,65 @@ scoring-service decisions), PUB-03 format-qualified records. Release gates
 still need Batch 62 evidence + services deployment. Roadmap: **19 checked /
 60 open / 79 IDs** (expiry display closed inside IAM-02/score-09 surfaces).
 
+### Batch 68 - invitation-proposed membership expiry bounds (16 October 2026)
+
+IAM-03/04 interplay with SCORE-09 - the second half Batch 67 left open. An
+invitation could bound only its own link (`user_invites.expires_at`); it could
+not propose, disclose or apply an expiry bound on the league membership the
+recipient would get.
+
+**Migration (applied to the remote project).** Additive, idempotent
+`20261016150000_invite_membership_expiry.sql`: nullable
+`user_invites.membership_expires_at`, CHECK `bound IS NULL OR bound >
+created_at`, column comment; no RLS/grant/FK changes. Applied via Supabase MCP;
+post-apply SQL verified the column; advisors show only the pre-existing
+baseline (no new lint). Drizzle schema mirrors the column with the link-vs-
+membership distinction documented.
+
+**Issuance** (`issueInviteInLeague`): accepts an optional proposed bound,
+rejects non-future bounds before opening the transaction, persists it and folds
+it into the audited `INVITE_CREATE` payload. `createInvite` parses
+`membershipExpiresAt` (ISO-8601 with offset, optional/nullable).
+
+**Redemption** (`claimInvite`, re-read under the same lock chain): a proposed
+bound provisions a NEW membership with `expires_at` + `delegated_by_user_id`
+provenance (issuing owner); an existing active same-role membership has its
+bound replaced (the conditional claim + issuer authority recheck precede the
+write; version bump is the DB trigger's job); an invite WITHOUT a bound
+rewrites nothing - redemption is never an unbind. `INVITE_ACCEPT` audits
+`membershipExpiresAt`/`membershipBoundApplied`, and the in-app notification
+states the bound date.
+
+**Disclosure**: bearer preview returns the bound (still no hashes/issuer IDs),
+the accept page renders "access expires on <date>" before acceptance, and the
+management list selects the bound for owner review.
+
+Honest limits: this is application-level enforcement inside the locked,
+audited claim transaction - real-DB acceptance of the bound-application race
+and of email-scoped redemption remains a staging/replay gate; no invite-form
+UI control was added yet (the server contract accepts the field); SCORE-09's
+queue-scoping half remains open.
+
+New regressions: `membership-invites.test.ts` (+7 - issuance persists/audits
+bound; stale/malformed bound rejected pre-transaction; bounded provision with
+provenance; bound replacement on existing membership; no-bound-never-unbinds;
+disclosure in preview; list exposure without hashes).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **102** files, **2,507 tests** (+7) |
+| `npx vitest run` (database) | PASS - **13** files, **199 tests** |
+| `tsc --noEmit` (web + database) | **0 + 0 error lines** |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | `invite_membership_expiry` applied + SQL-verified |
+
+Next source work: invite-form expiry control + IAM-02 detail polish, SCORE-09
+queue-scoping half, officials approval + server-side XI enforcement, PUB-03
+format-qualified records. Release gates still need Batch 62 evidence +
+services deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

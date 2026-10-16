@@ -3,6 +3,20 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **16 October 2026 (Batch 68) - `invite_membership_expiry` APPLIED to the remote
+> Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
+> `apply_migration`.** Local file: `supabase/migrations/20261016150000_invite_membership_expiry.sql`
+> (adds nullable `user_invites.membership_expires_at` + a chronological CHECK +
+> column COMMENT; additive/idempotent, no RLS/grant changes, no FK). Post-apply
+> verification via MCP SQL: column exists (`timestamp with time zone`, NULL
+> allowed). Security/performance advisors show only the pre-existing baseline
+> (including the long-standing `user_invites` RLS-without-policies INFO and the
+> `invited_by`/`team_id` unindexed-FK INFO findings that pre-date this change);
+> the new column introduces no new lint. Redemption-side enforcement is
+> application-level (locked, audited `claimInvite`); real-DB acceptance of the
+> bound-application race still needs staging, and Batch 62's release-evidence
+> requirements remain unmet.
+
 > **16 October 2026 (later) — BOTH Batch 63/65 migrations APPLIED to the remote
 > Supabase project (`anxstufkbqnjkxgksfkn`, ap-southeast-1, ACTIVE_HEALTHY) via
 > the Supabase MCP `apply_migration`**, byte-equal to the repository files.

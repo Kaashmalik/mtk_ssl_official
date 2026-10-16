@@ -44,7 +44,15 @@ export const userInvites = pgTable(
     tokenHash: text("token_hash").notNull(),
     status: text("status").notNull().default("pending"), // pending | accepted | revoked | expired
     invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
+    /** Instant the invitation link stops redeemable; independent of any membership bound. */
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * Optional membership expiry bound proposed by the issuing owner (SCORE-09).
+     * Applied to the redeemed membership (with delegated_by_user_id provenance)
+     * at acceptance; NULL proposes no bound and redemption leaves any existing
+     * bound untouched. Distinct from the link expiry above.
+     */
+    membershipExpiresAt: timestamp("membership_expires_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     /** Last recorded dispatch outcome; tracks attempts without claiming delivery. */
     emailState: text("email_state").$type<InvitationEmailState>(),

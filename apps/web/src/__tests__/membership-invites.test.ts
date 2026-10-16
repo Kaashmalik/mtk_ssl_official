@@ -431,3 +431,73 @@ describe("Owner invitation resend with persisted dispatch state", () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })
+describe("Invitation-proposed membership bounds (SCORE-09)", () => {
+  const bound = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+  const bounded = { ...invite, membershipExpiresAt: bound }
+  const activeRecipientMembership = { id: B, userId: ALI, tenantId: A, role: "scorer", status: "active" }
+
+  it("issuance persists the proposed bound and audits it; no bound records NULL explicitly", async () => {
+    issuing()
+    await createInvite({ tenantId: A, email: " ALI@example.test ", role: "scorer", membershipExpiresAt: bound.toISOString() })
+    expect(mocks.values.mock.calls[0][0]).toEqual({ tenantId: A, email: "ali@example.test", role: "scorer", teamId: null,
+      tokenHash: expect.any(String), status: "pending", invitedBy: OWNER, expiresAt: expect.any(Date), membershipExpiresAt: bound })
+    expect(mocks.values.mock.calls[0][0].tokenHash).toHaveLength(64)
+    const audit = mocks.values.mock.calls[1][0]
+    expect(audit.payload).toMatchObject({ inviteId: INVITE, role: "scorer", membershipExpiresAt: bound.toISOString() })
+  })
+
+  it("rejects a stale or malformed proposed bound before any transaction", async () => {
+    issuing()
+    await expect(createInvite({ tenantId: A, email: "ali@example.test", role: "scorer", membershipExpiresAt: new Date(Date.now() - 1_000).toISOString() })).rejects.toThrow("must be in the future")
+    await expect(createInvite({ tenantId: A, email: "ali@example.test", role: "scorer", membershipExpiresAt: "next month" })).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("redemption provisions the new membership with the bound and issuing-owner provenance", async () => {
+    mocks.initial.mockResolvedValue(bounded)
+    mocks.lockedInvite.mockResolvedValue(bounded)
+    await acceptInvite(TOKEN)
+    expect(mocks.insert.mock.calls.map(([table]) => table)).toEqual([userTenantRoles, auditLogs, notifications])
+    expect(mocks.values.mock.calls[0][0]).toEqual({ userId: ALI, tenantId: A, role: "scorer", isPrimary: false, expiresAt: bound, delegatedByUserId: OWNER })
+    const audit = mocks.values.mock.calls[1][0]
+    expect(audit.payload).toMatchObject({ membershipCreated: true, membershipBoundApplied: true, membershipExpiresAt: bound.toISOString() })
+    expect(mocks.values.mock.calls[2][0].body).toContain("bounded until")
+  })
+
+  it("redemption replaces the bound on an existing active same-role membership instead of re-inserting", async () => {
+    mocks.initial.mockResolvedValue(bounded)
+    mocks.lockedInvite.mockResolvedValue(bounded)
+    mocks.member.mockReset().mockResolvedValueOnce(ownerMember).mockResolvedValueOnce(activeRecipientMembership)
+    await acceptInvite(TOKEN)
+    expect(mocks.insert.mock.calls.map(([table]) => table)).toEqual([auditLogs, notifications])
+    expect(mocks.update).toHaveBeenCalledWith(userTenantRoles)
+    expect(mocks.set.mock.calls[1][0]).toEqual({ expiresAt: bound, delegatedByUserId: OWNER })
+    expect(mocks.set.mock.calls[1][0]).not.toHaveProperty("status")
+    const audit = mocks.values.mock.calls.find(([value]) => value.method === "INVITE_ACCEPT")![0]
+    expect(audit.payload).toMatchObject({ membershipCreated: false, membershipBoundApplied: true })
+  })
+
+  it("an invite without a proposed bound never touches existing membership bounds (never an unbind)", async () => {
+    mocks.member.mockReset().mockResolvedValueOnce(ownerMember).mockResolvedValueOnce(activeRecipientMembership)
+    await acceptInvite(TOKEN)
+    expect(mocks.update).not.toHaveBeenCalledWith(userTenantRoles)
+    const audit = mocks.values.mock.calls.find(([value]) => value.method === "INVITE_ACCEPT")![0]
+    expect(audit.payload).toMatchObject({ membershipCreated: false, membershipBoundApplied: false, membershipExpiresAt: null })
+  })
+
+  it("bearer preview discloses the proposed bound; absent bound previews as absent", async () => {
+    mocks.initial.mockResolvedValue(bounded)
+    expect(await getInvitePreview(TOKEN)).toMatchObject({ membershipExpiresAt: bound })
+    expect(await getInvitePreview(TOKEN)).not.toHaveProperty("tokenHash")
+    mocks.initial.mockResolvedValue({ ...invite, membershipExpiresAt: null })
+    expect((await getInvitePreview(TOKEN))?.membershipExpiresAt ?? null).toBeNull()
+  })
+
+  it("management list rows expose the proposed bound without hashes", async () => {
+    mocks.limit.mockResolvedValue([])
+    await getInvites(A)
+    const selected = mocks.select.mock.calls[0][0]
+    expect(Object.keys(selected)).toContain("membershipExpiresAt")
+    expect(Object.keys(selected)).not.toContain("tokenHash")
+  })
+})
