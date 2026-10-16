@@ -13,6 +13,7 @@ import { Search, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { updateUserRole, toggleUserStatus, removeMember, type MemberRoleChange } from "@/app/actions/users"
 import type { MemberAssignmentMap } from "@/lib/member-assignments"
+import { membershipExpiryDisplay } from "@/lib/membership-display"
 
 interface Member {
   id: string
@@ -26,6 +27,7 @@ interface Member {
   protectedAccess: boolean
   version: number
   createdAt: Date
+  expiresAt?: string | Date | null
 }
 
 const ROLE_OPTIONS = [
@@ -147,6 +149,11 @@ export function UserListTable({ initialUsers, assignments = {}, directoryMode = 
                 </TableCell>
                 <TableCell><Badge variant="outline">{member.status === "active" ? "Active in league" : "Suspended in league"}</Badge>
                   {!member.accountActive && <span className="block text-xs text-destructive">Platform account blocked</span>}
+                  {(() => {
+                    const expiry = membershipExpiryDisplay(member.expiresAt ?? null)
+                    if (expiry.state === "unbounded") return null
+                    return <span title={expiry.detail} className={`block text-xs ${expiry.state === "live" ? "text-muted-foreground" : "text-destructive"}`}>{expiry.short}</span>
+                  })()}
                 </TableCell>
                 <TableCell className="text-right">{!protectedMember && <div className="flex flex-wrap justify-end gap-2">
                   <Button variant="outline" size="sm" className="min-h-11" disabled={updatingId !== null} onClick={() => setConfirmation(member)}>

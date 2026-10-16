@@ -21,6 +21,15 @@ export function MemberDirectoryControls({ filters, invalid = false }: { filters:
           {memberDirectoryRoles.map(role => <option key={role} value={role}>{role === "all" ? "All roles" : role.replaceAll("_", " ")}</option>)}
         </select>
       </div>
+      <div className="space-y-1">
+        <label htmlFor="member-expiry" className="block text-sm font-medium">Expiry bound</label>
+        <select id="member-expiry" name="expiry" defaultValue={filters.expiry} className="min-h-11 rounded-md border bg-background px-3">
+          <option value="all">All expiry states</option>
+          <option value="unbounded">No expiry</option>
+          <option value="bounded">Bounded (expiry set)</option>
+          <option value="expired">Expired</option>
+        </select>
+      </div>
       <button type="submit" className="min-h-11 rounded-md bg-primary px-4 text-primary-foreground">Search members</button>
       <Link href="/dashboard/settings/members" className="inline-flex min-h-11 items-center underline">Reset directory</Link>
     </form>

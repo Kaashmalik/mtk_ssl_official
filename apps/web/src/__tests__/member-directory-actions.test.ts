@@ -21,7 +21,7 @@ beforeEach(() => {
 describe("Owner-only member directory action boundaries", () => {
   it("delegates the directory read with the session-resolved tenant and normalized filters", async () => {
     await getMemberDirectory({ tenantId: TENANT, q: " Ali " })
-    expect(mocks.directory).toHaveBeenCalledWith(TENANT, { q: "Ali", status: "all", role: "all" })
+    expect(mocks.directory).toHaveBeenCalledWith(TENANT, { q: "Ali", status: "all", role: "all", expiry: "all" })
   })
   it("delegates an exact membership detail read", async () => {
     await getMemberDetails({ tenantId: TENANT, membershipId: MEMBER })

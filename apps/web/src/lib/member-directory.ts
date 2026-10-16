@@ -1,5 +1,6 @@
 import { db, users, userTenantRoles } from "@mtk/database"
-import { and, eq, gt, ilike, or, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
+import { and, eq, gt, ilike, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { MEMBER_DIRECTORY_PAGE_SIZE, memberDirectoryFilters, type MemberDirectoryRequest } from "./member-directory-filters"
 
@@ -11,6 +12,7 @@ const memberColumns = {
   membershipId: userTenantRoles.id, role: userTenantRoles.role,
   status: userTenantRoles.status, version: userTenantRoles.version,
   createdAt: userTenantRoles.createdAt,
+  expiresAt: userTenantRoles.expiresAt,
 }
 
 /** Literal substring search: user-supplied %, _ and backslash are not wildcards. */
@@ -22,6 +24,14 @@ export async function readMemberDirectory(tenantId: string, input: Omit<MemberDi
   z.string().uuid().parse(tenantId)
   const filters = memberDirectoryFilters.parse(input)
   const pattern = filters.q ? searchPattern(filters.q) : undefined
+  // `expired` uses the database clock so pagination pages agree on one instant.
+  const expiryCondition = filters.expiry === "unbounded" ? isNull(userTenantRoles.expiresAt)
+    : filters.expiry === "bounded" ? isNotNull(userTenantRoles.expiresAt)
+    : filters.expiry === "expired" ? and(
+        isNotNull(userTenantRoles.expiresAt),
+        lte(userTenantRoles.expiresAt, sql`now()`),
+      )
+    : undefined
   const rows = await db.select(memberColumns).from(userTenantRoles)
     .innerJoin(users, eq(users.id, userTenantRoles.userId))
     .where(and(
@@ -29,6 +39,7 @@ export async function readMemberDirectory(tenantId: string, input: Omit<MemberDi
       filters.after ? gt(userTenantRoles.id, filters.after) : undefined,
       filters.status !== "all" ? eq(userTenantRoles.status, filters.status) : undefined,
       filters.role !== "all" ? eq(userTenantRoles.role, filters.role) : undefined,
+      expiryCondition,
       pattern ? or(ilike(users.email, pattern), ilike(users.displayName, pattern)) : undefined,
     ))
     // Unique ID ordering deliberately makes no chronological-order promise.
@@ -41,11 +52,18 @@ export async function readMemberDirectory(tenantId: string, input: Omit<MemberDi
   }
 }
 
+const delegatedByUser = alias(users, "delegated_by_user")
+
 export async function readMemberDetails(tenantId: string, membershipId: string) {
   z.string().uuid().parse(tenantId)
   z.string().uuid().parse(membershipId)
-  const [member] = await db.select(memberColumns).from(userTenantRoles)
+  const [member] = await db.select({
+    ...memberColumns,
+    delegatedByUserId: userTenantRoles.delegatedByUserId,
+    delegatedByName: delegatedByUser.displayName,
+  }).from(userTenantRoles)
     .innerJoin(users, eq(users.id, userTenantRoles.userId))
+    .leftJoin(delegatedByUser, eq(delegatedByUser.id, userTenantRoles.delegatedByUserId))
     .where(and(eq(userTenantRoles.tenantId, tenantId), eq(userTenantRoles.id, membershipId)))
     .limit(1)
   return member ?? null

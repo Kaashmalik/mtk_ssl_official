@@ -3453,6 +3453,58 @@ scoring **304 / 12 suites**, commentary **39 / 4 files**, release checker
 deployment action. Roadmap **19 checked / 60 open / 79 IDs**; release gate
 default-off.
 
+### Batch 67 - expiry surfaces: directory filter, row badges and detail provenance (16 October 2026)
+
+IAM-02 slice, Batch 65's own follow-up ("expiry display" was left open).
+Memberships could carry `expires_at` and provenance, and owners could set or
+clear a bound, but nothing displayed any of it - the detail page even claimed
+the model "has no expiry fields yet".
+
+**Pure display - new `lib/membership-display.ts` (rule v1).** One classifier:
+`unbounded` / `live` (`Expires 1 Nov 2026`) / `expired` (`Expired ...`,
+detail states reactivation requires clear-or-extend, not a status toggle) /
+`invalid` (unparseable bound - data-corruption signal, rendered fail-closed
+because the effectiveness policy withholds access). Truth about access stays
+in the shared membership-effectiveness policy; this module only renders it.
+
+**Reads - `member-directory.ts`.** Directory rows now select `expiresAt`
+(owner-gated surface already). New `expiry` directory filter
+(`all`/`unbounded`/`bounded`/`expired`) with the `expired` comparison against
+the database clock (`<= now()`) so every paginated page agrees on one
+instant. `readMemberDetails` additionally returns `delegatedByUserId` plus
+the granting owner's display name via an aliased left join - still strictly
+tenant-scoped, same parameter binding.
+
+**UI.** Directory controls gain the expiry select (preserved through
+href/search parsing); list rows show a muted `Expires <date>` or destructive
+`Expired <date>` line (unbounded renders nothing); the member detail page
+replaced its stale "no expiry fields yet" notice with a bound + provenance
+panel (records when a bound predates provenance tracking).
+
+Honest limits: invitations do not yet carry or default expiry bounds
+(IAM-03/04); SCORE-09's queue-scoping half remains open; display is not
+enforcement.
+
+New regressions: `membership-display.test.ts` (5), `member-directory.test.ts`
+(+3 - clock SQL, bounded filter, column/provenance reads),
+`members-page.test.tsx` (+1 expiry pass-through), directory-actions/+1.
+Updated: filters/navigation contracts, detail harness (leftJoin), action
+delegate assertions.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **102** files, **2,500 tests** (+11 over 2,489) |
+| `tsc --noEmit` | **0 error lines** (Batch 59 gate held) |
+| `git diff --check` | Clean |
+
+Next source work: invitation expiry defaults (IAM-03/04), SCORE-09
+queue-scoping half, officials approval + server-side XI enforcement (schema /
+scoring-service decisions), PUB-03 format-qualified records. Release gates
+still need Batch 62 evidence + services deployment. Roadmap: **19 checked /
+60 open / 79 IDs** (expiry display closed inside IAM-02/score-09 surfaces).
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

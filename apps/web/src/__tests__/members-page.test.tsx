@@ -94,8 +94,13 @@ describe("Members page authorization and assignment wiring (mocked, not browser 
 
   it("passes validated directory filters to the owner-gated reader", async () => {
     const tree = await MembersPage({ searchParams: Promise.resolve({ q: " Ali ", role: "scorer", status: "active", after: MEMBER }) })
-    expect(mocks.members).toHaveBeenCalledWith({ tenantId: TENANT, q: "Ali", role: "scorer", status: "active", after: MEMBER })
+    expect(mocks.members).toHaveBeenCalledWith({ tenantId: TENANT, q: "Ali", role: "scorer", status: "active", expiry: "all", after: MEMBER })
     expect(tableProps(tree)?.directoryMode).toBe(true)
+  })
+
+  it("forwards a parsed expiry filter to the owner-gated reader", async () => {
+    await MembersPage({ searchParams: Promise.resolve({ expiry: "expired" }) })
+    expect(mocks.members).toHaveBeenCalledWith({ tenantId: TENANT, q: "", role: "all", status: "all", expiry: "expired" })
   })
 
   it.each([{ after: "invalid" }, { q: ["Ali", "Bob"] }, { role: "invalid" }, { status: "blocked" }])("does not query a directory for invalid input %s", async search => {

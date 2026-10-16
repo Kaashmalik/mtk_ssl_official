@@ -2883,7 +2883,30 @@ COMP-07 remainder (schema decisions), member UI + records. Roadmap counts stay
   but the services themselves still need deployment, and Batch 62's
   release-evidence requirements remain unmet (no acceptance evidence yet).
 
-### 2026-10-16 — Batch 52: squad eligibility on the scoring player list (COMP-06 slice)
+### 2026-10-16 - Batch 67: expiry surfaces (IAM-02 slice)
+
+- New `lib/membership-display.ts` (rule v1): unbounded / live / expired /
+  invalid classification over the shared parse; expired states say plainly
+  that reactivation needs clear-or-extend, not a status toggle; unparseable
+  bounds render fail-closed.
+- Directory reads: `expiresAt` in rows + `expiry` filter
+  (all/unbounded/bounded/expired, `expired` computed against the database
+  clock for pagination consistency); detail read returns `delegatedByUserId`
+  and the granting owner's name via an aliased left join, tenant-scoped.
+- UI: expiry select in directory controls (parsed + href-preserved), expiry
+  line on member rows, and the detail page's stale "no expiry fields yet"
+  notice replaced with a bound + provenance panel.
+- Limits: invitation expiry defaults (IAM-03/04) and SCORE-09 queue-scoping
+  remain open; display is not enforcement.
+- New regressions: membership-display (5), member-directory (+3),
+  members-page (+1), member-directory-actions (+1); contracts updated.
+
+**Fresh verification:** web **2,500 / 102** (+11); `tsc --noEmit` **0 errors**;
+`git diff --check` clean. Next: invitation expiry defaults, SCORE-09
+queue-scoping, PUB-03 records; release gates still need Batch 62 evidence +
+service deployment. Roadmap **19 checked / 60 open / 79 IDs**.
+
+### 2026-10-16 - Batch 52: squad eligibility on the scoring player list (COMP-06 slice)
 
 - Pure `lib/squad-eligibility.ts` (rule v1): approved non-empty tournament
   squads (`leagueRegistrations.squadPlayerIds`) filter a side's scoring
