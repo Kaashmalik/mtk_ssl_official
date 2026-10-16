@@ -13,7 +13,7 @@ describe("League membership expand migration and schema contracts (not real SQL 
     expect(userTenantRoles.version.notNull).toBe(true)
   })
   it("declares database constraints rather than trusting enum types alone", () => {
-    expect(getTableConfig(userTenantRoles).checks.map(check => check.name)).toEqual(["user_tenant_roles_status_check", "user_tenant_roles_version_check"])
+    expect(getTableConfig(userTenantRoles).checks.map(check => check.name)).toEqual(["user_tenant_roles_status_check", "user_tenant_roles_version_check", "user_tenant_roles_expiry_check"])
     expect(migration).toContain("CHECK (status IN ('active', 'suspended'))")
     expect(migration).toContain("CHECK (version >= 0)")
   })

@@ -3430,6 +3430,29 @@ database, provider or deployment action. Multi-instance drills and real-broker
 acceptance remain open; SCORE-12 stays unchecked pending acceptance. Roadmap
 **19 checked / 60 open / 79 IDs**; release gate default-off.
 
+### Batch 65 — bounded memberships with fail-closed expiry enforcement (16 October 2026)
+
+SCORE-09 slice. Memberships were only active/suspended with unbounded time
+access. Now `user_tenant_roles` may carry `expires_at` plus `delegated_by_user_id`
+provenance (additive local migration, unapplied: CHECK keeps any bound after the
+row's creation, partial per-league index, RLS/grants unchanged, existing rows
+unaffected). A shared membership-effectiveness policy makes the decision
+single-sourced and fail-closed: active AND not expired, malformed bounds never
+grant access, suspension and expiry independent. The canonical scoring boundary
+enforces it under the existing user/league/membership lock order with distinct
+expired/suspended errors; web member administration gained an owner-only,
+audited, version-checked set/clear-expiry path that protects self/owner/platform
+memberships and records the acting owner as provenance. Relative delegation is
+explicitly not inferred; expiry display/invitations and SCORE-09's queue-scoping
+half remain open.
+
+Fresh verification: web **2,489 / 101 files**, database **199 / 13 files**,
+scoring **304 / 12 suites**, commentary **39 / 4 files**, release checker
+**87 tests** — **3,118 passing tests**, all exits 0. Web type check exits 0;
+`git diff --check` clean. No migration applied, no remote database/provider or
+deployment action. Roadmap **19 checked / 60 open / 79 IDs**; release gate
+default-off.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto"
 import { db, users, tenants, userTenantRoles, teams, matches, auditLogs } from "@mtk/database"
 import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { membershipGrantsAccess, parseMembershipExpiry } from "@mtk/database"
 
 /**
  * League-scoped member administration. Every read/write is predicated on an
@@ -23,9 +24,18 @@ const memberKey = z.object({
 export const memberRoleChangeSchema = memberKey.extend({ role: z.enum(memberEditableRoles) }).strict()
 export const memberStatusChangeSchema = memberKey.extend({ status: z.enum(["active", "suspended"]) }).strict()
 export const memberRemovalSchema = memberKey.strict()
+/**
+ * Bounded access (SCORE-09): an ISO-8601 instant sets/extends the expiry; null
+ * clears it, making the membership unbounded again. The instant must be in the
+ * future at submission time; the DB CHECK additionally keeps it after creation.
+ */
+export const memberExpiryChangeSchema = memberKey.extend({
+  expiresAt: z.string().datetime({ offset: true }).nullable(),
+}).strict()
 export type MemberRoleChange = z.infer<typeof memberRoleChangeSchema>
 export type MemberStatusChange = z.infer<typeof memberStatusChangeSchema>
 export type MemberRemoval = z.infer<typeof memberRemovalSchema>
+export type MemberExpiryChange = z.infer<typeof memberExpiryChangeSchema>
 
 /** The acting account and the exact league it manages. */
 export type MemberManagementContext = { tenantId: string; actorId: string; clerkId: string }
@@ -44,6 +54,8 @@ export async function readLeagueMembers(tenantId: string, expectedTenantId?: str
     protectedAccess: sql<boolean>`${users.role} = 'super_admin'`,
     membershipId: userTenantRoles.id, role: userTenantRoles.role,
     status: userTenantRoles.status, version: userTenantRoles.version,
+    expiresAt: userTenantRoles.expiresAt,
+    delegatedByUserId: userTenantRoles.delegatedByUserId,
     createdAt: userTenantRoles.createdAt,
   }).from(userTenantRoles).innerJoin(users, eq(users.id, userTenantRoles.userId))
     .where(eq(userTenantRoles.tenantId, tenantId))
@@ -117,6 +129,80 @@ export async function updateMemberRole(input: MemberRoleChange, context: MemberM
 /** League membership only; never the global account status. */
 export async function toggleMemberStatus(input: MemberStatusChange, context: MemberManagementContext) {
   return { success: true as const, member: await changeMember(input, context) }
+}
+
+/**
+ * Set or clear the bounded-access expiry of a member (SCORE-09). While a
+ * membership is bounded, the canonical scoring boundary rejects it after the
+ * expiry passes; clearing makes it unbounded again. The acting owner is
+ * recorded as the delegation provenance (`delegated_by_user_id`). Relative
+ * grants are intentionally not inferred: expiry is explicit, audited and
+ * cleared explicitly.
+ */
+export async function setMemberExpiry(input: MemberExpiryChange, context: MemberManagementContext) {
+  if (input.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before saving.")
+  const requestedExpiry = input.expiresAt === null ? null : parseMembershipExpiry(input.expiresAt)
+  if (requestedExpiry && requestedExpiry.getTime() <= Date.now()) {
+    throw new Error("Expiry must be in the future; suspend the member instead")
+  }
+  return db.transaction(async (tx) => {
+    const key = and(eq(userTenantRoles.id, input.membershipId), eq(userTenantRoles.tenantId, context.tenantId))
+    const initial = await tx.query.userTenantRoles.findFirst({ where: key })
+    if (!initial || initial.tenantId !== context.tenantId || initial.id !== input.membershipId) {
+      throw new Error("Member not found in this league")
+    }
+    // Same lock order as the other member writes: users, league, memberships.
+    const ids = [...new Set([context.actorId, initial.userId])].sort()
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${inArray(users.id, ids)} ORDER BY ${users.id} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${context.tenantId} FOR SHARE`)
+    await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
+      WHERE ${and(eq(userTenantRoles.tenantId, context.tenantId), inArray(userTenantRoles.userId, ids))}
+      ORDER BY ${userTenantRoles.id} FOR UPDATE`)
+
+    const actor = await tx.query.users.findFirst({ where: eq(users.id, context.actorId) })
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, context.tenantId) })
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, context.actorId), eq(userTenantRoles.tenantId, context.tenantId),
+    ) })
+    if (!actor || actor.id !== context.actorId || actor.isActive !== true || actor.clerkId !== context.clerkId
+      || !league || league.id !== context.tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== context.actorId || actorMember.tenantId !== context.tenantId
+      || !membershipGrantsAccess(actorMember) || actorMember.role !== "league_owner") {
+      throw new Error("Forbidden: your member-management access changed")
+    }
+    const target = await tx.query.userTenantRoles.findFirst({ where: key })
+    const account = await tx.query.users.findFirst({ where: eq(users.id, initial.userId) })
+    if (!target || target.id !== input.membershipId || target.tenantId !== context.tenantId
+      || target.userId !== initial.userId || !account || account.id !== target.userId) {
+      throw new Error("Member not found in this league")
+    }
+    // The owner's own and platform authority are not bounded here; ownership
+    // changes go through the two-party transfer.
+    if (target.userId === context.actorId || target.userId === league.ownerId
+      || target.role === "league_owner" || target.role === "super_admin" || account.role === "super_admin") {
+      throw new Error("Owner, platform and self access cannot be bounded here")
+    }
+    if (target.version !== input.expectedVersion) throw new Error("Member changed. Reload before saving.")
+    const beforeExpiry = parseMembershipExpiry(target.expiresAt)
+    const before = beforeExpiry ? beforeExpiry.toISOString() : null
+    const after = requestedExpiry ? requestedExpiry.toISOString() : null
+    if (before === after) {
+      return { membershipId: target.id, expiresAt: after, delegatedByUserId: target.delegatedByUserId ?? null, version: target.version }
+    }
+    const [updated] = await tx.update(userTenantRoles)
+      .set({ expiresAt: requestedExpiry, delegatedByUserId: requestedExpiry ? context.actorId : null })
+      .where(and(key, eq(userTenantRoles.version, input.expectedVersion)))
+      .returning({ membershipId: userTenantRoles.id, expiresAt: userTenantRoles.expiresAt,
+        delegatedByUserId: userTenantRoles.delegatedByUserId, version: userTenantRoles.version })
+    if (!updated) throw new Error("Member changed. Reload before saving.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId: context.tenantId, actorId: context.actorId,
+      actorRole: actorMember.role, method: "MEMBERSHIP_EXPIRY_CHANGE", path: "/dashboard/settings/members", statusCode: "200",
+      payload: { membershipId: target.id, targetUserId: target.userId,
+        before: { expiresAt: before, version: target.version }, after },
+    })
+    return updated
+  }, { isolationLevel: "read committed" })
 }
 
 /**

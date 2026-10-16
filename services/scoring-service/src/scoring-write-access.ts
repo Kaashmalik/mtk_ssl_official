@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations } from '@mtk/database';
+import { membershipGrantsAccess } from '@mtk/database/lib/membership-effectiveness';
 import { matchRegistrationMap, registrationAllowsPlayer, type SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
 import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
@@ -31,9 +32,16 @@ export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId
   const membership = await tx.query.userTenantRoles.findFirst({ where: and(
     eq(userTenantRoles.userId, actorId), eq(userTenantRoles.tenantId, tenantId),
   ) });
-  if (!membership || membership.userId !== actorId || membership.tenantId !== tenantId
-    || membership.status !== 'active') {
+  if (!membership || membership.userId !== actorId || membership.tenantId !== tenantId) {
     throw new ForbiddenException('Invalid scoring membership');
+  }
+  // Fail closed on suspension AND on a bounded membership whose expiry has
+  // passed (SCORE-09). The row is locked above, so a concurrent expiry change
+  // serialized against this decision. Null expires_at keeps legacy behavior.
+  if (!membershipGrantsAccess(membership)) {
+    throw new ForbiddenException(membership.status !== 'active'
+      ? 'This league membership is suspended'
+      : 'This league membership has expired');
   }
   const role = membership.role;
   if (role === 'league_owner') return;

@@ -5,14 +5,14 @@ import { revalidatePath } from "next/cache"
 import { getDashboardContext } from "@/lib/dashboard-context"
 import { hasPermission } from "@/lib/rbac"
 import {
-  readLeagueMembers, updateMemberRole, toggleMemberStatus, removeLeagueMember,
-  memberRoleChangeSchema, memberStatusChangeSchema, memberRemovalSchema,
+  readLeagueMembers, updateMemberRole, toggleMemberStatus, removeLeagueMember, setMemberExpiry,
+  memberRoleChangeSchema, memberStatusChangeSchema, memberRemovalSchema, memberExpiryChangeSchema,
 } from "@/lib/member-management"
-import type { MemberRoleChange, MemberStatusChange, MemberRemoval } from "@/lib/member-management"
+import type { MemberRoleChange, MemberStatusChange, MemberRemoval, MemberExpiryChange } from "@/lib/member-management"
 import { readMemberDirectory, readMemberDetails } from "@/lib/member-directory"
 import { memberDirectoryRequest, memberDetailRequest, type MemberDirectoryRequest, type MemberDetailRequest } from "@/lib/member-directory-filters"
 
-export type { MemberRoleChange, MemberStatusChange, MemberRemoval }
+export type { MemberRoleChange, MemberStatusChange, MemberRemoval, MemberExpiryChange }
 
 /**
  * Resolves the acting account and the exact active league, then requires an
@@ -77,6 +77,19 @@ export async function removeMember(input: MemberRemoval) {
   const parsed = memberRemovalSchema.parse(input)
   const context = await requireMemberManager()
   const result = await removeLeagueMember(parsed, context)
+  revalidatePath("/dashboard", "layout")
+  return result
+}
+
+/**
+ * Set or clear a member's bounded-access expiry (SCORE-09). An expired
+ * membership stops granting access at the canonical scoring boundary; clearing
+ * makes the membership unbounded again. Owner-only, audited, version-checked.
+ */
+export async function setUserMembershipExpiry(input: MemberExpiryChange) {
+  const parsed = memberExpiryChangeSchema.parse(input)
+  const context = await requireMemberManager()
+  const result = await setMemberExpiry(parsed, context)
   revalidatePath("/dashboard", "layout")
   return result
 }

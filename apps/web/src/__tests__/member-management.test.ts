@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { userTenantRoles, auditLogs } from "@mtk/database"
 import {
-  readLeagueMembers, updateMemberRole, toggleMemberStatus, removeLeagueMember,
+  readLeagueMembers, updateMemberRole, toggleMemberStatus, removeLeagueMember, setMemberExpiry,
 } from "@/lib/member-management"
 
 const mocks = vi.hoisted(() => ({
@@ -94,5 +94,68 @@ describe("lib/member-management — league-scoped member reads and writes", () =
     expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ tenantId: A, actorId: OWNER,
       payload: expect.objectContaining({ targetUserId: ALI, after: null }) }))
+  })
+})
+
+describe("setMemberExpiry — bounded membership access (SCORE-09)", () => {
+  const future = new Date(Date.now() + 86_400_000).toISOString()
+  const expiryInput = { tenantId: A, membershipId: MEMBER, expectedVersion: 2, expiresAt: future }
+  const boundedTarget = { ...target, expiresAt: new Date(Date.now() + 7_200_000) }
+
+  function chain(initial: Record<string, unknown>, actor: Record<string, unknown>, resolved: Record<string, unknown>, account?: Record<string, unknown>) {
+    mocks.member.mockReset()
+    mocks.member.mockResolvedValueOnce(initial).mockResolvedValueOnce(actor).mockResolvedValueOnce(resolved)
+    mocks.user.mockReset()
+    mocks.user.mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true })
+      .mockResolvedValueOnce(account ?? { id: ALI, role: "player", isActive: true })
+  }
+
+  it("sets a future expiry, records the acting owner as provenance and audits the change", async () => {
+    mocks.returning.mockResolvedValueOnce([{ membershipId: MEMBER, expiresAt: new Date(future), delegatedByUserId: OWNER, version: 3 }])
+    expect(await setMemberExpiry(expiryInput, ctx)).toMatchObject({ membershipId: MEMBER, version: 3 })
+    expect(mocks.set).toHaveBeenCalledWith(expect.objectContaining({ delegatedByUserId: OWNER }))
+    const audit = mocks.values.mock.calls.map(([row]) => row).find(row => row.method === "MEMBERSHIP_EXPIRY_CHANGE")
+    expect(audit).toMatchObject({ tenantId: A, actorId: OWNER, actorRole: "league_owner", method: "MEMBERSHIP_EXPIRY_CHANGE",
+      payload: { membershipId: MEMBER, targetUserId: ALI, before: { expiresAt: null, version: 2 }, after: future } })
+  })
+
+  it("clears a bound explicitly and drops the delegation provenance", async () => {
+    chain(boundedTarget, actorMember, boundedTarget)
+    mocks.returning.mockResolvedValueOnce([{ membershipId: MEMBER, expiresAt: null, delegatedByUserId: null, version: 3 }])
+    expect(await setMemberExpiry({ ...expiryInput, expiresAt: null }, ctx)).toMatchObject({ expiresAt: null })
+    expect(mocks.set).toHaveBeenCalledWith(expect.objectContaining({ expiresAt: null, delegatedByUserId: null }))
+  })
+
+  it("reports no change without writing when the requested expiry already matches", async () => {
+    chain({ ...target, expiresAt: new Date(future) }, actorMember, { ...target, expiresAt: new Date(future) })
+    const result = await setMemberExpiry(expiryInput, ctx)
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ membershipId: MEMBER, version: 2 })
+  })
+
+  it("rejects a past-dated expiry before opening a transaction (suspend instead)", async () => {
+    await expect(setMemberExpiry({ ...expiryInput, expiresAt: "2020-01-01T00:00:00.000Z" }, ctx))
+      .rejects.toThrow("must be in the future")
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("refuses a non-owner actor and an owner whose own membership is no longer effective", async () => {
+    chain(target, { ...actorMember, role: "scorer" }, target)
+    await expect(setMemberExpiry(expiryInput, ctx)).rejects.toThrow("Forbidden")
+    chain(target, { ...actorMember, expiresAt: "2020-01-01T00:00:00.000Z" }, target)
+    await expect(setMemberExpiry(expiryInput, ctx)).rejects.toThrow("Forbidden")
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it("never bounds owners, self or platform accounts", async () => {
+    chain(target, actorMember, target, { id: ALI, role: "super_admin", isActive: true })
+    await expect(setMemberExpiry(expiryInput, ctx)).rejects.toThrow("cannot be bounded")
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects a stale version without writing", async () => {
+    chain(target, actorMember, { ...target, version: 3 })
+    await expect(setMemberExpiry(expiryInput, ctx)).rejects.toThrow("Member changed")
+    expect(mocks.set).not.toHaveBeenCalled()
   })
 })

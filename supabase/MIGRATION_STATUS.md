@@ -11,6 +11,18 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 65 bounded memberships (16 October 2026)
+
+`20261016120000_membership_expiry_delegation.sql` is a **local migration only**,
+not applied anywhere. It adds nullable `expires_at` and `delegated_by_user_id`
+(ON DELETE SET NULL provenance) to `user_tenant_roles`, a chronological CHECK,
+and a partial index; RLS, grants and existing rows are unchanged and the
+migration is additive/idempotent. Enforcement is application-level (shared
+membership-effectiveness policy + canonical scoring boundary + web admin);
+database-level RLS/serializability acceptance of expiry races still requires a
+real disposable database. No remote database was queried or written; Batch 62's
+release-evidence requirements remain unmet.
+
 ### Batch 64 idempotent consumers (16 October 2026)
 
 Source-only change; no schema, migration, RLS/grant or database-data change.

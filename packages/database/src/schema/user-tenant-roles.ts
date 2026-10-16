@@ -25,6 +25,15 @@ export const userTenantRoles = pgTable(
     role: userRoleEnum("role").notNull().default("fan"),
     /** League-only access; never mirrors or changes users.isActive. */
     status: text("status").$type<"active" | "suspended">().notNull().default("active"),
+    /**
+     * Bounded access (SCORE-09): when set, the membership stops granting access
+     * once this instant passes. Cleared (null) means no expiry. Enforcement is
+     * fail-closed at the canonical write boundary and through the shared
+     * membership-effectiveness policy.
+     */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** Owner who granted or last extended this bounded membership; provenance only. */
+    delegatedByUserId: uuid("delegated_by_user_id").references(() => users.id, { onDelete: "set null" }),
     /** Incremented by the database trigger on every update, including invites. */
     version: integer("version").notNull().default(0),
     /** True if this is the user's primary/default tenant */
@@ -43,8 +52,14 @@ export const userTenantRoles = pgTable(
     ),
     // Tenant-wide lookups filter on tenant_id alone.
     tenantIdx: index("idx_user_tenant_roles_tenant_id").on(table.tenantId),
+    // Bounded-membership sweeps/admin reads by league; advisory, not enforcement.
+    expiresIdx: index("idx_user_tenant_roles_expires_at")
+      .on(table.tenantId).where(sql`${table.expiresAt} IS NOT NULL`),
     statusCheck: check("user_tenant_roles_status_check", sql`${table.status} IN ('active', 'suspended')`),
     versionCheck: check("user_tenant_roles_version_check", sql`${table.version} >= 0`),
+    // A bounded membership must expire after it began; the clock is the row's own creation.
+    expiryCheck: check("user_tenant_roles_expiry_check",
+      sql`${table.expiresAt} IS NULL OR ${table.expiresAt} > ${table.createdAt}`),
   }),
 );
 

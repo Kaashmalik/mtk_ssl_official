@@ -54,7 +54,7 @@ function createTransaction() {
       winnerId: null as string | null, result: null as string | null, manOfMatchId: null as string | null,
       status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
-    membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active' } as { userId: string; tenantId: string; role: string; status: string } | null,
+    membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active', expiresAt: null } as { userId: string; tenantId: string; role: string; status: string; expiresAt?: string | null } | null,
     roster: new Map<string, Record<string, any>>([
       [BATTER, { id: BATTER, tenantId: TENANT, teamId: TENANT, isActive: true, status: 'active', name: 'Batter' }],
       [BOWLER, { id: BOWLER, tenantId: TENANT, teamId: TEAM_B, isActive: true, status: 'active', name: 'Bowler' }],
@@ -636,5 +636,30 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.balls).toHaveLength(0);
     expect(mockTx.state.events).toHaveLength(0);
     expect(mockTx.state.outbox).toHaveLength(0);
+  });
+  it('rejects scoring when the membership expiry has passed', async () => {
+    mockTx.state.membership.expiresAt = new Date(Date.now() - 1000).toISOString();
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('membership has expired');
+    expect(mockTx.state.balls).toHaveLength(0);
+    expect(mockTx.state.outbox).toHaveLength(0);
+  });
+  it('names a suspended membership distinctly and rejects it before any write', async () => {
+    mockTx.state.membership.status = 'suspended';
+    mockTx.state.membership.expiresAt = new Date(Date.now() + 60000).toISOString();
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('membership is suspended');
+    expect(mockTx.state.outbox).toHaveLength(0);
+  });
+  it('fails closed on a malformed membership expiry instead of treating it as unbounded', async () => {
+    mockTx.state.membership.expiresAt = 'not-a-date';
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mockTx.state.balls).toHaveLength(0);
+  });
+  it('accepts a scorer whose bounded membership is still in the future or unbounded', async () => {
+    mockTx.state.membership.expiresAt = new Date(Date.now() + 60000).toISOString();
+    await service.recordBall(TENANT, ACTOR, ball());
+    expect(mockTx.state.outbox).toHaveLength(1);
+    mockTx.state.membership.expiresAt = null;
+    await service.recordBall(TENANT, ACTOR, ball({ runs: 1, over: 0, ball: 2 }));
+    expect(mockTx.state.outbox).toHaveLength(2);
   });
 });

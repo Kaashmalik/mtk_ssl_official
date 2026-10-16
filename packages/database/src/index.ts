@@ -16,6 +16,9 @@ export * from "./lib/plan-limits";
 // Shared plan-limit guard (throws structured PlanLimitError)
 export * from "./lib/plan-guard";
 
+// Shared membership-effectiveness policy (expiry/suspension, SCORE-09)
+export * from "./lib/membership-effectiveness";
+
 // DB Errors
 export * from "./lib/db-errors";
 
