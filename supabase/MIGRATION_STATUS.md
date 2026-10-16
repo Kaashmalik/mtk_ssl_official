@@ -3,7 +3,23 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-> **15 October 2026 (evening) — FULL REBUILD & RECONCILIATION COMPLETE.**
+> **16 October 2026 (later) — BOTH Batch 63/65 migrations APPLIED to the remote
+> Supabase project (`anxstufkbqnjkxgksfkn`, ap-southeast-1, ACTIVE_HEALTHY) via
+> the Supabase MCP `apply_migration`**, byte-equal to the repository files.
+> Remote migration history records them under server-assigned versions
+> `20261016130058` / `20261016130103` (same names: `scoring_transactional_outbox`,
+> `membership_expiry_delegation`) — version numbers differ from the local
+> filenames by design of the history table; treat the NAME as the identifier.
+> Post-apply verification (all via MCP SQL): `scoring_outbox` exists with
+> ENABLE+FORCE RLS, policy `scoring_outbox_internal_ssl`, grantees only
+> postgres/service_role/ssl (anon+authenticated revoked), envelope FK/{check}
+> indexes present; `user_tenant_roles` has both new columns, the
+> `expires_at > created_at` CHECK, and the partial index. Security + performance
+> advisors report no lints on the new objects. Server-side enforcement
+> (membership-effectiveness rollout) still depends on deploying the updated
+> services; Batch 62's release-evidence requirements remain unmet.
+
+> **15 October 2026 (evening) - FULL REBUILD & RECONCILIATION COMPLETE.**
 > The database was wiped from the SQL editor (schema and data dropped, migration
 > history left stale), then **rebuilt from the repository's canonical chain**:
 > all migrations `001` → `20261013180000` were applied in filename order, plus

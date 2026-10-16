@@ -2865,6 +2865,24 @@ lines; `git diff --check` clean. Next: officials/server-side eligibility,
 COMP-07 remainder (schema decisions), member UI + records. Roadmap counts stay
 **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-16 — Batch 66: MCP recovery + remote migration rollout
+
+- Environment: all seven MCP servers recovered (6 were stale-failed from a
+  startup-time DNS outage; a service restart reconnected them). `github` had
+  `Bearer {env:GITHUB_TOKEN}` with the variable unset — switched to OAuth
+  (sign-in pending via `/mcps`).
+- Applied BOTH previously local-only migrations to the remote project via the
+  Supabase MCP, byte-equal to the repository files, after verifying targets
+  absent and the canonical chain applied: scoring transactional outbox
+  (ENABLE+FORCE RLS, service/internal-only grants, envelope checks) and
+  bounded-membership expiry columns + CHECK + partial index. Post-apply
+  verification and security/performance advisors: clean. Remote history stores
+  server-assigned versions (20261016130058/103) under the same migration
+  names — recorded in `supabase/MIGRATION_STATUS.md`.
+- Notes: schema now matches Batch 63/65 application-level enforcement code,
+  but the services themselves still need deployment, and Batch 62's
+  release-evidence requirements remain unmet (no acceptance evidence yet).
+
 ### 2026-10-16 — Batch 52: squad eligibility on the scoring player list (COMP-06 slice)
 
 - Pure `lib/squad-eligibility.ts` (rule v1): approved non-empty tournament
