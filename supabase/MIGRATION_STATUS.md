@@ -3,8 +3,9 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-> **16 October 2026 (Batch 72) - `member_umpires` APPLIED to the remote Supabase
-> project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`.**
+> **16 October 2026 (Batch 73) - `umpire_assignment_approval` APPLIED to the remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`.** Local file: `supabase/migrations/20261016190000_umpire_assignment_approval.sql` (adds `matches.umpire_approval_required boolean NOT NULL DEFAULT false` and `matches.umpire_approved_at timestamptz` + column comments; additive/idempotent, no RLS/grant changes, member-umpire and free-text-only matches stay false so existing readiness semantics survive without backfill). Post-apply SQL verified all six umpire columns together. Consent enforcement is application-side (locked, conditional, audited `approveUmpireAssignmentInMatch` with a SCORE-09 effective-membership re-check, also retrofitted to the scorer-consent writer); real-DB acceptance remains staged. Batch 62's release-evidence requirements remain unmet.
+
+> **16 October 2026 (Batch 72) - `member_umpires` APPLIED to the remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`.**
 > Local file: `supabase/migrations/20261016180000_member_umpires.sql` (adds
 > `matches.umpire1_id` / `matches.umpire2_id` uuid REFERENCES users(id) ON
 > DELETE SET NULL + column comments; additive/idempotent, no RLS/grant

@@ -3781,6 +3781,70 @@ qualified records, ISO-05 resource-scoped grant design. Release gates still
 need Batch 62 evidence + services deployment. Roadmap: **19 checked / 60
 open / 79 IDs**.
 
+### Batch 73 - member-umpire consent (COMP-06, mirrors scorer approval)
+
+Closes the umpire thread Batch 72 left open: member-bound umpires were still
+assigned unilaterally - no consent, so "official approval" stopped halfway
+for the second member-official type.
+
+**Migration (applied remotely via MCP).** Additive, idempotent
+`20261016190000_umpire_assignment_approval.sql`:
+`matches.umpire_approval_required boolean NOT NULL DEFAULT false` and
+`matches.umpire_approved_at timestamptz` (free-text-only and legacy rows stay
+false, so existing readiness semantics survive without backfill). Applied
+through the Supabase MCP and SQL-verified (all six umpire columns present
+together). Drizzle schema mirrors them; no RLS/grant changes.
+
+**Consent binds to the exact assignment** (`assignUmpireInMatch`, mirroring
+Batch 71): every effective change to either member slot arms
+`umpire_approval_required` (any member slot occupied) and voids
+`umpire_approved_at`; clearing the last occupied member slot disarms; a
+same-value re-assignment remains a no-op that preserves consent. The
+`MATCH_UMPIRE_ASSIGN` audit now records before/after approval state.
+
+**The consent writer itself** - new locked `approveUmpireAssignmentInMatch`
++ `approveUmpireAssignment` action. Two differences from the scorer pair,
+both deliberate: (1) the action gates on `match:read`, not `match:score` -
+umpires may hold ANY member role (players/coaches hold no `match:score`),
+so the locked slot check is the real authority; nobody occupying no slot can
+ever approve on the assigned member's behalf. (2) BOTH consent writers now
+re-verify the actor's effective membership under the lock (fail-closed on a
+passed or unparseable bound - SCORE-09 consistency; a regression is added for
+the scorer side too). A concurrent assignment change wins the conditional
+update and voids the consent; audited `UMPIRE_ASSIGNMENT_APPROVE`.
+
+**Readiness + UI.** The advisory officials check folds consent in: an armed
+requirement renders "Member umpire assigned and approved" and fails while
+consent is pending - even alongside a free-text external listing, so the open
+consent question stays visible. The match page resolves whether the viewer
+occupies a pending scorer or umpire slot (one identity read) and renders the
+new `UmpireApprovalButton` only for them.
+
+Honest limits: third-umpire stays free text; the officials check remains
+advisory (never blocking); lock/consent races are proven by conditional-
+update regressions, real-DB acceptance stays staged (Batch 62 gates unmet).
+
+New regressions: `umpire-assignment.test.ts` (+7: no-op consent preservation,
+final-clear disarm, successful consent with conditional SQL + audit, passed-
+bound rejection, three invalid-state rejections, lost race, no-slot member
+cannot approve) plus `scorer-assignment.test.ts` (+1 expired-bound rejection)
+and `match-readiness.test.ts` (+1); two batch-72 exact-shape assertions
+updated to the new patch/audit payload.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **104** files, **2,553 tests** (+11) |
+| `npx vitest run` (database) | PASS - **13** files, **199 tests** |
+| `tsc --noEmit` (web + database) | **0 + 0 error lines** |
+| `git diff --check` | Clean |
+| Remote apply (MCP) | `umpire_assignment_approval` applied + SQL-verified |
+
+Next source work: PUB-03 format-qualified records, ISO-05 resource-scoped
+grant design. Release gates still need Batch 62 evidence + services
+deployment. Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

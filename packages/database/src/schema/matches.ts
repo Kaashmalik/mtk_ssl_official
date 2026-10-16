@@ -100,6 +100,14 @@ export const matches = pgTable("matches", {
    */
   umpire1Id: uuid("umpire1_id").references(() => users.id, { onDelete: "set null" }),
   umpire2Id: uuid("umpire2_id").references(() => users.id, { onDelete: "set null" }),
+  /**
+   * Umpire consent (COMP-06, mirrors scorer approval): true once a current
+   * assignment write has occupied a member umpire slot; free-text-only and
+   * legacy rows stay false and keep legacy readiness.
+   */
+  umpireApprovalRequired: boolean("umpire_approval_required").notNull().default(false),
+  /** When the assigned umpire approved; only the assigned member may set it, any assignment change clears it. */
+  umpireApprovedAt: timestamp("umpire_approved_at", { withTimezone: true }),
   matchReferee: text("match_referee"),
 
   // Live streaming

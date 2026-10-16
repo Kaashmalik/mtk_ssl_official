@@ -9,7 +9,7 @@ import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { proxyCompleteMatch } from "@/lib/scoring-service-client"
 import { manageMatch, matchMetadataSchema, streamCommandSchema } from "@/lib/match-management"
-import { assignScorerInMatch, approveScorerAssignmentInMatch, assignUmpireInMatch, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
+import { assignScorerInMatch, approveScorerAssignmentInMatch, approveUmpireAssignmentInMatch, assignUmpireInMatch, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
   readMatchFormOptions } from "@/lib/match-records"
 
 const createMatchSchema = matchMetadataSchema.extend({ tenantId: z.string().uuid().optional() }).strict()
@@ -229,6 +229,24 @@ export const approveScorerAssignment = withAuth("match:score", async (matchId: s
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/dashboard/matches/${matchId}`)
   revalidatePath(`/matches/${matchId}/scoring`)
+  return { success: true as const, ...result }
+})
+
+/**
+ * Umpire consent (COMP-06, mirroring scorer approval): the assigned member
+ * umpire consents to their assignment. Gated `match:read` because umpires may
+ * hold any member role; the locked writer's slot check is the real authority
+ * and an active effective membership is re-verified there.
+ */
+export const approveUmpireAssignment = withAuth("match:read", async (matchId: string) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(matchId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  const result = await approveUmpireAssignmentInMatch({ userId, tenantId, matchId })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/dashboard/matches/${matchId}`)
   return { success: true as const, ...result }
 })
 

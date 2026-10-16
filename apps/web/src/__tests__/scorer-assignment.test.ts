@@ -286,9 +286,24 @@ describe("Scorer assignment approval (COMP-06 official consent)", () => {
     mocks.returning.mockResolvedValueOnce([])
     await expect(approveScorerAssignment(MATCH)).rejects.toThrow("Match changed")
   })
-  it("an owner who occupies no slot can never approve on the scorer's behalf", async () => {
+  it("a member who occupies no slot can never approve on the scorer's behalf", async () => {
     mocks.match.mockResolvedValue({ ...approved, scorerApprovedAt: null })
     await expect(approveScorerAssignment(MATCH)).rejects.toThrow("not the assigned scorer")
     expectNoWrites()
+  })
+  it("a passed membership bound denies the assigned scorer's consent (SCORE-09)", async () => {
+    mocks.auth.mockResolvedValue({ userId: "scorer-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "scorer-clerk" ? { id: SCORER, clerkId: "scorer-clerk", isActive: true } : actor
+    })
+    mocks.member.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === OWNER ? ownerMember
+        : { userId: SCORER, tenantId: TENANT, role: "scorer", status: "active", expiresAt: "2020-01-01T00:00:00Z" }
+    })
+    mocks.match.mockResolvedValue({ ...approved, scorerApprovedAt: null })
+    await expect(approveScorerAssignment(MATCH)).rejects.toThrow("membership changed")
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 })

@@ -17,9 +17,12 @@
  *    the canonical writer. Missing registrations retain the legacy policy.
  *  - An umpire listing is advisory only, and is satisfied by EITHER a free
  *    text listing (external officials) OR a member-bound assignment
- *    (umpire1Id/umpire2Id, COMP-06). Umpire consent (like scorer approval)
- *    is not modeled yet. Free text and member slots can coexist; assigning a
- *    member never rewrites external listings.
+ *    (umpire1Id/umpire2Id, COMP-06). When the member-umpire consent
+ *    requirement is armed (`umpireApprovalRequired`, mirroring scorer
+ *    approval), the assigned member's consent (`umpireApprovedAt`) is part
+ *    of this check; a pending consent fails it even alongside free text.
+ *    Free text and member slots can coexist; assigning a member never
+ *    rewrites external listings.
  */
 export type MatchReadinessInput = {
   status: string | null
@@ -36,6 +39,9 @@ export type MatchReadinessInput = {
   /** Member-bound officials (COMP-06); satisfied alongside free-text listing. */
   umpire1Id?: string | null
   umpire2Id?: string | null
+  /** Umpire consent state (mirrors scorer approval); absent/undefined = legacy. */
+  umpireApprovalRequired?: boolean
+  umpireApprovedAt?: Date | string | null
   tournamentId?: string | null
   teamASquadDeclared?: boolean
   teamBSquadDeclared?: boolean
@@ -84,10 +90,15 @@ export function computeMatchReadiness(input: MatchReadinessInput): {
     },
     {
       id: "officials",
-      label: "Umpire listed or assigned",
-      pass: (input.umpire1 !== null && input.umpire1 !== "")
-        || input.umpire1Id !== null && input.umpire1Id !== undefined
-        || input.umpire2Id !== null && input.umpire2Id !== undefined,
+      label: input.umpireApprovalRequired ? "Member umpire assigned and approved" : "Umpire listed or assigned",
+      // A member assignment with a pending consent fails even when a free-text
+      // listing exists - the consent question stays visible in readiness.
+      pass: input.umpireApprovalRequired
+        ? input.umpireApprovedAt !== null && input.umpireApprovedAt !== undefined
+          && (input.umpire1Id !== null && input.umpire1Id !== undefined || input.umpire2Id !== null && input.umpire2Id !== undefined)
+        : (input.umpire1 !== null && input.umpire1 !== "")
+          || input.umpire1Id !== null && input.umpire1Id !== undefined
+          || input.umpire2Id !== null && input.umpire2Id !== undefined,
       blocking: false,
     },
   ]

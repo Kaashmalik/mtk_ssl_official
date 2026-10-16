@@ -125,4 +125,20 @@ describe("match readiness - official approval (COMP-06 consent)", () => {
     expect(check(backup, "scorer").pass).toBe(true)
     expect(check(withConsent, "scorer").blocking).toBe(false)
   })
+  it("members-umpire consent is part of the officials check only when the requirement is armed", () => {
+    // Legacy / free-text-only matches and unconsented-free member team keep the old shape.
+    expect(check({ ...readyFixture }, "officials").pass).toBe(true)
+    expect(check({ ...readyFixture }, "officials").label).toBe("Umpire listed or assigned")
+    expect(check({ ...readyFixture, umpire1: "", umpire1Id: T(90) as unknown as string }, "officials").pass).toBe(true)
+    // Pending member-umpire consent fails the advisory - even with a free-text listing alongside.
+    const pending = { ...readyFixture, umpire1: "Ext.", umpire1Id: T(90) as unknown as string, umpireApprovalRequired: true }
+    expect(check(pending, "officials").pass).toBe(false)
+    expect(check(pending, "officials").label).toBe("Member umpire assigned and approved")
+    expect(check({ ...pending, umpire1: "" }, "officials").pass).toBe(false)
+    // Recorded consent satisfies it, including a second-slot occupation.
+    const withConsent = { ...pending, umpireApprovedAt: new Date("2026-10-16T11:00:00Z") }
+    expect(check(withConsent, "officials").pass).toBe(true)
+    expect(check({ ...withConsent, umpire1Id: null, umpire2Id: T(91) as unknown as string }, "officials").pass).toBe(true)
+    expect(check(withConsent, "officials").blocking).toBe(false)
+  })
 })

@@ -13,6 +13,7 @@ import { StreamStartModal } from "@/components/matches/stream-start-modal"
 import { ScorerAssign } from "@/components/matches/scorer-assign"
 import { ScorerApprovalButton } from "@/components/matches/scorer-approval-button"
 import { UmpireAssign } from "@/components/matches/umpire-assign"
+import { UmpireApprovalButton } from "@/components/matches/umpire-approval-button"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
@@ -32,17 +33,20 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
     notFound()
   }
 
-  // Official approval (COMP-06): resolve whether the viewer is the assigned
-  // primary/backup scorer so only they see the consent control. The writer
-  // re-verifies the slot under a lock; this read only sizes the button.
+  // Official consent (COMP-06): resolve whether the viewer occupies a pending
+  // scorer or member-umpire slot so only they see the consent controls. The
+  // writers re-verify the slot under a lock; this read only sizes the buttons.
   let viewerOccupiesScorerSlot = false
-  if (match.scorerApprovalRequired && !match.scorerApprovedAt) {
+  let viewerOccupiesUmpireSlot = false
+  if ((match.scorerApprovalRequired && !match.scorerApprovedAt)
+    || (match.umpireApprovalRequired && !match.umpireApprovedAt)) {
     const { userId: viewerClerkId } = await auth()
     if (viewerClerkId) {
       const [viewer] = await db.select({ id: users.id }).from(users)
         .where(and(eq(users.clerkId, viewerClerkId), eq(users.isActive, true))).limit(1)
-      if (viewer && (match.scorerId === viewer.id || match.backupScorerId === viewer.id)) {
-        viewerOccupiesScorerSlot = true
+      if (viewer) {
+        if (match.scorerId === viewer.id || match.backupScorerId === viewer.id) viewerOccupiesScorerSlot = true
+        if (match.umpire1Id === viewer.id || match.umpire2Id === viewer.id) viewerOccupiesUmpireSlot = true
       }
     }
   }
@@ -316,6 +320,12 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
               <p className="text-xs text-muted-foreground">The owner's assignment needs your consent before approval is recorded for you.</p>
             </div>
           )}
+          {viewerOccupiesUmpireSlot && (
+            <div className="flex flex-wrap items-center gap-3">
+              <UmpireApprovalButton matchId={match.id} />
+              <p className="text-xs text-muted-foreground">The owner's umpire assignment needs your consent before approval is recorded for you.</p>
+            </div>
+          )}
         </div>
       </MotionWrapper>
 
@@ -335,6 +345,8 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
             umpire1: match.umpire1,
             umpire1Id: match.umpire1Id,
             umpire2Id: match.umpire2Id,
+            umpireApprovalRequired: match.umpireApprovalRequired,
+            umpireApprovedAt: match.umpireApprovedAt,
             tournamentId: match.tournamentId,
             teamASquadDeclared,
             teamARegistrationApproved,

@@ -159,10 +159,20 @@ export async function assignUmpireInMatch(input: {
       throw new Error("The same person cannot be both umpires")
     }
     if ((targetSlot === "primary" ? existing.umpire1Id : existing.umpire2Id) === umpireId) return existing
+    const nextUmpire1Id = targetSlot === "primary" ? umpireId : existing.umpire1Id
+    const nextUmpire2Id = targetSlot === "secondary" ? umpireId : existing.umpire2Id
+    // Umpire consent (COMP-06, mirroring scorer approval): consent binds to
+    // the exact assignment. Any change to either slot revokes it and, when a
+    // member slot remains occupied, the assigned member must approve again.
+    const patch = targetSlot === "primary"
+      ? { umpire1Id: umpireId, updatedAt: new Date() }
+      : { umpire2Id: umpireId, updatedAt: new Date() }
+    Object.assign(patch, {
+      umpireApprovalRequired: nextUmpire1Id !== null || nextUmpire2Id !== null,
+      umpireApprovedAt: null,
+    })
     const [updated] = await tx.update(matches)
-      .set(targetSlot === "primary"
-        ? { umpire1Id: umpireId, updatedAt: new Date() }
-        : { umpire2Id: umpireId, updatedAt: new Date() })
+      .set(patch)
       .where(key)
       .returning()
     if (!updated) throw new Error("Match changed. Reload before assigning.")
@@ -170,8 +180,8 @@ export async function assignUmpireInMatch(input: {
       requestId: randomUUID(), tenantId, actorId: actor.id, actorRole: actorMember.role,
       method: "MATCH_UMPIRE_ASSIGN", path: `/dashboard/matches/${matchId}`, statusCode: "200",
       payload: { matchId, slot: targetSlot,
-        before: { umpire1Id: existing.umpire1Id, umpire2Id: existing.umpire2Id },
-        after: { umpire1Id: updated.umpire1Id, umpire2Id: updated.umpire2Id } },
+        before: { umpire1Id: existing.umpire1Id, umpire2Id: existing.umpire2Id, umpireApprovedAt: existing.umpireApprovedAt },
+        after: { umpire1Id: updated.umpire1Id, umpire2Id: updated.umpire2Id, umpireApprovalRequired: updated.umpireApprovalRequired, umpireApprovedAt: updated.umpireApprovedAt } },
     })
     return updated
   }, { isolationLevel: "read committed" }))
@@ -286,6 +296,12 @@ export async function approveScorerAssignmentInMatch(input: {
     await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.clerkId} = ${userId} FOR UPDATE`)
     const actor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
     if (!actor || actor.clerkId !== userId || actor.isActive !== true) throw new Error("Forbidden: approval account unavailable")
+    // SCORE-09: a membership whose bound has passed denies this league surface.
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || !membershipGrantsAccess(actorMember)) throw new Error("Forbidden: your membership changed")
     const slot: "primary" | "backup" | null = match.scorerId === actor.id
       ? "primary"
       : match.backupScorerId === actor.id ? "backup" : null
@@ -303,6 +319,57 @@ export async function approveScorerAssignmentInMatch(input: {
       requestId: randomUUID(), tenantId, actorId: actor.id,
       method: "SCORER_ASSIGNMENT_APPROVE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
       payload: { matchId, slot, scorerId: slot === "primary" ? match.scorerId : match.backupScorerId, approvedAt: approvedAt.toISOString() },
+    })
+    return { matchId, slot, approvedAt }
+  }, { isolationLevel: "read committed" }))
+}
+
+/**
+ * Umpire consent (COMP-06, mirroring scorer approval): the ASSIGNED member
+ * consents to their member-umpire assignment. Fail-closed: an occupied member
+ * slot containing the actor, an armed requirement and a still-pending state
+ * are all re-checked under the match row lock; a concurrent assignment change
+ * wins the conditional update and voids this approval. Unlike scorer consent
+ * this is gated `match:read` at the action tier (umpires may hold any role);
+ * the slot check here is the real authority - nobody else can ever approve.
+ */
+export async function approveUmpireAssignmentInMatch(input: {
+  userId: string
+  tenantId: string
+  matchId: string
+}): Promise<{ matchId: string; slot: "primary" | "secondary"; approvedAt: Date }> {
+  const { userId, tenantId, matchId } = input
+  return withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const match = await tx.query.matches.findFirst({ where: key })
+    if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.clerkId} = ${userId} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!actor || actor.clerkId !== userId || actor.isActive !== true) throw new Error("Forbidden: approval account unavailable")
+    // SCORE-09: a membership whose bound has passed denies this league surface.
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || !membershipGrantsAccess(actorMember)) throw new Error("Forbidden: your membership changed")
+    const slot: "primary" | "secondary" | null = match.umpire1Id === actor.id
+      ? "primary"
+      : match.umpire2Id === actor.id ? "secondary" : null
+    if (!slot) throw new Error("You are not the assigned umpire of this match")
+    if (!match.umpireApprovalRequired) throw new Error("This assignment does not require approval")
+    if (match.umpireApprovedAt) throw new Error("This assignment is already approved")
+    const approvedAt = new Date()
+    const [updated] = await tx.update(matches)
+      .set({ umpireApprovedAt: approvedAt, updatedAt: approvedAt })
+      .where(and(key, eq(matches.umpireApprovalRequired, true), isNull(matches.umpireApprovedAt),
+        slot === "primary" ? eq(matches.umpire1Id, actor.id) : eq(matches.umpire2Id, actor.id)))
+      .returning({ id: matches.id })
+    if (!updated) throw new Error("Match changed. Reload before approving.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id,
+      method: "UMPIRE_ASSIGNMENT_APPROVE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId, slot, umpireId: slot === "primary" ? match.umpire1Id : match.umpire2Id, approvedAt: approvedAt.toISOString() },
     })
     return { matchId, slot, approvedAt }
   }, { isolationLevel: "read committed" }))

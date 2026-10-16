@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { auditLogs, matches } from "@mtk/database"
-import { assignUmpire, getUmpiresForTenant } from "@/app/actions/matches"
+import { assignUmpire, approveUmpireAssignment, getUmpiresForTenant } from "@/app/actions/matches"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), permission: vi.fn(), tenant: vi.fn(), myTenant: vi.fn(),
   where: vi.fn(), limit: vi.fn(), set: vi.fn(), updateWhere: vi.fn(), returning: vi.fn(), context: vi.fn(),
@@ -69,13 +69,14 @@ describe("Member-bound umpire assignment (COMP-06)", () => {
     expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith(matches)
     expect(mocks.directUpdate).not.toHaveBeenCalled()
-    expect(mocks.set).toHaveBeenCalledWith({ [field]: U1, updatedAt: expect.any(Date) })
+    expect(mocks.set).toHaveBeenCalledWith({ [field]: U1, updatedAt: expect.any(Date),
+      umpireApprovalRequired: true, umpireApprovedAt: null })
     expect(dialect.sqlToQuery(mocks.updateWhere.mock.calls[0][0]).params).toEqual([MATCH, TENANT])
     expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, actorId: OWNER,
       actorRole: "league_owner", method: "MATCH_UMPIRE_ASSIGN", payload: {
-        matchId: MATCH, slot, before: { umpire1Id: null, umpire2Id: null },
-        after: { umpire1Id: null, umpire2Id: null, [field]: U1 },
+        matchId: MATCH, slot, before: { umpire1Id: null, umpire2Id: null, umpireApprovedAt: undefined },
+        after: { umpire1Id: null, umpire2Id: null, [field]: U1, umpireApprovalRequired: true, umpireApprovedAt: null },
       } }))
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
   })
@@ -130,7 +131,9 @@ describe("Member-bound umpire assignment (COMP-06)", () => {
     mocks.match.mockResolvedValue({ ...fixture, umpire1Id: U1, umpire2Id: U2 })
     const result = await assignUmpire(MATCH, "primary", null)
     expect(result).toMatchObject({ success: true, match: { umpire1Id: null } })
-    expect(mocks.set).toHaveBeenCalledWith({ umpire1Id: null, updatedAt: expect.any(Date) })
+    // The other member slot stays occupied, so the consent requirement stays armed.
+    expect(mocks.set).toHaveBeenCalledWith({ umpire1Id: null, updatedAt: expect.any(Date),
+      umpireApprovalRequired: true, umpireApprovedAt: null })
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ method: "MATCH_UMPIRE_ASSIGN",
       payload: expect.objectContaining({ slot: "primary" }) }))
   })
@@ -167,5 +170,98 @@ describe("Member-bound umpire assignment (COMP-06)", () => {
     const list = await getUmpiresForTenant()
     expect(list).toBeDefined()
     expect(mocks.permission).toHaveBeenCalledWith("match:update", TENANT)
+  })
+})
+describe("Umpire assignment consent (COMP-06, mirrors scorer approval)", () => {
+  const approved = { ...fixture, umpire1Id: U1, umpireApprovalRequired: true, umpireApprovedAt: new Date("2026-01-02T00:00:00Z") }
+
+  it("a same-value re-assignment preserves existing consent", async () => {
+    mocks.match.mockResolvedValue({ ...approved })
+    await assignUmpire(MATCH, "primary", U1)
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+  it("clearing the last occupied member slot disarms the consent requirement", async () => {
+    mocks.match.mockResolvedValue({ ...approved })
+    await assignUmpire(MATCH, "primary", null)
+    expect(mocks.set).toHaveBeenLastCalledWith(expect.objectContaining({ umpireApprovalRequired: false, umpireApprovedAt: null }))
+  })
+  it("the assigned umpire approves their pending assignment with a conditional, audited update", async () => {
+    mocks.auth.mockResolvedValue({ userId: "umpire-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "umpire-clerk" ? { id: U1, clerkId: "umpire-clerk", isActive: true } : actor
+    })
+    mocks.member.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === OWNER ? ownerMember : { userId: U1, tenantId: TENANT, role: "player", status: "active" }
+    })
+    mocks.match.mockResolvedValue({ ...approved, umpireApprovedAt: null })
+    mocks.returning.mockResolvedValueOnce([{ id: MATCH }])
+    const result = await approveUmpireAssignment(MATCH)
+    expect(result).toMatchObject({ success: true, matchId: MATCH, slot: "primary" })
+    expect(mocks.set).toHaveBeenLastCalledWith(expect.objectContaining({ umpireApprovedAt: expect.any(Date) }))
+    const where = dialect.sqlToQuery(mocks.updateWhere.mock.calls.at(-1)![0])
+    expect(where.sql).toContain("umpire_approval_required")
+    expect(where.sql).toContain("umpire_approved_at")
+    expect(where.sql).toContain("umpire1_id")
+    expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ method: "UMPIRE_ASSIGNMENT_APPROVE",
+      payload: expect.objectContaining({ matchId: MATCH, slot: "primary" }) }))
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
+  })
+  it("a passed membership bound denies the assigned umpire's consent (SCORE-09)", async () => {
+    mocks.auth.mockResolvedValue({ userId: "umpire-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "umpire-clerk" ? { id: U1, clerkId: "umpire-clerk", isActive: true } : actor
+    })
+    mocks.member.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === OWNER ? ownerMember
+        : { userId: U1, tenantId: TENANT, role: "player", status: "active", expiresAt: "2020-01-01T00:00:00Z" }
+    })
+    mocks.match.mockResolvedValue({ ...approved, umpireApprovedAt: null })
+    await expect(approveUmpireAssignment(MATCH)).rejects.toThrow("membership changed")
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+  it.each([
+    ["not occupying a member slot", { ...fixture, umpire1Id: "00000000-0000-4000-8000-000000000008", umpireApprovalRequired: true }],
+    ["no outstanding consent requirement", { ...fixture, umpire1Id: U1, umpireApprovalRequired: false }],
+    ["already approved", { ...approved }],
+  ])("rejects consent when the match is %s", async (_label, match) => {
+    mocks.auth.mockResolvedValue({ userId: "umpire-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "umpire-clerk" ? { id: U1, clerkId: "umpire-clerk", isActive: true } : actor
+    })
+    mocks.member.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === OWNER ? ownerMember : { userId: U1, tenantId: TENANT, role: "player", status: "active" }
+    })
+    mocks.match.mockResolvedValue(match)
+    await expect(approveUmpireAssignment(MATCH)).rejects.toThrow()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+  it("a concurrent assignment change wins the conditional update and voids the consent", async () => {
+    mocks.auth.mockResolvedValue({ userId: "umpire-clerk" })
+    mocks.user.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === "umpire-clerk" ? { id: U1, clerkId: "umpire-clerk", isActive: true } : actor
+    })
+    mocks.member.mockImplementation(async ({ where }) => {
+      const [param] = dialect.sqlToQuery(where).params
+      return param === OWNER ? ownerMember : { userId: U1, tenantId: TENANT, role: "player", status: "active" }
+    })
+    mocks.match.mockResolvedValue({ ...approved, umpireApprovedAt: null })
+    mocks.returning.mockResolvedValueOnce([])
+    await expect(approveUmpireAssignment(MATCH)).rejects.toThrow("Match changed")
+  })
+  it("a member occupying no umpire slot can never approve on the assigned member's behalf", async () => {
+    mocks.match.mockResolvedValue({ ...approved, umpireApprovedAt: null })
+    await expect(approveUmpireAssignment(MATCH)).rejects.toThrow("not the assigned umpire")
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 })
