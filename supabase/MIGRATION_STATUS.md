@@ -11,6 +11,17 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 56 application-only follow-up (16 October 2026)
+
+Member assignment reads now detect and disclose capped results rather than implying
+that omitted assignments do not exist. They remain exact-league, account-filtered,
+bounded application reads with resource-ID ordering. The member removal writer,
+its locks, version checks, assignment guards and audit behavior are unchanged.
+No database inspection, write, migration application, RLS/grant change or deployment
+was performed in this batch. The rebuild evidence below is historical; it was not
+independently revalidated by this source-only work. Real-DB and browser acceptance
+remain required, and the release gate stays default-off.
+
 ### Rebuild summary (15 October 2026)
 
 | Check | Result |

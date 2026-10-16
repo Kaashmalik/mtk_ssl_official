@@ -3176,6 +3176,39 @@ scoring-service contracts), COMP-07 remainder (forfeits/disputes, competition lo
 scoped notices — schema), then records/awards. Roadmap counts: **19 checked / 60 open /
 79 IDs**.
 
+### Batch 56 — truthful assignment completeness and actionable resources (16 October 2026)
+
+IAM-02 follow-up after syncing clean `main` with `origin/main` at `0736dc2`.
+The Batch 55 assignment list stopped after 200 rows per resource kind. A member whose
+assignments were omitted could appear to have "None", even though removal would refuse.
+
+`readMemberAssignments` now validates UUIDs and bounds the input roster to 100 accounts,
+orders both exact-league reads by resource ID, and fetches one extra row to detect
+overflow. Only the first 200 resources per kind are returned. If either read overflows,
+all loaded members are marked incomplete because omitted rows could belong to any of
+them. An exact 200-row result remains complete. Reads remain two bounded queries with
+no per-member query fan-out; failures propagate.
+
+The table no longer calls unloaded or partial assignments "None". Partial counts are
+lower bounds, linked resources take the owner to existing guarded team/match pages,
+and the confirmation explains that listed blockers are a snapshot, rechecked by the
+unchanged removal writer. The members page now surfaces unavailable authorization
+context instead of redirecting it as an ordinary denial. Confirmed denial/non-owner
+redirects remain unchanged, including the settings-members alias.
+
+Regressions: assignment reader +9 (overflow in either kind, exact boundary, input
+validation and failure propagation); member view +4 (unknown/partial/escaped resources);
+new `members-page.test.tsx` (14 — league-scoped wiring, alias, denial and failure paths).
+
+Fresh verification: full web **2,355 tests / 93 files passed** (+27), process exit 0;
+targeted **143 tests / 6 files passed**. Type checking still fails on **18 pre-existing
+errors**, down from 19 after correcting the touched view fixture's status type rather
+than using an incompatible literal cast. No new diagnostics; `git diff --check` clean. These
+are mocked-query/SSR/page tests, not real PostgreSQL concurrency or browser certification.
+No schema, migration, RLS, grants, providers, remote database or deployment changes.
+Next: remaining IAM-02 search/pagination/detail work and PUB-03 format-qualified records.
+The release gate remains default-off; roadmap stays **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

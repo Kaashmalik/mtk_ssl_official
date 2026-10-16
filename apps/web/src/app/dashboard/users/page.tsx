@@ -18,6 +18,7 @@ export default async function UserManagementPage() {
   if (!clerkId) redirect("/")
 
   const access = await getDashboardContext(clerkId)
+  if (access.status === "unavailable") throw new Error("League member access is unavailable. Please try again.")
   if (access.status !== "ready" || access.context.role !== "league_owner") redirect("/dashboard")
   const { actorId: currentUserId, tenantId, tenantName } = access.context
   const initialUsers = await getUsers(tenantId)

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import { UserListTable } from "@/components/users/user-list-table"
 import { readFileSync } from "node:fs"
+import type { MemberAssignmentMap } from "@/lib/member-assignments"
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 vi.mock("@/app/actions/users", () => ({ updateUserRole: vi.fn(), toggleUserStatus: vi.fn() }))
@@ -18,7 +19,7 @@ vi.mock("@mtk/ui/components/ui/dialog", () => ({
 }))
 const member = { id: "ali", membershipId: "membership-A", email: "ali@example.test", displayName: "Ali", avatarUrl: null,
   role: "scorer", status: "active" as const, accountActive: true, protectedAccess: false, version: 2, createdAt: new Date("2026-10-12T00:00:00Z") }
-const render = (input = member, assignments?: Record<string, { managedTeamNames: string[]; scoringMatches: { id: string; matchNumber: number | null; status: string; scheduledDate: Date | null; role: "scorer" | "backup" }[] }>) =>
+const render = (input: React.ComponentProps<typeof UserListTable>["initialUsers"][number] = member, assignments?: MemberAssignmentMap) =>
   renderToStaticMarkup(<UserListTable initialUsers={[input]} assignments={assignments} currentUserId="owner" tenantId="A" tenantName="League A" />)
 describe("League member UI contracts (SSR/stubbed controls, not browser certification)", () => {
   it("labels league-only effects and loaded-row search", () => {
@@ -37,7 +38,7 @@ describe("League member UI contracts (SSR/stubbed controls, not browser certific
     expect(html).toContain("Platform account blocked")
   })
   it("shows a suspended membership without calling it global disablement", () => {
-    const html = render({ ...member, status: "suspended" } as typeof member)
+    const html = render({ ...member, status: "suspended" })
     expect(html).toContain("Suspended in league")
     expect(html).toContain("Reactivate in league")
     expect(html).not.toContain("Disable")
@@ -70,23 +71,49 @@ describe("League member UI contracts (SSR/stubbed controls, not browser certific
     expect(source).toContain("No other league or global account is changed")
   })
   it("surfaces the operational assignments that block a removal", () => {
-    const html = render(member, { [member.id]: { managedTeamNames: ["Falcons", "Hawks"], scoringMatches: [
+    const html = render(member, { [member.id]: { managedTeams: [{ id: "team-1", name: "Falcons" }, { id: "team-2", name: "Hawks" }], isComplete: true, scoringMatches: [
       { id: "m1", matchNumber: 7, status: "live", scheduledDate: null, role: "scorer" },
       { id: "m2", matchNumber: 8, status: "scheduled", scheduledDate: null, role: "backup" },
     ] } })
     expect(html).toContain("Assignments")
-    expect(html).toContain("manages Falcons, Hawks")
+    expect(html).toContain("manages 2 teams")
+    expect(html).toContain('href="/dashboard/teams/team-1"')
+    expect(html).toContain('href="/dashboard/matches/m1"')
+    expect(html).toContain('href="/dashboard/matches/m2"')
+    expect(html).toContain("Falcons")
     expect(html).toContain("scorer on 1 match")
     expect(html).toContain("backup scorer on 1 match")
   })
   it("marks a member with no operational assignments as None", () => {
-    const html = render()
+    const html = render(member, { [member.id]: { managedTeams: [], scoringMatches: [], isComplete: true } })
     expect(html).toContain("Assignments")
     expect(html).toContain("None")
   })
   it("names the blocking assignments inside the removal confirmation", () => {
     const source = readFileSync(new URL("../components/users/user-list-table.tsx", import.meta.url), "utf8")
-    expect(source).toContain("Blocking now:")
+    expect(source).toContain("Listed blockers:")
     expect(source).toContain("describeAssignments")
+    expect(source).toContain("Assignments are rechecked on removal")
+  })
+  it("does not misrepresent an unloaded assignment map as None", () => {
+    const html = render()
+    expect(html).toContain("Assignments not loaded")
+    expect(html).not.toContain(">None<")
+  })
+  it("does not misrepresent an empty truncated result as None", () => {
+    const html = render(member, { [member.id]: { managedTeams: [], scoringMatches: [], isComplete: false } })
+    expect(html).toContain("No assignments in loaded results")
+    expect(html).toContain("Additional assignments may block removal")
+    expect(html).not.toContain(">None<")
+  })
+  it("labels counts as lower bounds when assignments are truncated", () => {
+    const html = render(member, { [member.id]: { managedTeams: [{ id: "team-1", name: "Falcons" }], scoringMatches: [], isComplete: false } })
+    expect(html).toContain("At least: manages 1 team")
+    expect(html).toContain("Partial assignment list")
+  })
+  it("escapes assignment names rather than rendering markup", () => {
+    const html = render(member, { [member.id]: { managedTeams: [{ id: "team-1", name: "<script>bad</script>" }], scoringMatches: [], isComplete: true } })
+    expect(html).toContain("&lt;script&gt;bad&lt;/script&gt;")
+    expect(html).not.toContain("<script>")
   })
 })

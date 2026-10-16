@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@mtk/ui/components/ui/table"
 import { Badge } from "@mtk/ui/components/ui/badge"
@@ -39,12 +40,12 @@ const ROLE_OPTIONS = [
 function describeAssignments(assignments?: MemberAssignmentMap[string]): string[] {
   if (!assignments) return []
   const parts: string[] = []
-  if (assignments.managedTeamNames.length > 0) parts.push(`manages ${assignments.managedTeamNames.join(", ")}`)
+  if (assignments.managedTeams.length > 0) parts.push(`manages ${assignments.managedTeams.length} team${assignments.managedTeams.length === 1 ? "" : "s"}`)
   const scorer = assignments.scoringMatches.filter(match => match.role === "scorer").length
   const backup = assignments.scoringMatches.filter(match => match.role === "backup").length
   if (scorer > 0) parts.push(`scorer on ${scorer} match${scorer === 1 ? "" : "es"}`)
   if (backup > 0) parts.push(`backup scorer on ${backup} match${backup === 1 ? "" : "es"}`)
-  return parts
+  return assignments.isComplete ? parts : parts.map(part => `At least: ${part}`)
 }
 
 export function UserListTable({ initialUsers, assignments = {}, currentUserId, tenantId, tenantName }: {
@@ -117,13 +118,26 @@ export function UserListTable({ initialUsers, assignments = {}, currentUserId, t
           <TableBody>
             {filtered.map(member => {
               const protectedMember = member.protectedAccess || member.id === currentUserId || ["league_owner", "super_admin"].includes(member.role)
-              const assignmentSummary = describeAssignments(assignments[member.id])
+              const memberAssignments = assignments[member.id]
+              const assignmentSummary = describeAssignments(memberAssignments)
               return <TableRow key={member.membershipId}>
                 <TableCell><span className="font-semibold block">{member.displayName || "No display name"}</span><span className="text-xs text-muted-foreground">Joined {new Date(member.createdAt).toLocaleDateString()}</span></TableCell>
                 <TableCell>{member.email}</TableCell>
-                <TableCell>{assignmentSummary.length === 0
-                  ? <span className="text-xs text-muted-foreground">None</span>
-                  : <div className="flex flex-col gap-1 items-start text-xs">{assignmentSummary.map(part => <Badge key={part} variant="secondary">{part}</Badge>)}</div>}
+                <TableCell>{!memberAssignments
+                  ? <span className="text-xs text-muted-foreground">Assignments not loaded</span>
+                  : <div className="space-y-2 text-xs">
+                    {assignmentSummary.length === 0
+                      ? <span className="text-muted-foreground">{memberAssignments.isComplete ? "None" : "No assignments in loaded results"}</span>
+                      : <div className="flex flex-col gap-1 items-start">{assignmentSummary.map(part => <Badge key={part} variant="secondary">{part}</Badge>)}</div>}
+                    {!memberAssignments.isComplete && <p className="text-muted-foreground">Partial assignment list. Additional assignments may block removal.</p>}
+                    {assignmentSummary.length > 0 && <details>
+                      <summary className="cursor-pointer min-h-11 flex items-center">View listed assignments for {member.displayName || member.email}</summary>
+                      <ul className="space-y-1">
+                        {memberAssignments.managedTeams.map(team => <li key={team.id}><Link className="underline inline-flex min-h-11 items-center" href={`/dashboard/teams/${team.id}`}>Manage team: {team.name}</Link></li>)}
+                        {memberAssignments.scoringMatches.map(match => <li key={match.id}><Link className="underline inline-flex min-h-11 items-center" href={`/dashboard/matches/${match.id}`}>{match.role === "backup" ? "Backup scorer" : "Scorer"}: {match.matchNumber === null ? "Match" : `Match ${match.matchNumber}`} ({match.status.replaceAll("_", " ")})</Link></li>)}
+                      </ul>
+                    </details>}
+                  </div>}
                 </TableCell>
                 <TableCell>{protectedMember ? <Badge variant="outline">{member.role.replaceAll("_", " ")}</Badge> :
                   <Select disabled={updatingId !== null} value={member.role} onValueChange={value => void save(member, { role: value as MemberRoleChange["role"] })}>
@@ -174,7 +188,9 @@ export function UserListTable({ initialUsers, assignments = {}, currentUserId, t
               This removes {removal?.displayName || removal?.email} from {tenantName} only. Their global account and any other league are unchanged, and historical match/statistics records are kept.
               {" "}Removal is refused while the member still manages a team or is assigned to a match — unassign those first.
               {removal && describeAssignments(assignments[removal.id]).length > 0 &&
-                <span className="block mt-2 font-medium text-destructive">Blocking now: {describeAssignments(assignments[removal.id]).join("; ")}.</span>}
+                <span className="block mt-2 font-medium text-destructive">Listed blockers: {describeAssignments(assignments[removal.id]).join("; ")}.</span>}
+              {removal && !assignments[removal.id]?.isComplete && <span className="block mt-2">Assignment information is incomplete or not loaded. The server checks all current assignments before removal.</span>}
+              <span className="block mt-2">Assignments are rechecked on removal; this list is a snapshot.</span>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
