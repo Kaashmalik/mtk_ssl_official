@@ -8,6 +8,7 @@ import { UserListTable } from "@/components/users/user-list-table"
 import { InviteManager } from "@/components/users/invite-manager"
 import { OwnershipTransferPanel } from "@/components/settings/ownership-transfer-panel"
 import { getDashboardContext } from "@/lib/dashboard-context"
+import { readMemberAssignments } from "@/lib/member-assignments"
 import { unstable_noStore as noStore } from "next/cache"
 
 export default async function UserManagementPage() {
@@ -20,6 +21,7 @@ export default async function UserManagementPage() {
   if (access.status !== "ready" || access.context.role !== "league_owner") redirect("/dashboard")
   const { actorId: currentUserId, tenantId, tenantName } = access.context
   const initialUsers = await getUsers(tenantId)
+  const assignments = await readMemberAssignments(tenantId, initialUsers.map((member) => member.id))
   const transfer = await getOwnershipTransfer(tenantId)
 
   return (
@@ -45,7 +47,7 @@ export default async function UserManagementPage() {
 
       {/* Table Section */}
       <MotionWrapper variant="fadeInUp" delay={0.1}>
-        <UserListTable key={tenantId} initialUsers={initialUsers} currentUserId={currentUserId} tenantId={tenantId} tenantName={tenantName} />
+        <UserListTable key={tenantId} initialUsers={initialUsers} assignments={assignments} currentUserId={currentUserId} tenantId={tenantId} tenantName={tenantName} />
       </MotionWrapper>
     </div>
   )

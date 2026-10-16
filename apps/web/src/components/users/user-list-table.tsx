@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Search, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { updateUserRole, toggleUserStatus, removeMember, type MemberRoleChange } from "@/app/actions/users"
+import type { MemberAssignmentMap } from "@/lib/member-assignments"
 
 interface Member {
   id: string
@@ -34,8 +35,20 @@ const ROLE_OPTIONS = [
   { value: "fan", label: "Fan" },
 ] as const
 
-export function UserListTable({ initialUsers, currentUserId, tenantId, tenantName }: {
-  initialUsers: Member[]; currentUserId?: string | null; tenantId: string; tenantName: string
+/** Human summary of the operational assignments that block a removal. */
+function describeAssignments(assignments?: MemberAssignmentMap[string]): string[] {
+  if (!assignments) return []
+  const parts: string[] = []
+  if (assignments.managedTeamNames.length > 0) parts.push(`manages ${assignments.managedTeamNames.join(", ")}`)
+  const scorer = assignments.scoringMatches.filter(match => match.role === "scorer").length
+  const backup = assignments.scoringMatches.filter(match => match.role === "backup").length
+  if (scorer > 0) parts.push(`scorer on ${scorer} match${scorer === 1 ? "" : "es"}`)
+  if (backup > 0) parts.push(`backup scorer on ${backup} match${backup === 1 ? "" : "es"}`)
+  return parts
+}
+
+export function UserListTable({ initialUsers, assignments = {}, currentUserId, tenantId, tenantName }: {
+  initialUsers: Member[]; assignments?: MemberAssignmentMap; currentUserId?: string | null; tenantId: string; tenantName: string
 }) {
   const router = useRouter()
   const [members, setMembers] = useState(initialUsers)
@@ -99,14 +112,19 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
       <div className="rounded-xl border bg-card overflow-x-auto">
         <Table>
           <TableHeader><TableRow>
-            <TableHead>Member</TableHead><TableHead>Email</TableHead><TableHead>League role</TableHead><TableHead>League access</TableHead><TableHead className="text-right">Actions</TableHead>
+            <TableHead>Member</TableHead><TableHead>Email</TableHead><TableHead>Assignments</TableHead><TableHead>League role</TableHead><TableHead>League access</TableHead><TableHead className="text-right">Actions</TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {filtered.map(member => {
               const protectedMember = member.protectedAccess || member.id === currentUserId || ["league_owner", "super_admin"].includes(member.role)
+              const assignmentSummary = describeAssignments(assignments[member.id])
               return <TableRow key={member.membershipId}>
                 <TableCell><span className="font-semibold block">{member.displayName || "No display name"}</span><span className="text-xs text-muted-foreground">Joined {new Date(member.createdAt).toLocaleDateString()}</span></TableCell>
                 <TableCell>{member.email}</TableCell>
+                <TableCell>{assignmentSummary.length === 0
+                  ? <span className="text-xs text-muted-foreground">None</span>
+                  : <div className="flex flex-col gap-1 items-start text-xs">{assignmentSummary.map(part => <Badge key={part} variant="secondary">{part}</Badge>)}</div>}
+                </TableCell>
                 <TableCell>{protectedMember ? <Badge variant="outline">{member.role.replaceAll("_", " ")}</Badge> :
                   <Select disabled={updatingId !== null} value={member.role} onValueChange={value => void save(member, { role: value as MemberRoleChange["role"] })}>
                     <SelectTrigger className="min-h-11 min-w-[150px]" aria-label={`League role for ${member.displayName || member.email}`}><SelectValue /></SelectTrigger>
@@ -127,7 +145,7 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
                 </div>}</TableCell>
               </TableRow>
             })}
-            {filtered.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center">No league members match this search.</TableCell></TableRow>}
+            {filtered.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center">No league members match this search.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </div>
@@ -155,6 +173,8 @@ export function UserListTable({ initialUsers, currentUserId, tenantId, tenantNam
             <DialogDescription>
               This removes {removal?.displayName || removal?.email} from {tenantName} only. Their global account and any other league are unchanged, and historical match/statistics records are kept.
               {" "}Removal is refused while the member still manages a team or is assigned to a match — unassign those first.
+              {removal && describeAssignments(assignments[removal.id]).length > 0 &&
+                <span className="block mt-2 font-medium text-destructive">Blocking now: {describeAssignments(assignments[removal.id]).join("; ")}.</span>}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

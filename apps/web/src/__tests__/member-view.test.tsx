@@ -18,7 +18,8 @@ vi.mock("@mtk/ui/components/ui/dialog", () => ({
 }))
 const member = { id: "ali", membershipId: "membership-A", email: "ali@example.test", displayName: "Ali", avatarUrl: null,
   role: "scorer", status: "active" as const, accountActive: true, protectedAccess: false, version: 2, createdAt: new Date("2026-10-12T00:00:00Z") }
-const render = (input = member) => renderToStaticMarkup(<UserListTable initialUsers={[input]} currentUserId="owner" tenantId="A" tenantName="League A" />)
+const render = (input = member, assignments?: Record<string, { managedTeamNames: string[]; scoringMatches: { id: string; matchNumber: number | null; status: string; scheduledDate: Date | null; role: "scorer" | "backup" }[] }>) =>
+  renderToStaticMarkup(<UserListTable initialUsers={[input]} assignments={assignments} currentUserId="owner" tenantId="A" tenantName="League A" />)
 describe("League member UI contracts (SSR/stubbed controls, not browser certification)", () => {
   it("labels league-only effects and loaded-row search", () => {
     const html = render()
@@ -67,5 +68,25 @@ describe("League member UI contracts (SSR/stubbed controls, not browser certific
     expect(source).toContain("result.member")
     expect(source).toContain("Confirm league change")
     expect(source).toContain("No other league or global account is changed")
+  })
+  it("surfaces the operational assignments that block a removal", () => {
+    const html = render(member, { [member.id]: { managedTeamNames: ["Falcons", "Hawks"], scoringMatches: [
+      { id: "m1", matchNumber: 7, status: "live", scheduledDate: null, role: "scorer" },
+      { id: "m2", matchNumber: 8, status: "scheduled", scheduledDate: null, role: "backup" },
+    ] } })
+    expect(html).toContain("Assignments")
+    expect(html).toContain("manages Falcons, Hawks")
+    expect(html).toContain("scorer on 1 match")
+    expect(html).toContain("backup scorer on 1 match")
+  })
+  it("marks a member with no operational assignments as None", () => {
+    const html = render()
+    expect(html).toContain("Assignments")
+    expect(html).toContain("None")
+  })
+  it("names the blocking assignments inside the removal confirmation", () => {
+    const source = readFileSync(new URL("../components/users/user-list-table.tsx", import.meta.url), "utf8")
+    expect(source).toContain("Blocking now:")
+    expect(source).toContain("describeAssignments")
   })
 })

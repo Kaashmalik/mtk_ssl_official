@@ -3141,6 +3141,41 @@ scoring-service contracts), COMP-07 remainder (forfeits/disputes, competition lo
 scoped notices — schema), member UI + records. Roadmap counts: **19 checked / 60 open /
 79 IDs**.
 
+### Batch 55 — member assignments visibility (IAM-02 slice) (16 October 2026)
+
+The Members & access table showed a member's league role and status but not the operational
+assignments that block a removal, even though the removal guard refuses to orphan a managed
+team or an assigned scoring slot — the confirmation said "unassign those first" without
+saying what.
+
+New tenant-scoped `lib/member-assignments.ts` adds `readMemberAssignments(tenantId,
+userIds)`: one bounded read of the league's managed teams (`teams.managerId`) and one of its
+matches (`matches.scorerId`/`backupScorerId`), both `LIMIT 200` and both filtered by the
+exact tenant, assembled into a per-account map that seeds every loaded member. A member
+holding both scoring slots is recorded once (primary). An empty roster short-circuits
+before querying, since `inArray([])` is invalid SQL.
+
+`dashboard/users/page.tsx` passes the map to `UserListTable`, which gains an
+**Assignments** column ("None" when clear) and, in the removal confirmation, names the
+exact blockers. The prop is optional so the view still renders without assignments.
+
+New regressions: `member-assignments.test.ts` (6) and `member-view.test.tsx` (+3). No
+schema, migration, RLS, grant or deployment change; SSR/stubbed rendering is not browser
+certification.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS — **92** files, **2,328 tests** (+9) |
+| `tsc --noEmit` | **19 pre-existing** error lines only (new files clean) |
+| `git diff --check` | Clean |
+
+Next source work: officials approval + server-side XI enforcement (schema /
+scoring-service contracts), COMP-07 remainder (forfeits/disputes, competition locks and
+scoped notices — schema), then records/awards. Roadmap counts: **19 checked / 60 open /
+79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
