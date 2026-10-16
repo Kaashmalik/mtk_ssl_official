@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, battingScorecards, bowlingScorecards } from "@mtk/database"
+import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards } from "@mtk/database"
 import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 import {
   isTournamentPublished, isMatchPublished, readPublishedTournament, readPublishedMatch,
@@ -28,6 +28,8 @@ function selectChain() {
   const chain: any = {
     from: (table: any) => { record.table = table; return chain },
     innerJoin: (_table: any, where: any) => { record.joins.push(_table); if (where) merge(where); return chain },
+    // Verification provenance join (PUB-03): must never drop a name-only roster row.
+    leftJoin: (_table: any, where: any) => { record.joins.push(_table); if (where) merge(where); return chain },
     where: (where: any) => { merge(where); return chain },
     groupBy: () => { record.steps.push("groupBy"); return chain },
     having: (where: any) => { record.steps.push("having"); record.having = dialect.sqlToQuery(where); return chain },
@@ -43,6 +45,7 @@ function selectChain() {
         rows = (mocks.state.teams ?? []).filter((t: any) => t.id === wanted)
       } else if (record.table === matchInnings) rows = mocks.state.innings ?? []
       else if (record.table === playerSeasonStats) rows = mocks.state.leaderboard ?? []
+      else if (record.table === battingScorecards || record.table === bowlingScorecards) rows = mocks.state.scorecards ?? []
       return Promise.resolve(rows).then(resolve, reject)
     },
   }
@@ -158,7 +161,8 @@ describe("Public reads are tenant-scoped and publication-gated", () => {
       const query = mocks.queries[0]
       expect(query.table).toBe(rowsTable)
       // match -> published same-league tournament join, format pinned on the match.
-      expect(query.joins).toEqual([players, matchInnings, matches, tournaments])
+      // users is a LEFT join (verification provenance): a name-only roster row survives it.
+      expect(query.joins).toEqual([players, users, matchInnings, matches, tournaments])
       // The declared format is a bound parameter of the same-league, published predicate.
       expect(query.params).toContain("t20")
       expect(query.params.filter((p: unknown) => p === TENANT)).toHaveLength(5)
@@ -180,7 +184,28 @@ describe("Public reads are tenant-scoped and publication-gated", () => {
     await readPublicBattingLeaderboard(TENANT, { minimumInnings: 1, minimumBalls: 6 })
     const query = mocks.queries[0]
     expect(query.table).toBe(playerSeasonStats)
-    expect(query.joins).toEqual([players, tournaments])
+    // users is a LEFT join (verification provenance): a name-only roster row survives it.
+    expect(query.joins).toEqual([players, users, tournaments])
+  })
+
+  it("marks rows verified only for an active linked account, in both aggregation paths (PUB-03)", async () => {
+    const provenance = [
+      { playerId: "p1", playerName: "Linked Active", total: 40, playerUserId: "u1", linkedUserActive: true },
+      { playerId: "p2", playerName: "Linked Suspended", total: 35, playerUserId: "u2", linkedUserActive: false },
+      { playerId: "p3", playerName: "Name Only", total: 30, playerUserId: null, linkedUserActive: null },
+    ]
+    const expected = [
+      ["Linked Active", true],
+      ["Linked Suspended", false],
+      ["Name Only", false],
+    ]
+    mocks.state.leaderboard = provenance
+    expect((await readPublicBattingLeaderboard(TENANT)).map((r) => [r.playerName, r.playerVerified]))
+      .toEqual(expected)
+    mocks.state.leaderboard = []
+    mocks.state.scorecards = provenance
+    expect((await readPublicBowlingLeaderboard(TENANT, { format: "t20" })).map((r) => [r.playerName, r.playerVerified]))
+      .toEqual(expected)
   })
 
   it.each([

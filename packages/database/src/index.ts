@@ -20,6 +20,8 @@ export * from "./lib/plan-guard";
 export * from "./lib/membership-effectiveness";
 // Shared resource-scoped grant design (ISO-05): scorer slots + team grants
 export * from "./lib/resource-grants";
+// Verified player records + consented career linkage (PUB-03)
+export * from "./lib/career-records";
 
 // DB Errors
 export * from "./lib/db-errors";

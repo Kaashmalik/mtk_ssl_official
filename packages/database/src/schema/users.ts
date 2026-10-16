@@ -38,6 +38,11 @@ export const users = pgTable("users", {
   // read for league authorization (ISO-06).
   role: userRoleEnum("role").notNull().default("fan"),
   isActive: boolean("is_active").default(true).notNull(),
+  // PUB-03: affirmative cross-league career-linkage consent. Null = never
+  // granted; a timestamp counts as granted until the person revokes it.
+  // Gates only CROSS-LEAGUE merges (PUB-02 hub); per-league publication is
+  // unchanged by it.
+  publicCareerConsentAt: timestamp("public_career_consent_at", { withTimezone: true }),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

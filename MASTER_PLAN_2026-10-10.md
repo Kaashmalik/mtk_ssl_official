@@ -4023,6 +4023,82 @@ Next source work: release gates (Batch 62 evidence + services deployment
 remain the unmet close-out), PUB-03 verified-records/consent design.
 Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 77 - PUB-03: verified player records + consented career linkage
+
+The two PUB-03 halves that remained after format awareness (Batch 74) and
+minimum qualifications (Batch 57) are now built as one consent-gated
+design, deliberately sized so the per-league publication boundaries are
+not moved.
+
+**Identity IS the verification** (new shared pure module
+`packages/database/src/lib/career-records.ts`, also root-exported): a
+player record is verified when the roster row is linked (`players.user_id`)
+to an ACTIVE `users` account - `isVerifiedPlayerRecord`. There is no
+mutable "verified" boolean to grant or game; a suspended/deleted account
+voids verification exactly as SCORE-09 voids membership. The public
+leaderboards (both the combined season-aggregate path and the
+format-qualified per-innings path, Batch 74) now LEFT-join `users` through
+the player row and return `playerVerified` on every row; `/leaderboards`
+renders an accessible check mark with a tooltip and updated honest copy
+(league marks vs cross-league linkage are explained separately). A
+name-only roster row is never marked verified and never dropped by the
+join.
+
+**Cross-league career linkage is consent-gated at the person level**:
+`users.public_career_consent_at` (MCP migration
+`consented_career_linkage`, the remote project's 8th migration) records
+the affirmative grant; null is never-granted. `careerConsentGranted` and
+`mergeConsentedCareer` are the authoritative gate+fold for PUB-02's
+cross-league hub: fail-closed null without consent, per-league provenance
+kept in the fold, and a duplicate-league totals row throws instead of
+double-counting a career. The hub itself is NOT built here - PUB-02 owns
+the cross-league read models - and no cross-tenant SQL exists yet.
+
+**Self-service writer**: `setPublicCareerConsent` (web lib) resolves the
+person from the Clerk session (never a client argument), locks the account
+row before re-reading, writes grant/revoke verbatim, and audits a
+user-level row (`PUBLIC_CAREER_CONSENT`) with `tenant_id` null -
+deliberately crossing no league. Thin action `updatePublicCareerConsent`
+validates a bare boolean and returns the resulting state.
+
+**Apply-path deviation (recorded honestly):** the Supabase MCP tools were
+absent from this session's tool catalog mid-batch, so the migration was
+applied through the repo's own `postgres` driver using the project's
+`DATABASE_URL` - the exact local SQL file, one connection, then the
+`supabase_migrations.schema_migrations` history row the MCP would have
+written (verified by post-apply SQL: column present, 8-row history). A
+first attempt failed on the history-row insert type (`statements` is
+`text[]`); the re-run was made idempotent and the earlier partial apply
+verified rather than duplicated.
+
+Honest limits: consent state has no UI toggle yet (writer + audit +
+reader-primitive exist; the dashboard profile surface can adopt it
+next); the consent gate protects future cross-league views - today's
+public surface is unchanged except for the verification marks; verified
+derivation trusts the link+active-identity model, not documentary KYC.
+
+New regressions: database `career-records.test.ts` (+7: verification
+fail-closed, consent grant/revoke, merge fold+provenance, duplicate-league
+throw, empty-career zero); web `career-consent.test.ts` (+4: locked
+audited grant, revocation clearing, inactive refusal, unauthenticated
+stop); public-visibility suite gains the verification-mapping regression
+and join-shape updates (+5 net with page-copy assertions).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **105** files, **2,579 tests** (+7) |
+| `npx vitest run` (database) | PASS - **15** files, **215 tests** (+7) |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply | `consented_career_linkage` via postgres driver (+ history row) - column verified by SQL |
+
+Next source work: consent toggle UI (dashboard profile), PUB-02
+cross-league hub (consumes `mergeConsentedCareer`), release gates (Batch
+62 evidence + services deployment remain unmet).
+Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

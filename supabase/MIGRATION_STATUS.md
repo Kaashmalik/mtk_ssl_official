@@ -3,8 +3,25 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-> **16 October 2026 (Batch 76) - `retire_legacy_user_authorization` APPLIED to
-> the remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
+> **17 October 2026 (Batch 77) - `consented_career_linkage` APPLIED to the
+> remote Supabase project (`anxstufkbqnjkxgksfkn`).** Adds
+> `users.public_career_consent_at timestamptz` (null = never granted) + a
+> column comment; verified player records are DERIVED (`players.user_id` →
+> active `users` row), so no verification state is stored. **Note on the
+> apply path:** the Supabase MCP tools were unavailable from this session's
+> tool catalog, so the migration was applied through the repo's own
+> `postgres` driver using the project's `DATABASE_URL`, executing exactly
+> `supabase/migrations/20261016210000_consented_career_linkage.sql` (whole
+> file, single connection) and inserting the
+> `supabase_migrations.schema_migrations` history row ('20261016210000',
+> 'consented_career_linkage') the MCP would have written. Post-apply SQL
+> verified the column (`timestamp with time zone`) and the 8-row migration
+> history. Code retirement-wise: consent gates only cross-league merges
+> (PUB-02 hub must call `mergeConsentedCareer` and fail closed on null);
+> per-league publication predicates are untouched.
+
+> **16 October 2026 (Batch 76) - `retire_legacy_user_authorization` APPLIED to the
+> remote Supabase project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP
 > `apply_migration`.** ISO-06: adds `users_role_platform_only`
 > `CHECK (role IN ('super_admin','fan'))` (blocks legacy writers from putting
 > league roles on `users.role`; pre-flight verified 0 league-role rows, so no

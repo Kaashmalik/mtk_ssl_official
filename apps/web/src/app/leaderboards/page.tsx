@@ -24,7 +24,7 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
   return (
     <div className="max-w-4xl mx-auto space-y-6 p-4">
       <h1 className="text-2xl font-bold">Leaderboards</h1>
-      <p className="text-sm text-muted-foreground">{formatLabel ? `Published ${formatLabel}-format totals for this league only, aggregated from the per-innings scorecards of matches declared ${formatLabel}.` : "Published competition season totals in this league only. Formats are combined when no format filter is selected."} These are not verified career records or official awards.</p>
+      <p className="text-sm text-muted-foreground">{formatLabel ? `Published ${formatLabel}-format totals for this league only, aggregated from the per-innings scorecards of matches declared ${formatLabel}.` : "Published competition season totals in this league only. Formats are combined when no format filter is selected."} These are not official records or league awards. A check mark marks a roster entry linked to an active player account; cross-league career views are separate and only shown with the person's own consent.</p>
       <form method="get" className="flex flex-wrap items-end gap-4">
         <div className="space-y-1">
           <label htmlFor="format" className="block text-sm font-medium">Match format</label>
@@ -58,7 +58,9 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
                 {topRuns.map((r, i) => (
                   <tr key={r.playerId} className="border-b last:border-0">
                     <td className="py-2 w-6 text-muted-foreground">{i + 1}</td>
-                    <td className="py-2 font-medium">{r.playerName}</td>
+                    <td className="py-2 font-medium">{r.playerName}{r.playerVerified && (
+                      <span className="ml-1 text-primary" aria-label="(verified account)" title="Roster entry linked to an active player account">✓</span>
+                    )}</td>
                     <td className="py-2 text-right font-semibold tabular-nums">{r.total}</td>
                   </tr>
                 ))}
@@ -77,7 +79,9 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
                 {topWickets.map((r, i) => (
                   <tr key={r.playerId} className="border-b last:border-0">
                     <td className="py-2 w-6 text-muted-foreground">{i + 1}</td>
-                    <td className="py-2 font-medium">{r.playerName}</td>
+                    <td className="py-2 font-medium">{r.playerName}{r.playerVerified && (
+                      <span className="ml-1 text-primary" aria-label="(verified account)" title="Roster entry linked to an active player account">✓</span>
+                    )}</td>
                     <td className="py-2 text-right font-semibold tabular-nums">{r.total}</td>
                   </tr>
                 ))}

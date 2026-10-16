@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, inArray, sum } from "drizzle-orm"
-import { db, matches, tournaments, teams, matchInnings, players, playerSeasonStats, battingScorecards, bowlingScorecards } from "@mtk/database"
+import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
+import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
@@ -78,7 +79,19 @@ export async function matchHasInnings(tenantId: string, matchId: string): Promis
   return !!row
 }
 
-export type PublicLeaderboardRow = { playerId: string; playerName: string; total: number }
+/**
+ * A leaderboard row carries its verification provenance: `playerVerified`
+ * is the identity-bound derivation from `isVerifiedPlayerRecord` (a linked
+ * ACTIVE account) — a name-only roster entry is never marked verified.
+ * It says nothing about cross-league linkage, which stays behind the
+ * person's own consent (PUB-03 `mergeConsentedCareer`).
+ */
+export type PublicLeaderboardRow = {
+  playerId: string
+  playerName: string
+  total: number
+  playerVerified: boolean
+}
 
 /**
  * Public batting/bowling leaderboard for one tenant.
@@ -109,12 +122,15 @@ async function readPublicLeaderboard(
       playerId: playerSeasonStats.playerId,
       playerName: players.name,
       total: sum(column).mapWith(Number),
+      playerUserId: players.userId,
+      linkedUserActive: users.isActive,
     })
     .from(playerSeasonStats)
     .innerJoin(
       players,
       and(eq(players.id, playerSeasonStats.playerId), eq(players.tenantId, tenantId)),
     )
+    .leftJoin(users, eq(users.id, players.userId))
     .innerJoin(
       tournaments,
       and(eq(tournaments.id, playerSeasonStats.tournamentId), eq(tournaments.tenantId, tenantId)),
@@ -123,12 +139,18 @@ async function readPublicLeaderboard(
       eq(playerSeasonStats.tenantId, tenantId),
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
-    .groupBy(playerSeasonStats.playerId, players.name)
+    .groupBy(playerSeasonStats.playerId, players.name, players.userId, users.isActive)
     // Qualify across the same published, same-league rows before ranking/limiting.
     .having(and(gte(sum(innings), filters.minimumInnings), gte(sum(balls), filters.minimumBalls)))
     .orderBy(desc(sum(column)), asc(playerSeasonStats.playerId))
     .limit(PUBLIC_LEADERBOARD_LIMIT)
-  return rows
+  return rows.map((row) => ({
+    playerId: row.playerId,
+    playerName: row.playerName,
+    total: row.total,
+    playerVerified: isVerifiedPlayerRecord({ userId: row.playerUserId },
+      row.linkedUserActive === null || row.linkedUserActive === undefined ? null : { isActive: row.linkedUserActive }),
+  }))
 }
 
 /**
@@ -146,14 +168,17 @@ async function readFormatQualifiedLeaderboard(
 ): Promise<PublicLeaderboardRow[]> {
   const published = inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES])
   if (metric === "runs") {
-    return db
+    const rows = await db
       .select({
         playerId: battingScorecards.playerId,
         playerName: players.name,
         total: sum(battingScorecards.runs).mapWith(Number),
+        playerUserId: players.userId,
+        linkedUserActive: users.isActive,
       })
       .from(battingScorecards)
       .innerJoin(players, and(eq(players.id, battingScorecards.playerId), eq(players.tenantId, tenantId)))
+      .leftJoin(users, eq(users.id, players.userId))
       .innerJoin(matchInnings, and(eq(matchInnings.id, battingScorecards.inningsId), eq(matchInnings.tenantId, tenantId)))
       .innerJoin(matches, and(eq(matches.id, matchInnings.matchId), eq(matches.tenantId, tenantId)))
       .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
@@ -163,22 +188,32 @@ async function readFormatQualifiedLeaderboard(
         eq(matches.matchFormat, filters.format!),
         published,
       ))
-      .groupBy(battingScorecards.playerId, players.name)
+      .groupBy(battingScorecards.playerId, players.name, players.userId, users.isActive)
       .having(and(
         gte(count(battingScorecards.id), filters.minimumInnings),
         gte(sum(battingScorecards.ballsFaced), filters.minimumBalls),
       ))
       .orderBy(desc(sum(battingScorecards.runs)), asc(battingScorecards.playerId))
       .limit(PUBLIC_LEADERBOARD_LIMIT)
+    return rows.map((row) => ({
+      playerId: row.playerId,
+      playerName: row.playerName,
+      total: row.total,
+      playerVerified: isVerifiedPlayerRecord({ userId: row.playerUserId },
+        row.linkedUserActive === null || row.linkedUserActive === undefined ? null : { isActive: row.linkedUserActive }),
+    }))
   }
-  return db
+  const rows = await db
     .select({
       playerId: bowlingScorecards.playerId,
       playerName: players.name,
       total: sum(bowlingScorecards.wickets).mapWith(Number),
+      playerUserId: players.userId,
+      linkedUserActive: users.isActive,
     })
     .from(bowlingScorecards)
     .innerJoin(players, and(eq(players.id, bowlingScorecards.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(users, eq(users.id, players.userId))
     .innerJoin(matchInnings, and(eq(matchInnings.id, bowlingScorecards.inningsId), eq(matchInnings.tenantId, tenantId)))
     .innerJoin(matches, and(eq(matches.id, matchInnings.matchId), eq(matches.tenantId, tenantId)))
     .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
@@ -188,13 +223,20 @@ async function readFormatQualifiedLeaderboard(
       eq(matches.matchFormat, filters.format!),
       published,
     ))
-    .groupBy(bowlingScorecards.playerId, players.name)
+    .groupBy(bowlingScorecards.playerId, players.name, players.userId, users.isActive)
     .having(and(
       gte(count(bowlingScorecards.id), filters.minimumInnings),
       gte(sum(bowlingScorecards.ballsBowled), filters.minimumBalls),
     ))
     .orderBy(desc(sum(bowlingScorecards.wickets)), asc(bowlingScorecards.playerId))
     .limit(PUBLIC_LEADERBOARD_LIMIT)
+  return rows.map((row) => ({
+    playerId: row.playerId,
+    playerName: row.playerName,
+    total: row.total,
+    playerVerified: isVerifiedPlayerRecord({ userId: row.playerUserId },
+      row.linkedUserActive === null || row.linkedUserActive === undefined ? null : { isActive: row.linkedUserActive }),
+  }))
 }
 
 /** Batting leaderboard for the public hub, scoped and publication-gated. */

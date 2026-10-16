@@ -75,7 +75,8 @@ describe("Public leaderboards are scoped to the request-host league", () => {
     expect(text).toContain("T20-format")
     expect(text).toContain("Top Run Scorers")
     expect(text).toContain("— T20")
-    expect(text).toContain("not verified career records or official awards")
+    expect(text).toContain("not official records or league awards")
+    expect(text).toContain("only shown with the person's own consent")
   })
 
   it("keeps the combined labels when the format filter is left unselected", async () => {
@@ -102,7 +103,8 @@ describe("Public leaderboards are scoped to the request-host league", () => {
   it("labels the aggregates without claiming verified, format-specific or official records", async () => {
     const text = collectText(await LeaderboardsPage({})).join(" ")
     expect(text).toContain("Formats are combined")
-    expect(text).toContain("not verified career records or official awards")
+    expect(text).toContain("not official records or league awards")
+    expect(text).toContain("only shown with the person's own consent")
     expect(text).toContain("Zero means no minimum")
   })
 
