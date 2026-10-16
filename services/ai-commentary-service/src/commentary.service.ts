@@ -40,6 +40,12 @@ export interface Commentary {
    * key on it keep compiling.
    */
   ballId: string;
+  /**
+   * Source event identity from the scoring outbox (also sent as the
+   * `idempotency-key` Kafka header). Present when the consumer could resolve
+   * one; downstream consumers use it to deduplicate redeliveries.
+   */
+  eventId?: string;
   english: string;
   urdu: string;
   punjabi?: string;
@@ -190,13 +196,13 @@ export class CommentaryService {
     }
   }
 
-  async generateCommentary(event: BallEvent): Promise<Commentary> {
+  async generateCommentary(event: BallEvent, eventId?: string): Promise<Commentary> {
     const ballId = `${event.over}.${event.ball}`;
     const languages: CommentaryLanguage[] = ['english', 'urdu', 'punjabi', 'pashto', 'sindhi'];
-    
+
     // Build context from recent events
     const context = this.getMatchContext(event.matchId);
-    
+
     // Try cache first for all languages
     const commentaryTexts: Record<string, string> = {};
     const cachedLanguages: CommentaryLanguage[] = [];
@@ -269,6 +275,7 @@ export class CommentaryService {
       sindhi: commentaryTexts['sindhi'] || this.getFallbackCommentary(event, 'sindhi'),
       timestamp: new Date().toISOString(),
       generatedBy,
+      eventId,
     };
 
     // Update context
@@ -376,7 +383,7 @@ Write 2-3 sentences summarizing this exciting match.`;
     const langInstruction = langInstructions[language];
 
     let eventDescription = `Over ${event.over}.${event.ball}: ${event.bowlerName} to ${event.batsmanName}`;
-    
+
     if (event.wicket) {
       eventDescription += ` - WICKET! ${event.wicket.playerOut} is ${event.wicket.type}!`;
     } else if (event.runs === 6) {
@@ -409,12 +416,12 @@ Generate 1-2 sentences of live commentary (max 50 words):`;
   private updateMatchContext(matchId: string, commentary: string) {
     const context = this.getMatchContext(matchId);
     context.push(commentary);
-    
+
     // Keep only last 10 commentaries
     if (context.length > 10) {
       context.shift();
     }
-    
+
     this.matchContexts.set(matchId, context);
   }
 
@@ -438,6 +445,7 @@ Generate 1-2 sentences of live commentary (max 50 words):`;
     matchId: string,
     text: string,
     kind: 'intro' | 'summary',
+    eventId?: string,
   ): Promise<void> {
     await this.publishCommentary({
       matchId,
@@ -447,6 +455,7 @@ Generate 1-2 sentences of live commentary (max 50 words):`;
       timestamp: new Date().toISOString(),
       generatedBy: 'openai',
       kind,
+      eventId,
     });
   }
 
@@ -459,6 +468,9 @@ Generate 1-2 sentences of live commentary (max 50 words):`;
           value: JSON.stringify(commentary),
           headers: {
             'content-type': 'application/json',
+            // Stable across redeliveries so the bridge (and any other
+            // downstream consumer) can deduplicate the same commentary.
+            ...(commentary.eventId ? { 'idempotency-key': commentary.eventId } : {}),
           },
         }],
       });

@@ -3403,6 +3403,33 @@ drills and applied-migration acceptance remain open; SCORE-12 stays unchecked.
 No migration applied, no remote database/provider/deployment action; release gate
 default-off. Roadmap **19 checked / 60 open / 79 IDs**.
 
+### Batch 64 — idempotent commentary consumers and bridge dedupe (16 October 2026)
+
+SCORE-12 consumer half, following the Batch 63 producer outbox. Outbox
+redelivery or a consumer crash could previously regenerate the same commentary,
+double-publish it and duplicate the live feed.
+
+Deduplication now spans the pipeline without becoming an authorization point:
+the commentary consumer validates envelopes and claims the event identity (SET
+NX EX 24h) before generating — duplicate identities skip regeneration and
+publication, failures release claims so redelivery reprocesses, and Redis
+outages fail open with surfaced warnings. Ball identity prefers the producer
+`idempotency-key` header, then payload `eventId`, then the deterministic
+delivery composite; lifecycle events use the outbox's `matchId:Type` key.
+Published commentary carries the identity inline and as a header, and the
+scoring-service bridge claims it before forwarding through the publication-aware
+gateway (unchanged authorization recheck), releasing on forward failure. A hard
+crash between claim and commit can still skip one regeneration until the TTL
+expires; delivery remains at-least-once with bounded suppression.
+
+Fresh verification: commentary service **39 / 4 files**, scoring **300 / 12
+suites**, database **186 / 12 files**, web **2,482 / 101 files**, release
+checker **87 tests** — **3,094 passing tests**, all exits 0. Web type check
+exits 0; `git diff --check` clean. No schema/migration operation, remote
+database, provider or deployment action. Multi-instance drills and real-broker
+acceptance remain open; SCORE-12 stays unchecked pending acceptance. Roadmap
+**19 checked / 60 open / 79 IDs**; release gate default-off.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

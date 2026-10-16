@@ -11,6 +11,17 @@
 > sections below the horizontal rule are historical and describe the era **before**
 > this rebuild; their "unapplied" statements no longer hold.
 
+### Batch 64 idempotent consumers (16 October 2026)
+
+Source-only change; no schema, migration, RLS/grant or database-data change.
+Commentary consumers and the scoring bridge now use Redis SET NX claims keyed by
+the stable outbox event identity to deduplicate at-least-once redelivery, with
+fail-open behavior (surfaced) on Redis outages and claim release on processing
+failure. Claims are caches, not authorization: the bridge's forwards still pass
+the publication/league boundary recheck, and no endpoint grants access by claim
+possession. No migration was applied anywhere; no remote database was queried or
+written, and Batch 62's release-evidence requirements remain unmet.
+
 ### Batch 63 scoring transactional outbox (16 October 2026)
 
 `20261016102316_scoring_transactional_outbox.sql` is a **local migration only**,

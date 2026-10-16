@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { CommentaryController } from './commentary.controller';
 import { CommentaryService } from './commentary.service';
+import { ConsumerIdempotencyService } from './consumer-idempotency.service';
 import { OpenAIService } from './openai/openai.service';
 
 @Module({
@@ -12,6 +13,6 @@ import { OpenAIService } from './openai/openai.service';
     }),
   ],
   controllers: [CommentaryController],
-  providers: [CommentaryService, OpenAIService],
+  providers: [CommentaryService, ConsumerIdempotencyService, OpenAIService],
 })
 export class CommentaryModule {}
