@@ -4148,6 +4148,67 @@ Next source work: PUB-02 cross-league hub (consumes
 locks), release gates (Batch 62 evidence + services deployment remain
 unmet). Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### Batch 79 - PUB-02 hub slice: the consented cross-league career view
+
+Batch 77 reserved `mergeConsentedCareer` as the authoritative gate/fold
+for exactly this surface; this ships the first hub consumer.
+
+**Shared module hardening:** `mergeConsentedCareer` is now generic
+(`ConsentedCareer<L extends CareerLeagueTotals>`): the fold preserves
+each league row's display enrichment type-safely instead of stripping it.
+The fail-closed consent gate and the duplicate-league throw are
+unchanged; the fold remains the ONLY cross-league merge.
+
+**Hub reader:** `apps/web/src/lib/career-hub.ts` -
+`readConsentedCareerByClerkId` (session-free core + `readMyCareerHub`
+wrapper): resolves the Clerk identity's `users` row and fails closed on
+a missing/inactive account with the same boundary message the consent
+writer uses; WITHOUT consent it issues NO cross-league query at all; with
+consent it issues ONE aggregate query per league - `players` (linked,
+active rows only) joined same-tenant to `player_season_stats`, then to
+`tournaments` filtered by the exact PUBLISHED status values the public
+leaderboards use, then to active `tenants` - grouped per league and
+folded through `mergeConsentedCareer`. Leagues without published
+performances never appear as fabricated zero rows. Identity is
+session-derived only, and NO public cross-league page ships in this
+slice - the folded career stays on the person's own account view until a
+public-profile design is accepted (PUB-02 retains open scope; recorded,
+not overclaimed).
+
+**Surface:** `/dashboard/account` gains a "Your public career" section:
+consented shows a per-league table with a career-total row and scope-
+exact copy ("built only from competitions those leagues have published");
+consented-but-empty explains the state instead of showing zeros; with
+consent withheld the section says the career view stays empty; a hub
+read failure renders a visible `role="alert"` fallback rather than
+failing the whole page (the consent card still renders alongside).
+
+**Testing:** new `career-hub.test.ts` (+5): pure mapping normalization
+(null SQL sums -> 0), fail-closed account enforcement, withhold-consent
+proved by asserting the aggregate select never fires, the authoritative
+fold across two leagues (with the real PUB-03 module, not a mock), and a
+dialect-level query-shape capture (identity-anchored `players` scan,
+joins exactly `player_season_stats`/`tournaments`/`tenants`, published
+statuses present with draft/cancelled absent, `groupBy` recorded).
+`account-page.test.tsx` reworked (+8): consent-card wiring merges,
+per-league provenance plus career totals, honest empty and withheld
+states, hub-error alert fallback, and redirect-before-any-read.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **107** files, **2,593 tests** (+8) |
+| `npx vitest run` (database) | PASS - 15 files, **215 tests** |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply | none needed - no schema change |
+
+Next source work: PUB-02 remainder (public cross-league profile design,
+real-DB acceptance), COMP-07 remainder (scoped notices / competition
+locks), release gates (Batch 62 evidence + services deployment remain
+unmet). Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

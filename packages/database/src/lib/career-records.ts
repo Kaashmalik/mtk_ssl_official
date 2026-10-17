@@ -58,9 +58,9 @@ export type CareerLeagueTotals = {
   wicketsTaken: number
 }
 
-/** The consented, folded career view. Leagues keep their provenance. */
-export type ConsentedCareer = {
-  leagues: CareerLeagueTotals[]
+/** The consented, folded career view. Richer league rows keep their extra provenance. */
+export type ConsentedCareer<L extends CareerLeagueTotals = CareerLeagueTotals> = {
+  leagues: L[]
   totalRunsScored: number
   totalWicketsTaken: number
 }
@@ -72,10 +72,10 @@ export type ConsentedCareer = {
  * bug (one authoritative totals row per league) and throws rather than
  * double-counting a person's career.
  */
-export function mergeConsentedCareer(
-  leagues: CareerLeagueTotals[],
+export function mergeConsentedCareer<L extends CareerLeagueTotals>(
+  leagues: L[],
   consented: boolean,
-): ConsentedCareer | null {
+): ConsentedCareer<L> | null {
   if (!consented) return null
   const seen = new Set<string>()
   let totalRunsScored = 0

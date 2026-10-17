@@ -2,7 +2,9 @@ import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import AccountPage from "@/app/dashboard/account/page"
 
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), consent: vi.fn(), redirect: vi.fn(), cardProps: [] as unknown[] }))
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn(), consent: vi.fn(), hub: vi.fn(), redirect: vi.fn(), cardProps: [] as unknown[],
+}))
 
 /**
  * The card is a client component with hooks: in this suite's bare RSC-render
@@ -23,14 +25,13 @@ vi.mock("@/components/account/career-consent-card", async (importOriginal) => {
   }
 })
 
-import {
-  describeCareerConsent, consentControlLabel,
-} from "@/components/account/career-consent-card"
+import { describeCareerConsent, consentControlLabel } from "@/components/account/career-consent-card"
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }))
 vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/career-records", () => ({ readMyCareerConsent: mocks.consent }))
+vi.mock("@/lib/career-hub", () => ({ readMyCareerHub: mocks.hub }))
 
 const CONSENTED_AT = new Date("2026-10-17T00:00:00Z")
 
@@ -48,6 +49,8 @@ beforeEach(() => {
   mocks.cardProps.length = 0
   mocks.auth.mockResolvedValue({ userId: "clerk_1" })
   mocks.redirect.mockImplementation(() => { throw new Error("redirect") })
+  mocks.consent.mockResolvedValue({ granted: false, consentedAt: null })
+  mocks.hub.mockResolvedValue({ consented: false, career: null, leagues: [] })
 })
 
 describe("Consent card copy (pure label derivations)", () => {
@@ -63,12 +66,11 @@ describe("Consent card copy (pure label derivations)", () => {
   })
 })
 
-describe("Personal account page (PUB-03 consent surface)", () => {
+describe("Personal account page (PUB-03/PUB-02 surfaces)", () => {
   it("wires the reader's state into the card verbatim", async () => {
     mocks.consent.mockResolvedValue({ granted: true, consentedAt: CONSENTED_AT })
     collectText(await AccountPage())
     expect(mocks.cardProps).toEqual([{ granted: true, consentedAt: CONSENTED_AT.toISOString() }])
-    expect(mocks.cardProps.length).toBe(1)
   })
 
   it("wires a not-granted state verbatim (null date preserved)", async () => {
@@ -77,15 +79,55 @@ describe("Personal account page (PUB-03 consent surface)", () => {
     expect(mocks.cardProps).toEqual([{ granted: false, consentedAt: null }])
   })
 
-  it("links back to the dashboard", async () => {
-    mocks.consent.mockResolvedValue({ granted: false, consentedAt: null })
+  it("renders the consented career with per-league provenance and totals", async () => {
+    mocks.consent.mockResolvedValue({ granted: true, consentedAt: CONSENTED_AT })
+    mocks.hub.mockResolvedValue({
+      consented: true,
+      career: {
+        leagues: [
+          { tenantId: "t1", leagueName: "Alpha", runsScored: 120, wicketsTaken: 3 },
+          { tenantId: "t2", leagueName: "Beta", runsScored: 80, wicketsTaken: 11 },
+        ],
+        totalRunsScored: 200,
+        totalWicketsTaken: 14,
+      },
+      leagues: [
+        { tenantId: "t1", leagueName: "Alpha", runsScored: 120, wicketsTaken: 3 },
+        { tenantId: "t2", leagueName: "Beta", runsScored: 80, wicketsTaken: 11 },
+      ],
+    })
     const text = collectText(await AccountPage()).join(" ")
-    expect(text).toContain("Back to dashboard")
+    expect(text).toContain("Your public career")
+    expect(text).toContain("Alpha")
+    expect(text).toContain("Beta")
+    expect(text).toContain("Career total")
+    expect(text).toContain("200")
+    expect(text).toContain("14")
+  })
+
+  it("keeps the linked career view empty-with-explainer while consent is withheld", async () => {
+    const text = collectText(await AccountPage()).join(" ")
+    expect(text).toContain("career view stays empty")
+  })
+
+  it("explains the empty consented state instead of fabricating zero rows", async () => {
+    mocks.consent.mockResolvedValue({ granted: true, consentedAt: CONSENTED_AT })
+    mocks.hub.mockResolvedValue({ consented: true, career: null, leagues: [] })
+    const text = collectText(await AccountPage()).join(" ")
+    expect(text).toContain("No published performances are linked")
+  })
+
+  it("shows a visible alert instead of failing the page when the hub read errors", async () => {
+    mocks.hub.mockRejectedValue(new Error("db down"))
+    const text = collectText(await AccountPage()).join(" ")
+    expect(text).toContain("temporarily unavailable")
+    expect(text).toContain("Your account")
   })
 
   it("redirects an unauthenticated visitor before any read", async () => {
     mocks.auth.mockResolvedValue({ userId: null })
     await expect(AccountPage()).rejects.toThrow("redirect")
     expect(mocks.consent).not.toHaveBeenCalled()
+    expect(mocks.hub).not.toHaveBeenCalled()
   })
 })
