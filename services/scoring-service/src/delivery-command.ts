@@ -18,6 +18,10 @@ export const deliveryCommandSchema = z.object({
     playerId: z.string().uuid(),
     fielderId: z.string().uuid().optional(),
   }).optional(),
+  // SCORE-11 writer fencing: the handover epoch the scoring session last
+  // observed. Deliberately NOT part of deliveryFingerprint — an idempotent
+  // retry after a handover must still dedupe against the recorded event.
+  handoverEpoch: z.number().int().min(0).optional(),
 });
 
 export type DeliveryCommand = z.infer<typeof deliveryCommandSchema>;

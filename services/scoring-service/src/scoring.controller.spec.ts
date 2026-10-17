@@ -60,7 +60,9 @@ describe('Post-commit match-state broadcast', () => {
   it('passes award details but takes tenant and actor only from guarded request context', async () => {
     await controller.completeMatch(request, MATCH, { winnerId: MATCH, result: 'Won', manOfMatchId: MATCH,
       tenantId: 'forged', actorId: 'forged' } as never);
-    expect(service.completeMatch).toHaveBeenCalledWith('tenant', '00000000-0000-4000-8000-000000000006', MATCH, MATCH, 'Won', MATCH);
+    expect(service.completeMatch).toHaveBeenCalledWith('tenant', '00000000-0000-4000-8000-000000000006', MATCH, MATCH, 'Won', MATCH,
+      // SCORE-11: the optional body token is passed through (null when absent).
+      null);
   });
 
   it.each(Object.keys(service))('protects the real %s route with ordered token, tenant, and actor guards', (operation) => {

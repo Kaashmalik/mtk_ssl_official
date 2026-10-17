@@ -3,6 +3,22 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 83) - `scorer_handover_epoch` LOCAL ONLY, unapplied.**
+> File: `supabase/migrations/20261018090000_scorer_handover_epoch.sql` (adds
+> `matches.scorer_handover_epoch integer NOT NULL DEFAULT 0`; the SCORE-11
+> writer-fencing token bumped by every real scorer slot change and echoed by
+> canonical scoring writes once it exceeds 0 — additive/idempotent, no
+> backfill, legacy rows default 0 and keep pre-fencing behavior). NOT applied
+> to the remote project — no MCP apply, no `DATABASE_URL` execution, no history
+> row; acceptance still requires real PostgreSQL application. Enforcement is
+> application-side (shared `scorerFencingDecision` policy at the canonical
+> scoring boundary before any lock; the assignment writer bumps the epoch under
+> the match lock and audits before/after). Until applied, the canonical service
+> can only fence on deployments where the column exists; tokenless legacy
+> behavior is preserved while the epoch is 0. The Batch 80
+> `playing_xi_declaration` migration below remains pending apply alongside
+> this one.
+>
 > **17 October 2026 (Batch 80 + 81) - `playing_xi_declaration` LOCAL ONLY, unapplied.**
 > File: `supabase/migrations/20261017090000_playing_xi_declaration.sql`
 > (arms the COMP-06 declared-XI gate: `matches.xi_required boolean NOT NULL

@@ -2,17 +2,25 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations, matchPlayingXis, membershipGrantsAccess } from '@mtk/database';
 import { scorerSlotGrant } from '@mtk/database';
+import { scorerFencingDecision } from '@mtk/database/lib/scorer-fencing';
 import { matchRegistrationMap, registrationAllowsPlayer, type SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
 import { xiEnforcementLevel, xiCoversParticipants } from '@mtk/database/lib/playing-xi-policy';
 import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
 
 export type ScoringTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type ScoringMatch = { id: string; tenantId: string; tournamentId: string | null; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string; xiRequired?: boolean | null; xiApprovedAt?: Date | string | null };
+export type ScoringMatch = { id: string; tenantId: string; tournamentId: string | null; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string; xiRequired?: boolean | null; xiApprovedAt?: Date | string | null; scorerHandoverEpoch?: number | null };
 
 /** Call AFTER the tenant-filtered match lock, BEFORE replay or any write. */
 export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId: string,
-  actorId: string, match: Pick<ScoringMatch, 'tenantId' | 'scorerId' | 'backupScorerId'>) {
+  actorId: string, match: Pick<ScoringMatch, 'tenantId' | 'scorerId' | 'backupScorerId' | 'scorerHandoverEpoch'>,
+  fence?: number | null) {
+  // SCORE-11 writer fencing: compare the echoed handover epoch against the
+  // locked match row BEFORE any other work. Pure comparison — the epoch was
+  // read under the caller's match lock, so a concurrent assignment change is
+  // already serialized against this decision.
+  const fenceDecision = scorerFencingDecision({ commandEpoch: fence ?? null, matchEpoch: match.scorerHandoverEpoch });
+  if (fenceDecision.status === 'rejected') throw new ForbiddenException(fenceDecision.reason);
   if (!z.string().uuid().safeParse(actorId).success || match.tenantId !== tenantId) {
     throw new ForbiddenException('Invalid scoring actor context');
   }

@@ -82,14 +82,16 @@ describe("Transactional primary/backup scorer assignment", () => {
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith(matches)
     expect(mocks.directUpdate).not.toHaveBeenCalled()
     expect(mocks.set).toHaveBeenCalledWith({ [field]: SCORER, updatedAt: expect.any(Date),
-      scorerApprovalRequired: true, scorerApprovedAt: null })
+      scorerApprovalRequired: true, scorerApprovedAt: null,
+      // SCORE-11: every real slot change fences stale scoring sessions.
+      scorerHandoverEpoch: 1 })
     expect(dialect.sqlToQuery(mocks.updateWhere.mock.calls[0][0]).params).toEqual([MATCH, TENANT])
     expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(auditLogs)
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, actorId: OWNER,
       actorRole: "league_owner", method: "MATCH_SCORER_ASSIGN", payload: {
         matchId: MATCH, slot,
-        before: { scorerId: null, backupScorerId: null, scorerApprovedAt: undefined },
-        after: { scorerId: null, backupScorerId: null, [field]: SCORER, scorerApprovalRequired: true, scorerApprovedAt: null },
+        before: { scorerId: null, backupScorerId: null, scorerApprovedAt: undefined, scorerHandoverEpoch: undefined },
+        after: { scorerId: null, backupScorerId: null, [field]: SCORER, scorerApprovalRequired: true, scorerApprovedAt: null, scorerHandoverEpoch: 1 },
       } }))
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard", "layout")
     expect(mocks.revalidate).toHaveBeenCalledWith(`/matches/${MATCH}/scoring`)
@@ -161,7 +163,7 @@ describe("Transactional primary/backup scorer assignment", () => {
     expect(mocks.member).toHaveBeenCalledTimes(1)
     expect(mocks.set).toHaveBeenCalledWith({ [slot === "primary" ? "scorerId" : "backupScorerId"]: null, updatedAt: expect.any(Date),
       // The other slot stays occupied, so the requirement stays armed and consent is voided.
-      scorerApprovalRequired: true, scorerApprovedAt: null })
+      scorerApprovalRequired: true, scorerApprovedAt: null, scorerHandoverEpoch: 1 })
   })
   it("does not rewrite or audit an unchanged, still-authorized assignment", async () => {
     mocks.match.mockResolvedValue({ ...fixture, scorerId: SCORER })
@@ -169,6 +171,11 @@ describe("Transactional primary/backup scorer assignment", () => {
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.insert).not.toHaveBeenCalled()
     expect(mocks.member).toHaveBeenCalledTimes(2)
+  })
+  it("bumps the handover epoch monotonically from any pre-existing value", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, scorerId: SCORER, scorerHandoverEpoch: 7 })
+    await assignScorer(MATCH, "backup", BACKUP)
+    expect(mocks.set).toHaveBeenCalledWith(expect.objectContaining({ scorerHandoverEpoch: 8 }))
   })
   it("rejects a lost update without auditing success", async () => {
     mocks.returning.mockResolvedValue([])

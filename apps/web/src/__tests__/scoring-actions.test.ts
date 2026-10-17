@@ -107,13 +107,14 @@ describe("Scoring action explicit command bridge", () => {
       expect(mocks.proxy.mock.calls[0][0]).not.toHaveProperty("actorId")
     } else if (operation === "undo") {
       await undoBall(MATCH, input().inningsId)
-      expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR)
+      // SCORE-11: the action threads the (here absent) handover token through.
+      expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, undefined)
     } else if (operation === "create") {
       await createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1 })
       expect(mocks.create.mock.calls[0][2]).toBe(ACTOR)
     } else {
       await completeInnings(MATCH, input().inningsId)
-      expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR)
+      expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, undefined)
     }
     expect(mocks.actor).toHaveBeenCalledWith("user_clerk")
   })

@@ -127,6 +127,16 @@ export const matches = pgTable("matches", {
   /** When the assigned scorer approved; only the assigned member may set it, any assignment change clears it. */
   scorerApprovedAt: timestamp("scorer_approved_at", { withTimezone: true }),
   /**
+   * Writer fencing token (SCORE-11): bumped (+1) by the locked, audited
+   * scorer-assignment writer on every real primary/backup slot change.
+   * Canonical scoring writes must echo the epoch they last observed; a
+   * command without a token is accepted only while the epoch is still 0, so
+   * after the first handover a stale device (including a re-occupied
+   * scorer's old session) fails closed instead of silently writing. Legacy
+   * rows default to 0 and keep pre-fencing behavior.
+   */
+  scorerHandoverEpoch: integer("scorer_handover_epoch").notNull().default(0),
+  /**
    * Playing-XI gate (COMP-06 slice): armed by XI declaration writes; legacy
    * matches stay false and keep registered-squad-only eligibility. While
    * armed, deliveries are blocked until an official (league owner or assigned

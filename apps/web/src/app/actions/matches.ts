@@ -159,12 +159,13 @@ export const startMatch = withAuth("match:score", async (matchId: string) => {
   return { success: true, match }
 })
 
-export const endMatch = withAuth("match:score", async (matchId: string, winnerId: string | null, result: string, manOfMatchId?: string | null) => {
+export const endMatch = withAuth("match:score", async (matchId: string, winnerId: string | null, result: string, manOfMatchId?: string | null, handoverEpoch?: number) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const command = z.object({ matchId: z.string().uuid(), winnerId: z.string().uuid().nullable(),
-    result: z.string().trim().min(1).max(2000), manOfMatchId: z.string().uuid().nullish() })
-    .parse({ matchId, winnerId, result, manOfMatchId })
+    result: z.string().trim().min(1).max(2000), manOfMatchId: z.string().uuid().nullish(),
+    handoverEpoch: z.number().int().min(0).optional() })
+    .parse({ matchId, winnerId, result, manOfMatchId, handoverEpoch })
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   await requireMatchScoringAccess(userId, tenantId, matchId)
@@ -172,7 +173,8 @@ export const endMatch = withAuth("match:score", async (matchId: string, winnerId
   // Never write completed results locally: canonical authorization, replay,
   // cache invalidation and broadcasts belong to the scoring service.
   await proxyCompleteMatch(matchId, { winnerId: command.winnerId ?? undefined,
-    result: command.result, manOfMatchId: command.manOfMatchId ?? undefined }, tenantId, actorId)
+    result: command.result, manOfMatchId: command.manOfMatchId ?? undefined,
+    handoverEpoch: command.handoverEpoch }, tenantId, actorId)
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/matches/${matchId}/live`)

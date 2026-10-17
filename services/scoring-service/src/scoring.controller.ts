@@ -49,12 +49,15 @@ class RecordBallDto {
   batsmanId: string;
   bowlerId: string;
   clientOpId: string;
+  /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
+  handoverEpoch?: number;
 }
 
 class CreateInningsDto {
   matchId: string;
   teamId: string;
   inningsNumber: number;
+  handoverEpoch?: number;
 }
 
 /** Every scoring mutation requires service authentication, tenant, and actor. */
@@ -110,13 +113,14 @@ export class ScoringController {
   @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 undos per minute
   async undoBall(
     @Req() req: Request,
-    @Body() body: { matchId: string; ballId: string },
+    @Body() body: { matchId: string; ballId: string; handoverEpoch?: number },
   ) {
     const result = await this.scoringService.undoBall(
       tenantIdOf(req),
       actorIdOf(req),
       body.matchId,
       body.ballId,
+      body.handoverEpoch ?? null,
     );
     await this.gateway.broadcastMatchState(tenantIdOf(req), body.matchId);
     return result;
@@ -131,6 +135,7 @@ export class ScoringController {
       matchId: dto.matchId,
       teamId: dto.teamId,
       inningsNumber: Number(dto.inningsNumber),
+      handoverEpoch: dto.handoverEpoch,
     });
     await this.gateway.broadcastMatchState(tenantIdOf(req), dto.matchId);
     return result;
@@ -147,13 +152,14 @@ export class ScoringController {
   async completeInnings(
     @Req() req: Request,
     @Param('inningsId') inningsId: string,
-    @Body() body: { matchId: string },
+    @Body() body: { matchId: string; handoverEpoch?: number },
   ) {
     const result = await this.scoringService.completeInnings(
       tenantIdOf(req),
       actorIdOf(req),
       body.matchId,
       inningsId,
+      body.handoverEpoch ?? null,
     );
     await this.gateway.broadcastMatchState(tenantIdOf(req), body.matchId);
     return result;
@@ -166,7 +172,7 @@ export class ScoringController {
   async completeMatch(
     @Req() req: Request,
     @Param('matchId') matchId: string,
-    @Body() body: { winnerId?: string; result?: string; manOfMatchId?: string },
+    @Body() body: { winnerId?: string; result?: string; manOfMatchId?: string; handoverEpoch?: number },
   ) {
     await this.scoringService.completeMatch(
       tenantIdOf(req),
@@ -175,6 +181,7 @@ export class ScoringController {
       body.winnerId,
       body.result,
       body.manOfMatchId,
+      body.handoverEpoch ?? null,
     );
     await this.gateway.broadcastMatchState(tenantIdOf(req), matchId);
     return { success: true, matchId, status: 'completed' };

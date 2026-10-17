@@ -109,6 +109,8 @@ export interface CreateInningsInput {
   matchId: string;
   teamId: string;
   inningsNumber: number;
+  /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
+  handoverEpoch?: number;
 }
 
 export interface InningsSummary {
@@ -276,7 +278,7 @@ export class ScoringService {
 
       assertTenantScope(tenantId, match, 'Match', matchId);
 
-      await requireScoringWriteAccess(tx, tenantId, actorId, match);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match, command.handoverEpoch);
       // 2. Validate innings exists within this tenant and this match
       const innings = await tx.query.matchInnings.findFirst({
         where: and(
@@ -559,7 +561,8 @@ export class ScoringService {
     return result;
   }
 
-  async undoBall(tenantId: string, actorId: string, matchId: string, ballId: string): Promise<BallResult> {
+  async undoBall(tenantId: string, actorId: string, matchId: string, ballId: string,
+    fence?: number | null): Promise<BallResult> {
     validateMutationIds(matchId, ballId);
     const result = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
@@ -568,7 +571,7 @@ export class ScoringService {
         where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
       });
       assertTenantScope(tenantId, match, 'Match', matchId);
-      await requireScoringWriteAccess(tx, tenantId, actorId, match);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match, fence);
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException('This match can no longer be edited');
       }
@@ -818,9 +821,10 @@ export class ScoringService {
    */
   async createInnings(tenantId: string, actorId: string, input: CreateInningsInput): Promise<InningsSummary> {
     const parsed = z.object({ matchId: z.string().uuid(), teamId: z.string().uuid(),
-      inningsNumber: z.number().int().min(1).max(3) }).safeParse(input);
+      inningsNumber: z.number().int().min(1).max(3),
+      handoverEpoch: z.number().int().min(0).optional() }).safeParse(input);
     if (!parsed.success) throw new BadRequestException('Invalid innings command');
-    const { matchId, teamId, inningsNumber } = parsed.data;
+    const { matchId, teamId, inningsNumber, handoverEpoch } = parsed.data;
     let created: InningsSummary;
     try {
       created = await db.transaction(async (tx) => {
@@ -830,7 +834,7 @@ export class ScoringService {
           where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
         });
         assertTenantScope(tenantId, match, 'Match', matchId);
-        await requireScoringWriteAccess(tx, tenantId, actorId, match);
+        await requireScoringWriteAccess(tx, tenantId, actorId, match, handoverEpoch);
         if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
           throw new BadRequestException(`Cannot add an innings while match is ${match.status}`);
         }
@@ -880,6 +884,7 @@ export class ScoringService {
     actorId: string,
     matchId: string,
     inningsId: string,
+    fence?: number | null,
   ): Promise<CompleteInningsResult> {
     validateMutationIds(matchId, inningsId);
     const result = await db.transaction(async (tx) => {
@@ -890,7 +895,7 @@ export class ScoringService {
         where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
       });
       assertTenantScope(tenantId, match, 'Match', matchId);
-      await requireScoringWriteAccess(tx, tenantId, actorId, match);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match, fence);
       const innings = await tx.query.matchInnings.findFirst({
         where: and(
           eq(matchInnings.id, inningsId),
@@ -978,6 +983,7 @@ export class ScoringService {
     winnerId?: string,
     result?: string,
     manOfMatchId?: string,
+    fence?: number | null,
   ): Promise<void> {
     validateMutationIds(matchId);
     const completion = z.object({ winnerId: z.string().uuid().optional(), result: z.string().min(1).max(2000).optional(),
@@ -990,7 +996,7 @@ export class ScoringService {
         where: and(eq(matches.id, matchId), eq(matches.tenantId, tenantId)),
       });
       assertTenantScope(tenantId, match, 'Match', matchId);
-      await requireScoringWriteAccess(tx, tenantId, actorId, match);
+      await requireScoringWriteAccess(tx, tenantId, actorId, match, fence);
       if (winnerId && winnerId !== match.teamAId && winnerId !== match.teamBId) {
         throw new BadRequestException('Winner must be one of the match teams');
       }

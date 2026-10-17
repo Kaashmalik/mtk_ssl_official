@@ -4378,6 +4378,83 @@ matrix incl. umpire-slot denial. `playing-xi-card.test.ts` (+2):
 Next source work: scorer handover safeguards (SCORE-11), PUB-02 public page,
 COMP-07 remainder, release gates. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+## Batch 83 - SCORE-11 writer fencing (handover epoch, first slice)
+
+**Scope built.** The plan's SCORE-11 acceptance names the gap a slot pointer
+alone can never close: a stale device of a RE-OCCUPIED scorer still passes a
+pointer check, and "a TTL alone is insufficient if a stale device can still
+write." Batch 83 adds a server-enforced handover epoch as a writer fencing
+token.
+
+- Additive local-only migration `20261018090000_scorer_handover_epoch.sql`:
+  `matches.scorer_handover_epoch integer NOT NULL DEFAULT 0` (legacy-safe, no
+  backfill), bumped by the locked scorer-assignment writer on every real
+  primary/backup slot change.
+- `packages/database/src/lib/scorer-fencing.ts`: `scorerFencingDecision` - a
+  pure, string-discriminated decision (deliberately not a boolean flag so
+  consumers compiling under `strictNullChecks:false` still narrow):
+  tokenless commands are accepted only while the epoch is still 0; after the
+  first handover every authoritative write must echo the epoch its session
+  observed; present tokens must be non-negative integers equal to the locked
+  row; corrupt epochs fail closed; an unread/NULL column reads as 0.
+- `services/scoring-service/src/scoring-write-access.ts`: the fence is checked
+  BEFORE the user/tenant/membership locks, so a fenced writer is refused
+  without acquiring or touching any lock; `ScoringMatch` carries
+  `scorerHandoverEpoch`; all five write paths (recordDelivery, undoBall,
+  createInnings, completeInnings, completeMatch) thread the optional token;
+  `delivery-command.ts` accepts `handoverEpoch` while `deliveryFingerprint`
+  stays token-free (idempotent retries still dedupe); controller DTOs/bodies
+  carry `handoverEpoch`.
+- `apps/web/src/lib/match-records.ts`: `assignScorerInMatch` bumps the epoch
+  monotonically on any real slot change and records epoch before/after in the
+  `MATCH_SCORER_ASSIGN` audit; unchanged assignments stay a no-op; consent
+  clearing unchanged.
+- `apps/web/src/lib/scoring-service-client.ts` + `app/actions/scoring.ts` +
+  `app/actions/matches.ts`: the proxy and action tiers thread the optional
+  token for `recordBall`, `undoBall`, `createInnings`, `completeInnings` and
+  `endMatch`.
+- `services/scoring-service/src/scoring.service.ts` is normalized to LF in
+  this batch (its index blob carried mixed line endings from earlier batches);
+  the content diff is exactly 10 hunks and `git diff --check` is clean.
+
+**Boundary.** First slice only: the scoring UI does not yet read/echo the
+epoch (UI scoring sessions are fenced after any handover until wired), durable
+revisions, conflict reconciliation and multi-tab/device tests remain SCORE-11
+open scope; migration still local-only/unapplied; no deployment.
+
+**Testing.** database `scorer-fencing.test.ts` (+4): tokenless-only-until-
+first-handover, current-epoch accept, stale re-occupied-scorer fence, corrupt
+epoch/token matrix. scoring `scoring-write-access.spec.ts` (+4): tokenless on
+epoch 0 accepted and tokenless on epoch 2 refused before any lock; current vs
+stale token with lock counts verified (3 locks on the accepted call, 0 on
+rejections); re-occupied scorer fenced; corrupt token/epoch fail closed with
+the null-column legacy path preserved. `scoring.controller.spec.ts`: the
+completeMatch passthrough includes the null handover token. web
+`scorer-assignment.test.ts` (+1): epoch bumps monotonically from any
+pre-existing value; set/audit payloads assert `scorerHandoverEpoch` before and
+after. `scoring-actions.test.ts`: undo/completeInnings thread the token
+through.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/database test` | PASS - **18** files, **231 tests** (+4) |
+| `corepack pnpm --filter @mtk/web test` | PASS - **109** files, **2,617 tests** (+1) |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS - **12** files, **316 tests** (+4) |
+| `corepack pnpm --filter @ssl/ai-commentary-service test` | PASS - **4** files, **39 tests** (unchanged) |
+| `corepack pnpm test:release` (release checker) | PASS - **87/87** |
+| `tsc --noEmit` (scoring service) | **0** errors |
+| `tsc --noEmit` (web) | **0** errors |
+| `git diff --check` | Clean |
+| Remote apply | none - migration local-only |
+
+Next source work: SCORE-11 remainder (UI token wiring, durable revisions,
+multi-tab/device tests), PUB-02 public page, COMP-07 remainder, release gates.
+Roadmap: **19 checked / 60 open / 79 IDs**.
+
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

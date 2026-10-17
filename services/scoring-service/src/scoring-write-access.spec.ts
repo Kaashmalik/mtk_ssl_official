@@ -345,3 +345,47 @@ describe('Declared playing-XI delivery gate (COMP-06)', () => {
       .mockResolvedValue(rows);
   }
 });
+
+
+describe('Scorer handover writer fencing (SCORE-11)', () => {
+  const fenced = { ...match, scorerHandoverEpoch: 2 };
+
+  it('accepts tokenless writers only on an un-fenced match (epoch 0)', async () => {
+    const { mock, tx } = adapter();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, match)).resolves.toBeUndefined();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, fenced)).rejects.toThrow('A scorer handover occurred');
+    expect(mock.query.users.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the current epoch and rejects a stale one before any lock', async () => {
+    const { mock, tx } = adapter();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, fenced, 2)).resolves.toBeUndefined();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, fenced, 1))
+      .rejects.toThrow('A scorer handover occurred');
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, fenced, 3))
+      .rejects.toThrow('A scorer handover occurred');
+    // The one accepted call passes the fence and locks user/tenant/membership;
+    // both rejected calls are refused before any lock.
+    expect(mock.query.users.findFirst).toHaveBeenCalledTimes(1);
+    expect(mock.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('fences even a re-verified scorer whose session missed the handover', async () => {
+    const { mock, tx } = adapter();
+    mock.query.userTenantRoles.findFirst.mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active' });
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, fenced)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mock.query.userTenantRoles.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a corrupt token or epoch', async () => {
+    const { mock, tx } = adapter();
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, fenced, 1.5))
+      .rejects.toThrow('Invalid scoring session token');
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...fenced, scorerHandoverEpoch: 0.5 }, 1))
+      .rejects.toThrow('handover epoch is corrupt');
+    // An unread/null column keeps legacy behavior: epoch reads as 0, so a
+    // tokenless writer on a pre-migration match keeps working.
+    await expect(requireScoringWriteAccess(tx, TENANT, ACTOR, { ...fenced, scorerHandoverEpoch: null }, null))
+      .resolves.toBeUndefined();
+  });
+});

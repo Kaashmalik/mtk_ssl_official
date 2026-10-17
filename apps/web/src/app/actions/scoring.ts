@@ -37,6 +37,8 @@ const recordBallSchema = z.object({
   isLegBye: z.boolean().default(false),
   isFour: z.boolean().default(false),
   isSix: z.boolean().default(false),
+  // SCORE-11 writer fencing: the handover epoch the scoring session observed.
+  handoverEpoch: z.number().int().min(0).optional(),
 })
 
 export type RecordBallInput = z.infer<typeof recordBallSchema>
@@ -45,6 +47,8 @@ const createInningsSchema = z.object({
   matchId: z.string().uuid(),
   teamId: z.string().uuid(),
   inningsNumber: z.number().int().min(1).max(3), // 1, 2, or 3 for super over
+  /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
+  handoverEpoch: z.number().int().min(0).optional(),
 })
 
 export type CreateInningsInput = z.infer<typeof createInningsSchema>
@@ -97,6 +101,7 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
     bowlerId: validated.bowlerId,
     extras: delivery.extras,
     wicket,
+    handoverEpoch: validated.handoverEpoch,
   }, tenant.id, actorId)
 
   if (validated.clientOpId && result.clientOpId !== validated.clientOpId) {
@@ -128,7 +133,11 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
 // ─── Undo Ball ────────────────────────────────────────────────
 // Auth here; undo rules enforced by scoring-service SoT.
 
-export const undoBall = withAuth("match:score", async (matchId: string, ballId: string) => {
+export const undoBall = withAuth("match:score", async (
+  matchId: string,
+  ballId: string,
+  handoverEpoch?: number,
+) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
@@ -138,7 +147,7 @@ export const undoBall = withAuth("match:score", async (matchId: string, ballId: 
   await requireMatchScoringAccess(userId, tenant.id, matchId)
   const actorId = await requireScoringActorId(userId)
 
-  await proxyUndoBall(matchId, ballId, tenant.id, actorId)
+  await proxyUndoBall(matchId, ballId, tenant.id, actorId, handoverEpoch)
 
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)
@@ -222,7 +231,11 @@ export const getMatchPlayersForScoring = withAuth("match:read", async (matchId: 
 // `live` -> `innings_break` transition and cache invalidation all happen in
 // scoring-service (SoT), in one transaction.
 
-export const completeInnings = withAuth("match:score", async (matchId: string, inningsId: string) => {
+export const completeInnings = withAuth("match:score", async (
+  matchId: string,
+  inningsId: string,
+  handoverEpoch?: number,
+) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
@@ -236,7 +249,7 @@ export const completeInnings = withAuth("match:score", async (matchId: string, i
   const owned = await findInningsId(inningsId, matchId, tenant.id)
   if (!owned) throw new Error("Innings not found")
 
-  const result = await proxyCompleteInnings(matchId, inningsId, tenant.id, actorId)
+  const result = await proxyCompleteInnings(matchId, inningsId, tenant.id, actorId, handoverEpoch)
 
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)

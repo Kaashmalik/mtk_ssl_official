@@ -255,12 +255,18 @@ export async function assignScorerInMatch(input: {
     // Official approval (COMP-06): consent binds to the exact assignment. Any
     // change to either slot revokes it and, when a slot remains occupied, the
     // assigned member must approve again (IAM-06 pending acceptance).
+    // Writer fencing (SCORE-11): every real slot change bumps the handover
+    // epoch, so scoring sessions that observed a pre-handover epoch —
+    // including a replaced scorer's stale device, even if the same person is
+    // later re-assigned — are fenced by the canonical boundary until they
+    // reload and echo the new epoch.
     const patch = targetSlot === "primary"
       ? { scorerId, updatedAt: new Date() }
       : { backupScorerId: scorerId, updatedAt: new Date() }
     Object.assign(patch, {
       scorerApprovalRequired: nextScorerId !== null || nextBackupScorerId !== null,
       scorerApprovedAt: null,
+      scorerHandoverEpoch: (existing.scorerHandoverEpoch ?? 0) + 1,
     })
     const [updated] = await tx.update(matches)
       .set(patch)
@@ -271,8 +277,8 @@ export async function assignScorerInMatch(input: {
       requestId: randomUUID(), tenantId, actorId: actor.id, actorRole: actorMember.role,
       method: "MATCH_SCORER_ASSIGN", path: `/dashboard/matches/${matchId}`, statusCode: "200",
       payload: { matchId, slot: targetSlot,
-        before: { scorerId: existing.scorerId, backupScorerId: existing.backupScorerId, scorerApprovedAt: existing.scorerApprovedAt },
-        after: { scorerId: updated.scorerId, backupScorerId: updated.backupScorerId, scorerApprovalRequired: updated.scorerApprovalRequired, scorerApprovedAt: updated.scorerApprovedAt } },
+        before: { scorerId: existing.scorerId, backupScorerId: existing.backupScorerId, scorerApprovedAt: existing.scorerApprovedAt, scorerHandoverEpoch: existing.scorerHandoverEpoch },
+        after: { scorerId: updated.scorerId, backupScorerId: updated.backupScorerId, scorerApprovalRequired: updated.scorerApprovalRequired, scorerApprovedAt: updated.scorerApprovedAt, scorerHandoverEpoch: updated.scorerHandoverEpoch } },
     })
     return updated
   }, { isolationLevel: "read committed" }))

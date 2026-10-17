@@ -36,6 +36,8 @@ export type ScoringProxyBallInput = {
   bowlerId: string;
   extras?: { type: "wide" | "noball" | "bye" | "legbye"; runs: number };
   wicket?: { type: string; playerId: string; fielderId?: string };
+  /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
+  handoverEpoch?: number;
 };
 
 export type ScoringProxyBallResult = {
@@ -149,17 +151,22 @@ export async function proxyRecordBall(
   );
 }
 
+/**
+ * `handoverEpoch` is optional: the canonical service accepts tokenless writes
+ * only while no scorer handover has occurred (SCORE-11 writer fencing).
+ */
 export async function proxyUndoBall(
   matchId: string,
   ballId: string,
   tenantId: string,
   actorId: string,
+  handoverEpoch?: number,
 ): Promise<unknown> {
   return scoringFetch(
     "/scoring/ball/undo",
     {
       method: "POST",
-      body: JSON.stringify({ matchId, ballId }),
+      body: JSON.stringify({ matchId, ballId, handoverEpoch }),
     },
     tenantId,
     actorId,
@@ -175,6 +182,7 @@ export async function proxyCreateInnings(
     matchId: string;
     teamId: string;
     inningsNumber: number;
+    handoverEpoch?: number;
   },
   tenantId: string,
   actorId: string,
@@ -199,12 +207,13 @@ export async function proxyCompleteInnings(
   inningsId: string,
   tenantId: string,
   actorId: string,
+  handoverEpoch?: number,
 ): Promise<ScoringCompleteInningsResult> {
   return scoringFetch<ScoringCompleteInningsResult>(
     `/scoring/innings/${encodeURIComponent(inningsId)}/complete`,
     {
       method: "POST",
-      body: JSON.stringify({ matchId }),
+      body: JSON.stringify({ matchId, handoverEpoch }),
     },
     tenantId,
     actorId,
@@ -213,7 +222,8 @@ export async function proxyCompleteInnings(
 
 /** Match completion stays in the canonical writer, including optional awards. */
 export async function proxyCompleteMatch(matchId: string,
-  input: { winnerId?: string; result?: string; manOfMatchId?: string }, tenantId: string, actorId: string,
+  input: { winnerId?: string; result?: string; manOfMatchId?: string; handoverEpoch?: number },
+  tenantId: string, actorId: string,
 ): Promise<{ success: true; matchId: string; status: "completed" }> {
   const response = await scoringFetch<unknown>(`/scoring/match/${encodeURIComponent(matchId)}/complete`, {
     method: "POST", body: JSON.stringify(input),
