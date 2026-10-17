@@ -100,3 +100,40 @@ export function xiCoversParticipants(
   }
   return true
 }
+
+export interface XiSubstitutionInput {
+  /** Active declared rows for BOTH sides (superseded_at IS NULL). */
+  activeRows: ActiveXiRow[]
+  /** Side performing the substitution. */
+  teamId: string
+  outgoingPlayerId: string
+  incomingPlayerId: string
+}
+
+/**
+ * Validates a substitution (SCORE-10) against the ACTIVE declared XIs and
+ * returns the outgoing row's batting order so the replacement inherits the
+ * slot. Fail closed: the outgoing player must be an active XI member of the
+ * substituting side, the incoming player must be entirely absent from BOTH
+ * sides' current XIs, and the sides' active XI shape must stay intact. The
+ * replacement row itself is written by the locked writer, which separately
+ * re-checks registered-squad and roster eligibility for the incoming player.
+ */
+export function xiSubstitutionOrder(input: XiSubstitutionInput): number {
+  const { activeRows, teamId, outgoingPlayerId, incomingPlayerId } = input
+  if (teamId === "" || outgoingPlayerId === "" || incomingPlayerId === "") {
+    throw new Error("Substitution requires an outgoing and an incoming player")
+  }
+  if (outgoingPlayerId === incomingPlayerId) {
+    throw new Error("The substitution must name two different players")
+  }
+  const sideRows = activeRows.filter(row => row.teamId === teamId)
+  const outgoing = sideRows.find(row => row.playerId === outgoingPlayerId)
+  if (!outgoing) throw new Error("The outgoing player is not in the declared playing XI")
+  if (sideRows.some(row => row.playerId === incomingPlayerId)) {
+    throw new Error("The incoming player is already in the declared playing XI")
+  }
+  const otherSide = activeRows.find(row => row.teamId !== teamId && row.playerId === incomingPlayerId)
+  if (otherSide) throw new Error("The incoming player is declared for the other side")
+  return outgoing.battingOrder
+}

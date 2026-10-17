@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { xiCanDeclare, xiDeclarationFromSlots, xiGateStatus, xiInitialSlots, xiStatusLabel,
-  type ActiveXiPlayer } from "@/lib/xi-card"
+import { xiCanDeclare, xiCanSubstitute, xiDeclarationFromSlots, xiGateStatus, xiInitialSlots, xiStatusLabel,
+  xiSubstitutionSelection, type ActiveXiPlayer } from "@/lib/xi-card"
 
 const T = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const P = (start: number) => Array.from({ length: 11 }, (_, i) => T(start + i))
@@ -52,5 +52,30 @@ describe("Playing-XI card derivations (COMP-06 slice)", () => {
     expect(xiInitialSlots(declared.slice(0, 10))).toHaveLength(11)
     expect(xiInitialSlots(declared.slice(0, 10)).every(slot => slot === null)).toBe(true)
     expect(xiInitialSlots()).toEqual(Array.from({ length: 11 }, () => null))
+  })
+
+  it("substitution is official in-match business on armed competition XIs", () => {
+    expect(xiCanSubstitute({ xiRequired: true, status: "live", tournamentId: T(10) })).toBe(true)
+    expect(xiCanSubstitute({ xiRequired: true, status: "innings_break", tournamentId: T(10) })).toBe(true)
+    expect(xiCanSubstitute({ xiRequired: false, status: "live", tournamentId: T(10) })).toBe(false)
+    expect(xiCanSubstitute({ xiRequired: true, status: "completed", tournamentId: T(10) })).toBe(false)
+    expect(xiCanSubstitute({ xiRequired: true, status: "live", tournamentId: null })).toBe(false)
+  })
+
+  it("substitution selection mirrors the policy before calling the writer", () => {
+    const declared: ActiveXiPlayer[] = P(100).map((playerId, i) => ({ playerId, battingOrder: i + 1, name: `P${i}` }))
+    const eligible = [...P(150), ...P(100)].map((id, i) => ({ id, name: `E${i}` }))
+    const bare = { outgoingPlayerId: "", incomingPlayerId: "", error: expect.anything() }
+    expect(xiSubstitutionSelection(null, null, declared, eligible)).toEqual(bare)
+    expect(xiSubstitutionSelection(P(100)[3], null, declared, eligible)).toEqual(bare)
+    expect(xiSubstitutionSelection(P(150)[0], P(150)[1], declared, eligible).error)
+      .toBe("The outgoing player is not in the declared playing XI")
+    expect(xiSubstitutionSelection(P(100)[3], P(100)[5], declared, eligible).error)
+      .toBe("The incoming player is already in the declared playing XI")
+    expect(xiSubstitutionSelection(P(100)[3], T(999), declared, eligible).error)
+      .toBe("The incoming player is not eligible for this side")
+    expect(xiSubstitutionSelection(P(100)[3], P(150)[0], declared, eligible)).toEqual({
+      outgoingPlayerId: P(100)[3], incomingPlayerId: P(150)[0], error: null,
+    })
   })
 })

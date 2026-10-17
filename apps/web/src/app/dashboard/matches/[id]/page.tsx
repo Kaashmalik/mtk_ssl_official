@@ -42,8 +42,11 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   let viewerOccupiesUmpireSlot = false
   let viewerCanDeclareXis = false
   let viewerCanApproveXis = false
+  let viewerCanSubstituteXi = false
   const xiSurfacesRelevant = Boolean(match.tournamentId)
     && (match.status === "scheduled" || Boolean(match.xiRequired && !match.xiApprovedAt))
+    || Boolean(match.tournamentId && match.xiRequired
+      && ["scheduled", "toss", "live", "innings_break"].includes(match.status ?? ""))
   if ((match.scorerApprovalRequired && !match.scorerApprovedAt)
     || (match.umpireApprovalRequired && !match.umpireApprovedAt)
     || xiSurfacesRelevant) {
@@ -60,6 +63,9 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
           viewerCanDeclareXis = match.status === "scheduled"
             && (membership?.role === "league_owner" || viewerOccupiesScorerSlot)
           viewerCanApproveXis = Boolean(match.xiRequired && !match.xiApprovedAt)
+            && (membership?.role === "league_owner" || viewerOccupiesUmpireSlot)
+          viewerCanSubstituteXi = Boolean(match.xiRequired)
+            && ["scheduled", "toss", "live", "innings_break"].includes(match.status ?? "")
             && (membership?.role === "league_owner" || viewerOccupiesUmpireSlot)
         }
       }
@@ -366,10 +372,13 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
             tournamentId={match.tournamentId}
             xiRequired={match.xiRequired}
             xiApprovedAt={match.xiApprovedAt}
+            teamAId={teamA.id}
+            teamBId={teamB.id}
             teamAName={teamA.name}
             teamBName={teamB.name}
             canDeclare={viewerCanDeclareXis}
             canApprove={viewerCanApproveXis}
+            canSubstitute={viewerCanSubstituteXi}
             activeXi={{ teamA: teamAXi, teamB: teamBXi }}
             eligible={{
               teamA: matchPlayers.filter(player => player.teamId === teamA.id),

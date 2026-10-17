@@ -8,11 +8,10 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { CheckCircle2, ListOrdered } from "lucide-react"
-import { declarePlayingXis, approveXis } from "@/app/actions/matches"
-import { xiCanDeclare, xiDeclarationFromSlots, xiGateStatus, xiInitialSlots, xiStatusLabel,
-  type ActiveXiPlayer, type XiGateState } from "@/lib/xi-card"
+import { declarePlayingXis, approveXis, substituteInXi } from "@/app/actions/matches"
+import { xiCanDeclare, xiCanSubstitute, xiDeclarationFromSlots, xiGateStatus, xiInitialSlots,
+  xiStatusLabel, xiSubstitutionSelection, type ActiveXiPlayer, type UiPlayer, type XiGateState } from "@/lib/xi-card"
 
-type UiPlayer = { id: string; name: string }
 const NONE = "__unselected__"
 
 /**
@@ -25,17 +24,20 @@ const NONE = "__unselected__"
  */
 export function PlayingXiCard({
   matchId, matchStatus, tournamentId, xiRequired, xiApprovedAt,
-  teamAName, teamBName, canDeclare, canApprove, activeXi, eligible,
+  teamAId, teamBId, teamAName, teamBName, canDeclare, canApprove, canSubstitute, activeXi, eligible,
 }: {
   matchId: string
   matchStatus: string | null
   tournamentId: string | null
   xiRequired: boolean
   xiApprovedAt: Date | string | null
+  teamAId: string
+  teamBId: string
   teamAName: string
   teamBName: string
   canDeclare: boolean
   canApprove: boolean
+  canSubstitute: boolean
   activeXi: { teamA: ActiveXiPlayer[]; teamB: ActiveXiPlayer[] }
   eligible: { teamA: UiPlayer[]; teamB: UiPlayer[] }
 }) {
@@ -77,8 +79,66 @@ export function PlayingXiCard({
     }
   })
 
-  const sidePanel = (teamName: string, slots: (string | null)[], players: UiPlayer[],
-    setSlots: (next: (string | null)[]) => void, declared: ActiveXiPlayer[]) => (
+  const [subOutA, setSubOutA] = useState<string | null>(null)
+  const [subInA, setSubInA] = useState<string | null>(null)
+  const [subOutB, setSubOutB] = useState<string | null>(null)
+  const [subInB, setSubInB] = useState<string | null>(null)
+  const substituteAllowed = xiCanSubstitute({ xiRequired, status: matchStatus, tournamentId })
+
+  const substitute = (teamId: string, subOut: string | null, subIn: string | null,
+    declared: ActiveXiPlayer[], eligibleSide: UiPlayer[], reset: () => void) => {
+    const selection = xiSubstitutionSelection(subOut, subIn, declared, eligibleSide)
+    if (selection.error) {
+      toast.error(selection.error)
+      return
+    }
+    startTransition(async () => {
+      try {
+        await substituteInXi(matchId, teamId, selection.outgoingPlayerId, selection.incomingPlayerId)
+        toast.success("Substitution recorded. The replacement inherits the declared slot.")
+        reset()
+        router.refresh()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Substitution failed. Reload and try again.")
+      }
+    })
+  }
+
+  const substitutionPanel = (teamId: string, teamName: string, declared: ActiveXiPlayer[], eligibleSide: UiPlayer[],
+    subOut: string | null, subIn: string | null, setOut: (v: string | null) => void, setIn: (v: string | null) => void) => {
+    if (!(canSubstitute && substituteAllowed && declared.length === 11)) return null
+    const selection = xiSubstitutionSelection(subOut, subIn, declared, eligibleSide)
+    const outOptions = [...declared].sort((x, y) => x.battingOrder - y.battingOrder)
+      .map(player => <SelectItem key={player.playerId} value={player.playerId}>{player.battingOrder}. {player.name}</SelectItem>)
+    const inOptions = eligibleSide
+      .filter(player => !declared.some(declaredPlayer => declaredPlayer.playerId === player.id))
+      .map(player => <SelectItem key={player.id} value={player.id}>{player.name}</SelectItem>)
+    return (
+      <div className="mt-3 space-y-1.5">
+        <p className="text-xs text-muted-foreground">Substitute into {teamName} (audited):</p>
+        <Select value={subOut ?? NONE} onValueChange={v => setOut(v === NONE ? null : v)}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Outgoing player" /></SelectTrigger>
+          <SelectContent>{outOptions}</SelectContent>
+        </Select>
+        <Select value={subIn ?? NONE} onValueChange={v => setIn(v === NONE ? null : v)}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Incoming player" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>—</SelectItem>
+            {inOptions}
+          </SelectContent>
+        </Select>
+        {selection.error && <p className="text-xs text-destructive">{selection.error}</p>}
+        <Button size="sm" variant="outline" disabled={isPending || Boolean(selection.error)}
+          onClick={() => substitute(teamId, subOut, subIn, declared, eligibleSide, () => { setOut(null); setIn(null) })}>
+          {isPending ? "Substituting…" : "Record substitution"}
+        </Button>
+      </div>
+    )
+  }
+
+  const sidePanel = (teamId: string, teamName: string, slots: (string | null)[], players: UiPlayer[],
+    setSlots: (next: (string | null)[]) => void, declared: ActiveXiPlayer[],
+    subOut: string | null, subIn: string | null, setOut: (v: string | null) => void, setIn: (v: string | null) => void) => (
     <div className="space-y-2">
       <p className="text-sm font-semibold">{teamName}</p>
       {declared.length === 11 ? (
@@ -106,6 +166,7 @@ export function PlayingXiCard({
       ) : (
         <p className="text-sm text-muted-foreground">No XI declared for this side yet.</p>
       )}
+      {substitutionPanel(teamId, teamName, declared, players, subOut, subIn, setOut, setIn)}
     </div>
   )
 
@@ -126,8 +187,8 @@ export function PlayingXiCard({
           </p>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
-          {sidePanel(teamAName, slotsA, eligible.teamA, setSlotsA, activeXi.teamA)}
-          {sidePanel(teamBName, slotsB, eligible.teamB, setSlotsB, activeXi.teamB)}
+          {sidePanel(teamAId, teamAName, slotsA, eligible.teamA, setSlotsA, activeXi.teamA, subOutA, subInA, setSubOutA, setSubInA)}
+          {sidePanel(teamBId, teamBName, slotsB, eligible.teamB, setSlotsB, activeXi.teamB, subOutB, subInB, setSubOutB, setSubInB)}
         </div>
         {validationError && canDeclare && declareAllowed && (
           <p className="text-xs text-destructive">{validationError}</p>

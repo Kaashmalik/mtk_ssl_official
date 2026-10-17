@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+﻿import { beforeEach, describe, expect, it, vi } from "vitest"
 import { db } from "@mtk/database"
-import { setPlayingXis, approvePlayingXis } from "@/lib/match-records"
+import { setPlayingXis, approvePlayingXis, substituteInPlayingXi } from "@/lib/match-records"
 
 // Real schema tables, shared policies and withTenantContext pass through;
 // only the db handle is mocked. Order-sensitive findFirst mocks dispatch by
@@ -32,6 +32,7 @@ function buildTx(options: {
   xiCounts?: { teamId: string; declared: number }[]
   returningMatch?: Record<string, unknown>
   rosterOverrides?: Map<string, { teamId?: string; isActive?: boolean; status?: string }>
+  activeXis?: { teamId: string; playerId: string; battingOrder: number }[]
 } = {}) {
   const overrides = options.rosterOverrides
   const roster = [...A_PLAYERS.map(id => ({ id, teamId: TEAM_A })), ...B_PLAYERS.map(id => ({ id, teamId: TEAM_B }))]
@@ -52,6 +53,10 @@ function buildTx(options: {
       leagueRegistrations: { findMany: vi.fn(async () => options.registrations ?? [
         { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: TEAM_A, status: "approved", squadPlayerIds: null },
         { tenantId: TENANT, tournamentId: TOURNAMENT, teamId: TEAM_B, status: "approved", squadPlayerIds: null },
+      ]) },
+      matchPlayingXis: { findMany: vi.fn(async () => options.activeXis ?? [
+        ...A_PLAYERS.map((playerId, i) => ({ teamId: TEAM_A, playerId, battingOrder: i + 1 })),
+        ...B_PLAYERS.map((playerId, i) => ({ teamId: TEAM_B, playerId, battingOrder: i + 1 })),
       ]) },
       players: { findFirst: vi.fn(async () => {
         const next = roster.shift()
@@ -239,3 +244,90 @@ describe("approvePlayingXis (COMP-06 slice)", () => {
     await expect(approvePlayingXis({ userId: CLERK, tenantId: TENANT, matchId: MATCH })).rejects.toThrow()
     expect(txm.matchUpdates).toHaveLength(0)
   })})
+
+describe("substituteInPlayingXi (SCORE-10)", () => {
+  const armedMatch = () => ({ ...happyMatch(), xiRequired: true })
+
+  it("supersedes the outgoing declaration, inherits the slot and keeps the approval intact", async () => {
+    const txm = buildTx({ match: { ...armedMatch(), xiApprovedAt: new Date("2026-10-17T10:00:00Z") },
+      actor: activeActor(), member: ownerMember() })
+    ;(txm.tx.query.players.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { id: T(50), tenantId: TENANT, teamId: TEAM_A, isActive: true, status: "active" })
+
+    const result = await substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })
+
+    expect(result).toEqual({ matchId: MATCH, teamId: TEAM_A, battingOrder: 3, substitutedAt: expect.any(Date) })
+    expect(txm.xiSupersedeWhere).toHaveBeenCalledTimes(1)
+    const xiInsert = txm.insertValues[0] as Record<string, unknown>
+    expect(xiInsert).toMatchObject({ matchId: MATCH, teamId: TEAM_A, playerId: T(50), battingOrder: 3 })
+    // An official substitution act never re-opens the approval gate.
+    expect(txm.matchUpdates).toHaveLength(0)
+    const audit = txm.insertValues[1] as Record<string, unknown>
+    expect(audit.method).toBe("XI_SUBSTITUTE")
+    expect(audit.payload).toMatchObject({ outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50), battingOrder: 3 })
+  })
+
+  it("refuses an unmatched pair, a cross-side or duplicate replacement before any write", async () => {
+    const txm = buildTx({ match: armedMatch(), actor: activeActor(), member: ownerMember() })
+    ;(txm.tx.query.players.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { id: T(50), tenantId: TENANT, teamId: TEAM_A, isActive: true, status: "active" })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: A_PLAYERS[4],
+    })).rejects.toThrow("already in the declared playing XI")
+    expect(txm.xiSupersedeWhere).not.toHaveBeenCalled()
+
+    const cross = buildTx({ match: armedMatch(), actor: activeActor(), member: ownerMember() })
+    ;(cross.tx.query.players.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { id: B_PLAYERS[0], tenantId: TENANT, teamId: TEAM_A, isActive: true, status: "active" })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: B_PLAYERS[0],
+    })).rejects.toThrow("declared for the other side")
+
+    const missing = buildTx({ match: armedMatch(), actor: activeActor(), member: ownerMember() })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: T(50), incomingPlayerId: A_PLAYERS[4],
+    })).rejects.toThrow("not in the declared playing XI")
+    expect(missing.insertValues).toHaveLength(0)
+  })
+
+  it("is official-only, gate-only and closes with the match", async () => {
+    const outsider = buildTx({
+      match: armedMatch(), actor: activeActor(),
+      member: { userId: USER, tenantId: TENANT, role: "fan", status: "active" },
+    })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })).rejects.toThrow("assigned member umpire may substitute")
+    expect(outsider.insertValues).toHaveLength(0)
+
+    buildTx({ match: happyMatch(), actor: activeActor(), member: ownerMember() })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })).rejects.toThrow("no declared XIs")
+
+    buildTx({ match: { ...armedMatch(), status: "completed" }, actor: activeActor(), member: ownerMember() })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })).rejects.toThrow("closed for this match status")
+
+    // A player-role member without an umpire slot is rejected by the slot check.
+    buildTx({
+      match: armedMatch(),
+      actor: activeActor(),
+      member: { userId: USER, tenantId: TENANT, role: "player", status: "active" },
+    })
+    await expect(substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })).rejects.toThrow("assigned member umpire may substitute")
+  })
+})

@@ -7,7 +7,8 @@ import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm
 import { scorerMembership } from "@/lib/scorer-membership"
 import { matchRegistrationMap, registrationAllowsPlayer,
   type SquadRegistration } from "@mtk/database/lib/registered-squad-eligibility"
-import { validateDeclaredXi, PLAYING_XI_SIZE, type XiDeclarationEntry } from "@mtk/database/lib/playing-xi-policy"
+import { validateDeclaredXi, xiSubstitutionOrder, PLAYING_XI_SIZE,
+  type XiDeclarationEntry } from "@mtk/database/lib/playing-xi-policy"
 
 /**
  * Match record reads and the scorer-assignment writer. Every function is
@@ -571,5 +572,117 @@ export async function approvePlayingXis(input: {
         approvedAs: actorMember.role === "league_owner" ? "owner" : "umpire" },
     })
     return { matchId, approvedAt }
+  }, { isolationLevel: "read committed" }))
+}
+
+/**
+ * Audited XI substitution (SCORE-10, COMP-06): an official (league owner or
+ * assigned member umpire) replaces one active declared XI member with a
+ * registered-squad, active-roster player of the SAME side while the gate is
+ * armed. The match row lock plus the shared policy re-validate the pair; the
+ * outgoing row is superseded (never deleted) and the replacement inherits its
+ * batting order. The official's own substitution act keeps `xi_approved_at`
+ * intact — approval binds to the gate, the history rows record who changed
+ * what. Audited as XI_SUBSTITUTE.
+ */
+export async function substituteInPlayingXi(input: {
+  userId: string
+  tenantId: string
+  matchId: string
+  teamId: string
+  outgoingPlayerId: string
+  incomingPlayerId: string
+}): Promise<{ matchId: string; teamId: string; battingOrder: number; substitutedAt: Date }> {
+  const { userId, tenantId, matchId, teamId, outgoingPlayerId, incomingPlayerId } = input
+  return withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const match = await tx.query.matches.findFirst({ where: key })
+    if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.clerkId} = ${userId} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!actor || actor.clerkId !== userId || actor.isActive !== true) {
+      throw new Error("Forbidden: substitution account unavailable")
+    }
+    // SCORE-09: a membership whose bound has passed denies this league surface.
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || !membershipGrantsAccess(actorMember)) throw new Error("Forbidden: your membership changed")
+    if (actorMember.role !== "league_owner"
+      && match.umpire1Id !== actor.id && match.umpire2Id !== actor.id) {
+      throw new Error("Only the owner or an assigned member umpire may substitute")
+    }
+    if (match.tournamentId === null) throw new Error("Playing XIs apply to competition matches only")
+    if (!match.xiRequired) throw new Error("This match has no declared XIs to substitute into")
+    if (match.teamAId !== teamId && match.teamBId !== teamId) {
+      throw new Error("Substitution side does not belong to this match")
+    }
+    if (!["scheduled", "toss", "live", "innings_break"].includes(match.status ?? "")) {
+      throw new Error("Substitutions are closed for this match status")
+    }
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR SHARE`)
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
+    if (!league || league.id !== tenantId || league.isActive !== true) {
+      throw new Error("Forbidden: league unavailable")
+    }
+    // Active declared rows for BOTH sides, then the shared policy decision.
+    const activeRows = await tx.query.matchPlayingXis.findMany({
+      where: and(eq(matchPlayingXis.matchId, matchId), eq(matchPlayingXis.tenantId, tenantId),
+        isNull(matchPlayingXis.supersededAt)),
+      columns: { teamId: true, playerId: true, battingOrder: true },
+      orderBy: [asc(matchPlayingXis.battingOrder)],
+    })
+    const battingOrder = xiSubstitutionOrder({ activeRows, teamId, outgoingPlayerId, incomingPlayerId })
+    // Ordered team locks before any roster reads.
+    const teamIds = [match.teamAId, match.teamBId].sort()
+    await tx.execute(sql`SELECT ${teams.id} FROM ${teams}
+      WHERE ${and(eq(teams.tenantId, tenantId), inArray(teams.id, teamIds))} ORDER BY ${teams.id} FOR SHARE`)
+    // Mirrors the canonical boundary's registered-squad eligibility read.
+    const regWhere = and(eq(leagueRegistrations.tenantId, tenantId),
+      eq(leagueRegistrations.tournamentId, match.tournamentId),
+      inArray(leagueRegistrations.teamId, teamIds))
+    await tx.execute(sql`SELECT ${leagueRegistrations.id} FROM ${leagueRegistrations}
+      WHERE ${regWhere} ORDER BY ${leagueRegistrations.id} LIMIT 3 FOR SHARE`)
+    const regRows = await tx.query.leagueRegistrations.findMany({ where: regWhere,
+      columns: { tenantId: true, tournamentId: true, teamId: true, status: true, squadPlayerIds: true },
+      orderBy: [asc(leagueRegistrations.id)], limit: 3 })
+    let registrations: Map<string, SquadRegistration>
+    try {
+      registrations = matchRegistrationMap(regRows, tenantId, match.tournamentId, teamIds)
+    } catch {
+      throw new Error("Tournament registrations require review")
+    }
+    await tx.execute(sql`SELECT ${players.id} FROM ${players}
+      WHERE ${and(eq(players.tenantId, tenantId), eq(players.id, incomingPlayerId))} FOR SHARE`)
+    const incoming = await tx.query.players.findFirst({ where: and(eq(players.id, incomingPlayerId), eq(players.tenantId, tenantId)) })
+    if (!incoming || incoming.id !== incomingPlayerId || incoming.tenantId !== tenantId
+      || incoming.isActive !== true || incoming.status !== "active") {
+      throw new Error("The incoming player is not an active roster member")
+    }
+    if (incoming.teamId !== teamId) throw new Error("The incoming player belongs to the other side")
+    if (!registrationAllowsPlayer(registrations.get(teamId), incomingPlayerId)) {
+      throw new Error("The incoming player is outside the approved tournament squad")
+    }
+    const substitutedAt = new Date()
+    // Supersede the outgoing declaration; the replacement inherits its slot.
+    await tx.update(matchPlayingXis)
+      .set({ supersededAt: substitutedAt })
+      .where(and(eq(matchPlayingXis.matchId, matchId), eq(matchPlayingXis.tenantId, tenantId),
+        eq(matchPlayingXis.teamId, teamId), eq(matchPlayingXis.playerId, outgoingPlayerId),
+        isNull(matchPlayingXis.supersededAt)))
+    await tx.insert(matchPlayingXis).values({
+      matchId, tenantId, teamId, playerId: incomingPlayerId, battingOrder,
+      declaredBy: actor.id, declaredAt: substitutedAt,
+    })
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id,
+      method: "XI_SUBSTITUTE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId, teamId, outgoingPlayerId, incomingPlayerId, battingOrder,
+        substitutedAt: substitutedAt.toISOString(),
+        substitutedAs: actorMember.role === "league_owner" ? "owner" : "umpire" },
+    })
+    return { matchId, teamId, battingOrder, substitutedAt }
   }, { isolationLevel: "read committed" }))
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { validateDeclaredXi, xiEnforcementLevel, xiIsApproved, xiCoversParticipants,
-  PLAYING_XI_SIZE } from "../lib/playing-xi-policy"
+  xiSubstitutionOrder, PLAYING_XI_SIZE } from "../lib/playing-xi-policy"
 
 const T = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const TEAM_A = T(21)
@@ -64,5 +64,26 @@ describe("Shared playing-XI policy (COMP-06)", () => {
     const rows = [...declared(100).map(e => ({ ...e, teamId: TEAM_A })), ...declared(200).map(e => ({ ...e, teamId: TEAM_B }))]
     expect(xiCoversParticipants(rows, new Map([[T(100), TEAM_B]]))).toBe(false)
     expect(xiCoversParticipants(rows, new Map([[T(300), TEAM_A]]))).toBe(false)
+  })
+
+  describe("XI substitution (SCORE-10)", () => {
+    const rows = [...declared(100).map(e => ({ ...e, teamId: TEAM_A })), ...declared(200).map(e => ({ ...e, teamId: TEAM_B }))]
+
+    it("returns the outgoing player's order so the replacement inherits the slot", () => {
+      expect(xiSubstitutionOrder({ activeRows: rows, teamId: TEAM_A, outgoingPlayerId: T(103), incomingPlayerId: T(150) })).toBe(4)
+  })
+
+    it("fails closed on unknown, duplicate, cross-side or self replacements", () => {
+      expect(() => xiSubstitutionOrder({ activeRows: rows, teamId: TEAM_A, outgoingPlayerId: T(150), incomingPlayerId: T(151) }))
+        .toThrow("not in the declared playing XI")
+      expect(() => xiSubstitutionOrder({ activeRows: rows, teamId: TEAM_A, outgoingPlayerId: T(103), incomingPlayerId: T(105) }))
+        .toThrow("already in the declared playing XI")
+      expect(() => xiSubstitutionOrder({ activeRows: rows, teamId: TEAM_A, outgoingPlayerId: T(103), incomingPlayerId: T(203) }))
+        .toThrow("declared for the other side")
+      expect(() => xiSubstitutionOrder({ activeRows: rows, teamId: TEAM_A, outgoingPlayerId: T(103), incomingPlayerId: T(103) }))
+        .toThrow("two different players")
+      expect(() => xiSubstitutionOrder({ activeRows: rows, teamId: TEAM_A, outgoingPlayerId: "", incomingPlayerId: T(150) }))
+        .toThrow("outgoing and an incoming player")
+    })
   })
 })

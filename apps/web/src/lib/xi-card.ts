@@ -15,6 +15,11 @@ export interface ActiveXiPlayer extends XiEntry {
   name: string
 }
 
+export interface UiPlayer {
+  id: string
+  name: string
+}
+
 export type XiGateState = "notDeclared" | "pendingApproval" | "approved"
 
 /** Same split the shared policy and the canonical boundary enforce. */
@@ -62,4 +67,42 @@ export function xiInitialSlots(active?: ActiveXiPlayer[]): (string | null)[] {
   const sorted = [...(active ?? [])].sort((a, b) => a.battingOrder - b.battingOrder)
   if (sorted.length === 11) return sorted.map(player => player.playerId)
   return Array.from({ length: 11 }, () => null)
+}
+
+/** Substitutions are official in-match acts on armed competition XIs. */
+export function xiCanSubstitute(match: {
+  xiRequired?: boolean | null
+  status: string | null
+  tournamentId: string | null | undefined
+}): boolean {
+  return match.xiRequired === true && match.tournamentId !== null && match.tournamentId !== undefined
+    && ["scheduled", "toss", "live", "innings_break"].includes(match.status ?? "")
+}
+
+export interface XiSubstitutionSelection {
+  outgoingPlayerId: string
+  incomingPlayerId: string
+  error: string | null
+}
+
+/** Client-side mirror of the shared substitution policy for the two selects. */
+export function xiSubstitutionSelection(
+  outgoing: string | null | undefined,
+  incoming: string | null | undefined,
+  declared: ActiveXiPlayer[],
+  eligible: UiPlayer[],
+): XiSubstitutionSelection {
+  if (!outgoing || !incoming) {
+    return { outgoingPlayerId: "", incomingPlayerId: "", error: "Choose the outgoing and incoming players" }
+  }
+  if (!declared.some(player => player.playerId === outgoing)) {
+    return { outgoingPlayerId: outgoing, incomingPlayerId: incoming, error: "The outgoing player is not in the declared playing XI" }
+  }
+  if (declared.some(player => player.playerId === incoming)) {
+    return { outgoingPlayerId: outgoing, incomingPlayerId: incoming, error: "The incoming player is already in the declared playing XI" }
+  }
+  if (!eligible.some(player => player.id === incoming)) {
+    return { outgoingPlayerId: outgoing, incomingPlayerId: incoming, error: "The incoming player is not eligible for this side" }
+  }
+  return { outgoingPlayerId: outgoing, incomingPlayerId: incoming, error: null }
 }

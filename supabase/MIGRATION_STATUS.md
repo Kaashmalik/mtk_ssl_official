@@ -20,6 +20,11 @@
 > check). Batch 81 adds no schema: only the match-page UI surfaces (playing-XI
 > card, viewer-authority sizing reads, readiness passthrough); the migration
 > remains the only pending apply for this ID.
+>
+> **17 October 2026 (Batch 82) - no schema change.** SCORE-10 substitutions
+> slice rides entirely on the Batch 80 XI schema (supersede + insert on
+> `match_playing_xis`, `matches` untouched); nothing new to apply, and the
+> `playing_xi_declaration` migration above stays the only pending apply.
 
 > **17 October 2026 (Batch 77) - `consented_career_linkage` APPLIED to the
 > remote Supabase project (`anxstufkbqnjkxgksfkn`).** Adds

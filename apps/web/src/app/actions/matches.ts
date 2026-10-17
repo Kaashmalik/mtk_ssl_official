@@ -9,7 +9,7 @@ import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { proxyCompleteMatch } from "@/lib/scoring-service-client"
 import { manageMatch, matchMetadataSchema, streamCommandSchema } from "@/lib/match-management"
-import { assignScorerInMatch, approveScorerAssignmentInMatch, approveUmpireAssignmentInMatch, assignUmpireInMatch, setPlayingXis, approvePlayingXis, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
+import { assignScorerInMatch, approveScorerAssignmentInMatch, approveUmpireAssignmentInMatch, assignUmpireInMatch, setPlayingXis, approvePlayingXis, substituteInPlayingXi, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
   readMatchFormOptions } from "@/lib/match-records"
 
 const createMatchSchema = matchMetadataSchema.extend({ tenantId: z.string().uuid().optional() }).strict()
@@ -293,6 +293,33 @@ export const approveXis = withAuth("match:read", async (matchId: string) => {
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   const result = await approvePlayingXis({ userId, tenantId, matchId })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/dashboard/matches/${matchId}`)
+  return { success: true as const, ...result }
+})
+
+/**
+ * Audited XI substitution (SCORE-10, mirroring XI approval): a league owner or
+ * an ASSIGNED member umpire replaces one declared player with a squad-eligible
+ * roster player of the same side. Gated `match:read` because member umpires
+ * may hold any role; the locked writer's authority and eligibility checks are
+ * the real gate and the substitution is audited (XI_SUBSTITUTE).
+ */
+export const substituteInXi = withAuth("match:read", async (
+  matchId: string,
+  teamId: string,
+  outgoingPlayerId: string,
+  incomingPlayerId: string,
+) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(matchId)
+  z.string().uuid().parse(teamId)
+  z.string().uuid().parse(outgoingPlayerId)
+  z.string().uuid().parse(incomingPlayerId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  const result = await substituteInPlayingXi({ userId, tenantId, matchId, teamId, outgoingPlayerId, incomingPlayerId })
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/dashboard/matches/${matchId}`)
   return { success: true as const, ...result }

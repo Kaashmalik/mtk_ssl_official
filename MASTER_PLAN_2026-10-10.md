@@ -4306,6 +4306,78 @@ Next source work: toss decisions, substitutions (SCORE-10), scorer handover
 safeguards (SCORE-11), PUB-02 public page, COMP-07 remainder, release gates.
 Roadmap: **19 checked / 60 open / 79 IDs**.
 
+## Batch 82 — SCORE-10 audited XI substitutions (first slice)
+
+**Scope built.** SCORE-10's first audited slice on top of the Batch 80/81
+declared-XI design. Cricket substitutions are official acts: only the league
+owner or an ASSIGNED member umpire may substitute (never scorers), only
+while the gate is armed and the match is scheduled/toss/live/innings_break,
+and the replacement must be a registered-squad, active-roster member of the
+SAME side who is not already declared on EITHER side.
+
+- `packages/database/src/lib/playing-xi-policy.ts`: `xiSubstitutionOrder`
+  — pure, fail-closed decision over the ACTIVE declared rows of both sides;
+  outgoing must be an active member of the substituting side; incoming must
+  be absent from both sides' XIs; returns the outgoing player's batting
+  order so the replacement inherits the slot.
+- `apps/web/src/lib/match-records.ts`: `substituteInPlayingXi` — one
+  read-committed transaction re-running the Batch 80 lock order (match FOR
+  UPDATE -> actor row -> membership -> league FOR SHARE -> both teams FOR
+  SHARE sorted -> registrations -> incoming player), re-verifying
+  competition-only/armed-only/status-window, mirroring the canonical
+  registered-squad eligibility read (`matchRegistrationMap` throws
+  "require review" on dup/mis-scoped) plus `registrationAllowsPlayer`
+  and the active-roster check; supersedes the outgoing row (never deleted),
+  inserts the replacement with the inherited order, audits `XI_SUBSTITUTE`
+  with the performed-as role. `xi_approved_at` deliberately untouched —
+  approval binds to the gate; the history rows record who changed what.
+- `apps/web/src/app/actions/matches.ts`: `substituteInXi` action gated
+  `match:read` (mirroring XI approval — member umpires may hold any role;
+  the locked writer is the real gate), zod uuid parsing, path revalidation.
+- `apps/web/src/lib/xi-card.ts`: `xiCanSubstitute` (armed competition match
+  in the substitution window) and `xiSubstitutionSelection` (client mirror
+  of the policy for the two selects, fail-visible before any call).
+- `apps/web/src/components/matches/playing-xi-card.tsx`: card now receives
+  `teamAId`/`teamBId` and `canSubstitute`; per declared side (exactly 11) a
+  substitution panel — outgoing select sorted by batting order, incoming
+  select over eligible-not-declared players, disabled while pending/invalid.
+- `apps/web/src/app/dashboard/matches/[id]/page.tsx`: viewer substitution
+  authority (owner or occupied umpire slot while armed and in-window) and
+  side-ID wiring.
+
+**Boundary.** First slice only: no SCORE-10 full cricket-rule scope yet
+(per-side substitution caps, same-player re-entry, concussion/IPL-style
+policy variants are future decisions); the canonical delivery gate itself
+needs no change (active rows are re-read per delivery, so substitutions take
+effect without scoring-service edits); no schema change and no migration
+apply (Batch 80's remains local-only/unapplied); real database/browser
+acceptance still open.
+
+**Testing.** `playing-xi-policy.test.ts` (+2): slot inheritance; fail-closed
+matrix (unknown outgoing, duplicate incoming, cross-side incoming, self,
+empty ids). `playing-xis.test.ts` (+3): approval-intact happy path with the
+inherited slot and XI_SUBSTITUTE audit; duplicate/cross-side/missing-outgoing
+fail-closed before any write; official-only + gate-only + status-closed
+matrix incl. umpire-slot denial. `playing-xi-card.test.ts` (+2):
+`xiCanSubstitute` matrix; selection mirror incl. every error copy.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/database test` | PASS - **17** files, **227 tests** (+2) |
+| `corepack pnpm --filter @mtk/web test` | PASS - **109** files, **2,616 tests** (+5) |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS - **12** files, **312 tests** (unchanged) |
+| `corepack pnpm --filter @ssl/ai-commentary-service test` | PASS - **4** files, **39 tests** (unchanged) |
+| `corepack pnpm test:release` (release checker) | PASS - **87/87** |
+| `tsc --noEmit` (web) | **0** errors |
+| `git diff --check` | Clean |
+| Remote apply | none - no schema change |
+
+Next source work: scorer handover safeguards (SCORE-11), PUB-02 public page,
+COMP-07 remainder, release gates. Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
