@@ -2,7 +2,7 @@ import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { unstable_noStore as noStore } from "next/cache"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublicBattingLeaderboard, readPublicBowlingLeaderboard, readPublicFieldingLeaderboard } from "@/lib/public-visibility"
+import { readPublicBattingLeaderboard, readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions, type PublicTournamentOption } from "@/lib/public-visibility"
 import { parsePublicLeaderboardSearch, PUBLIC_LEADERBOARD_MAX_MINIMUM, PUBLIC_LEADERBOARD_FORMATS, publicLeaderboardFormatLabel, type PublicLeaderboardSearch } from "@/lib/leaderboard-filters"
 
 export default async function LeaderboardsPage({ searchParams }: { searchParams?: Promise<PublicLeaderboardSearch> }) {
@@ -20,6 +20,15 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
     readPublicFieldingLeaderboard(tenantId, parsed.data),
   ]) : [[], [], []]
 
+  // Records-by-competition dimension (PUB-03): published same-league tournaments
+  // only, so the selector can never offer an unpublished competition.
+  const competitions: PublicTournamentOption[] = parsed.success
+    ? await readPublicTournamentOptions(tenantId)
+    : []
+  const selectedCompetition = parsed.success && parsed.data.tournamentId
+    ? competitions.find(c => c.id === parsed.data.tournamentId)
+    : undefined
+
   const format = parsed.success ? parsed.data.format : undefined
   const formatLabel = publicLeaderboardFormatLabel(format)
   return (
@@ -33,6 +42,16 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
             <option value="">All formats (combined)</option>
             {PUBLIC_LEADERBOARD_FORMATS.map(f => <option key={f} value={f}>{publicLeaderboardFormatLabel(f)}</option>)}
           </select>
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="tournamentId" className="block text-sm font-medium">Competition</label>
+          <select id="tournamentId" name="tournamentId" defaultValue={parsed.success && parsed.data.tournamentId ? parsed.data.tournamentId : ""} className="min-h-11 w-56 rounded-md border bg-background px-3">
+            <option value="">All competitions (combined)</option>
+            {competitions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {selectedCompetition ? (
+            <p className="text-xs text-muted-foreground">Showing records for {selectedCompetition.name} only.</p>
+          ) : null}
         </div>
         <div className="space-y-1">
           <label htmlFor="minimum-innings" className="block text-sm font-medium">Minimum innings</label>
@@ -49,7 +68,7 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
         <button type="submit" className="min-h-11 rounded-md bg-primary px-4 text-primary-foreground">Apply qualification</button>
         <a href="/leaderboards" className="inline-flex min-h-11 items-center underline">Reset filters</a>
       </form>
-      <p className="text-sm text-muted-foreground">Minimums apply to innings batted / balls faced for batting, and innings bowled / balls bowled for bowling. Fielding is qualified on matches played with a recorded fielding scorecard, ranked by dismissals (catches + run-outs + stumpings); minimum balls and innings do not apply to it. Zero means no minimum. User-selected filters do not set league award eligibility.</p>
+      <p className="text-sm text-muted-foreground">Minimums apply to innings batted / balls faced for batting, and innings bowled / balls bowled for bowling. Fielding is qualified on matches played with a recorded fielding scorecard, ranked by dismissals (catches + run-outs + stumpings); minimum balls and innings do not apply to it. Zero means no minimum. Tied values are ordered deterministically by the earliest player record — the display never breaks ties by hidden criteria. User-selected filters do not set league award eligibility.</p>
       {!parsed.success ? <p role="alert" className="text-destructive">Enter whole-number minimums from 0 to 10,000 and a valid match format. Repeated or invalid filter values are not accepted.</p> : <>
       <p className="text-sm">Qualification{formatLabel ? ` (${formatLabel})` : ""}: at least {parsed.data.minimumInnings} innings and {parsed.data.minimumBalls} balls for batting/bowling, and {parsed.data.minimumMatches} matches for fielding. Top 10 per category.</p>
       <div className="grid md:grid-cols-2 gap-6">

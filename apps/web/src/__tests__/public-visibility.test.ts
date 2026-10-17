@@ -6,7 +6,7 @@ import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 import {
   isTournamentPublished, isMatchPublished, readPublishedTournament, readPublishedMatch,
   readPublishedMatchTeams, matchHasInnings, readPublicBattingLeaderboard,
-  readPublicBowlingLeaderboard, readPublicFieldingLeaderboard,
+  readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions,
   readPublishedTournamentAwards, PUBLIC_LEADERBOARD_LIMIT,
 } from "@/lib/public-visibility"
 
@@ -349,5 +349,51 @@ describe("Published tournament award gallery (PUB-04)", () => {
   it("does not hide a gallery query failure as an empty ceremony", async () => {
     mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
     await expect(readPublishedTournamentAwards(TENANT, TOURNAMENT)).rejects.toThrow("Database unavailable")
+  })
+})
+
+
+describe("Records by competition and published-competition options (PUB-03)", () => {
+  const OPTION = "00000000-0000-4000-8000-0000000000cc"
+
+  it("narrows the combined batting/bowling boards to the competition dimension", async () => {
+    await readPublicBattingLeaderboard(TENANT, { tournamentId: OPTION })
+    await readPublicBowlingLeaderboard(TENANT, { tournamentId: OPTION })
+    expect(mocks.queries.length).toBe(2)
+    for (const record of mocks.queries) {
+      expect(record.table).toBe(playerSeasonStats)
+      expect(record.params).toContain(OPTION)
+    }
+  })
+
+  it("keeps the combined boards league-wide when no competition is selected", async () => {
+    await readPublicBattingLeaderboard(TENANT)
+    expect(mocks.queries[0].params).not.toContain(OPTION)
+  })
+
+  it("narrows the format-qualified batting board through the matches join", async () => {
+    await readPublicBattingLeaderboard(TENANT, { format: "t20", tournamentId: OPTION })
+    expect(mocks.queries.length).toBe(1)
+    expect(mocks.queries[0].params).toContain("t20")
+    expect(mocks.queries[0].params).toContain(OPTION)
+  })
+
+  it("narrows the fielding board on both aggregation paths", async () => {
+    await readPublicFieldingLeaderboard(TENANT, { tournamentId: OPTION })
+    await readPublicFieldingLeaderboard(TENANT, { format: "odi", tournamentId: OPTION })
+    expect(mocks.queries.length).toBe(2)
+    for (const record of mocks.queries) {
+      expect(record.params).toContain(OPTION)
+    }
+  })
+
+  it("offers only published same-league competitions, bounded", async () => {
+    mocks.state.parent = { id: OPTION, name: "Cup 2026", status: "completed" }
+    const options = await readPublicTournamentOptions(TENANT)
+    expect(options).toHaveLength(1)
+    const record = mocks.queries[0]
+    expect(record.table).toBe(tournaments)
+    expect(record.params[0]).toBe(TENANT)
+    expect(record.limit).toBe(100)
   })
 })

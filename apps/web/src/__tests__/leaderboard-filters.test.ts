@@ -50,4 +50,20 @@ describe("Public leaderboard qualification filters", () => {
       expect(parsePublicLeaderboardSearch({ format: value as never }).success).toBe(false)
       expect(publicLeaderboardFilters.safeParse({ minimumInnings: 0, minimumBalls: 0, format: value }).success).toBe(false)
     })
+
+  it("accepts a competition id as the records-by-competition dimension", () => {
+    const id = "00000000-0000-4000-8000-0000000000bb"
+    expect(parsePublicLeaderboardSearch({ tournamentId: id })).toMatchObject({ success: true, data: { tournamentId: id } })
+    expect(publicLeaderboardFilters.safeParse({ minimumInnings: 0, minimumBalls: 0, tournamentId: id }).success).toBe(true)
+  })
+
+  it("an empty-string competition resets to the combined view instead of erroring", () => {
+    expect(parsePublicLeaderboardSearch({ tournamentId: "" })).toMatchObject({ success: true, data: { tournamentId: undefined } })
+  })
+
+  it.each(["nope", "123", "t20", ["00000000-0000-4000-8000-0000000000bb", "00000000-0000-4000-8000-0000000000bb"], "00000000-0000-4000-8000-0000000000bx"])(
+    "rejects an invalid or repeated competition id %s", value => {
+      expect(parsePublicLeaderboardSearch({ tournamentId: value as never }).success).toBe(false)
+      expect(publicLeaderboardFilters.safeParse({ minimumInnings: 0, minimumBalls: 0, tournamentId: value as never }).success).toBe(false)
+    })
 })

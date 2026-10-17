@@ -26,6 +26,9 @@ export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VA
 /** Public leaderboard rows are bounded, newest-agnostic (ranked by aggregate). */
 export const PUBLIC_LEADERBOARD_LIMIT = 10
 
+/** Competition selector entries are bounded (disclosed, never silently cut). */
+export const PUBLIC_TOURNAMENT_OPTIONS_LIMIT = 100
+
 export type PublicTournament = typeof tournaments.$inferSelect
 export type PublicMatch = typeof matches.$inferSelect
 
@@ -139,6 +142,8 @@ async function readPublicLeaderboard(
     )
     .where(and(
       eq(playerSeasonStats.tenantId, tenantId),
+      // Competition/season dimension (PUB-03): optional published-tournament scoping.
+      filters.tournamentId ? eq(playerSeasonStats.tournamentId, filters.tournamentId) : undefined,
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(playerSeasonStats.playerId, players.name, players.userId, users.isActive)
@@ -188,6 +193,7 @@ async function readFormatQualifiedLeaderboard(
         eq(battingScorecards.tenantId, tenantId),
         // The metric-only caller guarantees a declared format; see the guard in readPublicLeaderboard.
         eq(matches.matchFormat, filters.format!),
+        filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
         published,
       ))
       .groupBy(battingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -223,6 +229,7 @@ async function readFormatQualifiedLeaderboard(
       eq(bowlingScorecards.tenantId, tenantId),
       // The metric discriminant guarantees a declared format here.
       eq(matches.matchFormat, filters.format!),
+      filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
       published,
     ))
     .groupBy(bowlingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -249,6 +256,31 @@ export function readPublicBattingLeaderboard(tenantId: string, input: PublicLead
 /** Bowling leaderboard for the public hub, scoped and publication-gated. */
 export function readPublicBowlingLeaderboard(tenantId: string, input: PublicLeaderboardFilterInput = {}) {
   return readPublicLeaderboard(tenantId, "wickets", input)
+}
+
+/** An entry of the competition selector on the public leaderboards page. */
+export type PublicTournamentOption = { id: string; name: string }
+
+/**
+ * Competitions the leaderboards page may offer as a records-by-competition
+ * dimension (PUB-03): PUBLISHED same-league tournaments only, bounded, name-
+ * ordered. The readers re-apply the published-tournament gate, so an option
+ * that goes stale between select render and read simply yields an empty board
+ * — it can never widen the scope.
+ */
+export async function readPublicTournamentOptions(
+  tenantId: string,
+): Promise<PublicTournamentOption[]> {
+  const rows = await db
+    .select({ id: tournaments.id, name: tournaments.name })
+    .from(tournaments)
+    .where(and(
+      eq(tournaments.tenantId, tenantId),
+      inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
+    ))
+    .orderBy(asc(tournaments.name), asc(tournaments.id))
+    .limit(PUBLIC_TOURNAMENT_OPTIONS_LIMIT)
+  return rows
 }
 
 /**
@@ -309,6 +341,7 @@ export async function readPublicFieldingLeaderboard(
       .where(and(
         eq(fieldingScorecards.tenantId, tenantId),
         eq(matches.matchFormat, filters.format),
+        filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
         inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
       ))
       .groupBy(fieldingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -334,6 +367,7 @@ export async function readPublicFieldingLeaderboard(
     )
     .where(and(
       eq(playerSeasonStats.tenantId, tenantId),
+      filters.tournamentId ? eq(playerSeasonStats.tournamentId, filters.tournamentId) : undefined,
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(playerSeasonStats.playerId, players.name, players.userId, users.isActive)

@@ -5094,6 +5094,58 @@ remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Migrations | None needed (pure logic) |
 
+## Batch 96 - PUB-03 records-by-competition + tie-breaker disclosure
+
+The implementable remainder of PUB-03's leaderboard surface (the keeper board
+stays deliberately unbuilt — it needs an authoritative keeper designation at
+XI declaration and was refused as fabrication; records-by-season beyond the
+competition dimension and real-data acceptance remain open). **No migration**
+(the competition dimension filters existing columns).
+
+**Competition/season dimension.** `publicLeaderboardFilters` gains an optional
+`tournamentId` (UUID; empty-string select resets to the combined view; invalid
+or repeated values fail loudly as today). All FOUR reader paths narrow —
+combined batting/bowling (`player_season_stats.tournamentId`), format-
+qualified batting/bowling (`matches.tournamentId` through the innings join),
+and both fielding paths (per-match + per-season) — so records can now be
+viewed per competition instead of only league-wide. The fail-closed
+composition is unchanged: the tournament must still be PUBLISHED and
+same-league in every path; an arbitrary id simply yields an empty board and
+can never widen scope.
+
+**Options reader.** `readPublicTournamentOptions` (bounded at
+`PUBLIC_TOURNAMENT_OPTIONS_LIMIT = 100`, name-ordered, published-only) feeds
+the page's Competition select — the selector can only ever OFFER competitions
+the readers would admit, and a competition that goes stale between render and
+read simply shows an honest empty board.
+
+**Tie-breaker disclosure.** The boards were already deterministic (metric
+desc, then stable player-id asc, tested); the page now DISCLOSES it: "Tied
+values are ordered deterministically by the earliest player record — the
+display never breaks ties by hidden criteria." Selected competition renders
+its name under the select ("Showing records for {name} only").
+
+**Accessibility/tests.** The form's labelled-controls test now asserts the
+new `tournamentId` label; the filter suite covers accept/reset/duplicate/non-
+uuid; the reader suite asserts the dimension lands in the WHERE on all four
+paths (and is absent without it) plus the bounded options read.
+
+**Boundary.** Keeper board (needs XI keeper designation — schema + declaration
+writer work, deliberately not fabricated), per-season views beyond the
+competition dimension, and real-data acceptance remain open; PUB-03 stays
+UNCHECKED and the roadmap honestly remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **126** files, **2,833 tests** (+12) |
+| `npx vitest run` (database) | PASS - **305 tests** (26 files), unchanged |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migrations | None needed (filters on existing columns) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

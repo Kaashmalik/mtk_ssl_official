@@ -20,11 +20,21 @@ export const publicLeaderboardFilters = z.object({
   minimumBalls: minimum,
   minimumMatches: minimum,
   format: formatFilter,
+  /**
+   * Competition/season dimension (PUB-03): a published same-league tournament
+   * id narrows every board to that competition's rows. Absent/empty means the
+   * combined all-competition league view. The readers pin the value to a
+   * PUBLISHED same-league tournament, so an arbitrary id simply yields no
+   * rows — it can never widen the scope.
+   */
+  tournamentId: z.string().uuid().optional(),
 }).strict()
 
 export type PublicLeaderboardFilterInput = z.input<typeof publicLeaderboardFilters>
 export type PublicLeaderboardFilters = z.output<typeof publicLeaderboardFilters>
 export type PublicLeaderboardSearch = Record<string, string | string[] | undefined>
+
+const tournamentIdFilter = z.string().uuid().optional()
 
 // Reject duplicate query parameters, fractions, negatives, exponent/hex notation,
 // blank values, and unbounded thresholds rather than silently broadening results.
@@ -46,10 +56,15 @@ const searchFilters = z.object({
   minimumBalls: queryMinimum,
   minimumMatches: queryMinimum,
   format: queryFormat,
+  // Same empty-string reset semantics as the format select.
+  tournamentId: z.preprocess(
+    value => (value === "" ? undefined : value),
+    tournamentIdFilter,
+  ),
 }).pipe(publicLeaderboardFilters)
 
 export function parsePublicLeaderboardSearch(input: PublicLeaderboardSearch) {
-  return searchFilters.safeParse({ minimumInnings: input.minimumInnings, minimumBalls: input.minimumBalls, minimumMatches: input.minimumMatches, format: input.format })
+  return searchFilters.safeParse({ minimumInnings: input.minimumInnings, minimumBalls: input.minimumBalls, minimumMatches: input.minimumMatches, format: input.format, tournamentId: input.tournamentId })
 }
 
 /** Display label for a selected format filter; undefined keeps the combined label. */

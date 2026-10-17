@@ -2,13 +2,14 @@ import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import LeaderboardsPage from "@/app/leaderboards/page"
 
-const mocks = vi.hoisted(() => ({ tenant: vi.fn(), batting: vi.fn(), bowling: vi.fn(), fielding: vi.fn() }))
+const mocks = vi.hoisted(() => ({ tenant: vi.fn(), batting: vi.fn(), bowling: vi.fn(), fielding: vi.fn(), options: vi.fn() }))
 vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/public-tenant", () => ({ requirePublicTenantId: mocks.tenant }))
 vi.mock("@/lib/public-visibility", () => ({
   readPublicBattingLeaderboard: mocks.batting,
   readPublicBowlingLeaderboard: mocks.bowling,
   readPublicFieldingLeaderboard: mocks.fielding,
+  readPublicTournamentOptions: mocks.options,
 }))
 
 const TENANT = "00000000-0000-4000-8000-000000000001"
@@ -37,6 +38,7 @@ beforeEach(() => {
   mocks.batting.mockResolvedValue([{ playerId: "p1", playerName: "Adeel", total: 320 }])
   mocks.bowling.mockResolvedValue([{ playerId: "p2", playerName: "Bilal", total: 18 }])
   mocks.fielding.mockResolvedValue([{ playerId: "p3", playerName: "Usman", total: 7 }])
+  mocks.options.mockResolvedValue([{ id: "00000000-0000-4000-8000-0000000000bb", name: "Cup 2026" }])
 })
 
 describe("Public leaderboards are scoped to the request-host league", () => {
@@ -141,7 +143,7 @@ describe("Public leaderboards are scoped to the request-host league", () => {
       { id: "minimum-balls", name: "minimumBalls", min: 0, max: 10_000, defaultValue: 12 },
       { id: "minimum-matches", name: "minimumMatches", min: 0, max: 10_000, defaultValue: 1 },
     ])
-    expect(collectElements(tree, "label").map(node => node.props.htmlFor)).toEqual(["format", "minimum-innings", "minimum-balls", "minimum-matches"])
+    expect(collectElements(tree, "label").map(node => node.props.htmlFor)).toEqual(["format", "tournamentId", "minimum-innings", "minimum-balls", "minimum-matches"])
     expect(collectElements(tree, "th")).toHaveLength(9)
     expect(collectElements(tree, "th").every(node => node.props.scope === "col")).toBe(true)
   })
