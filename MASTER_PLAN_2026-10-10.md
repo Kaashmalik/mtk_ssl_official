@@ -4631,6 +4631,54 @@ stays default-off; no remote database writes occurred.
 | `git diff --check` | Clean (EOL repair applied to `tenants.ts` added lines only) |
 | Remote apply/deployment | None |
 
+## Batch 87 - PUB-03 fielding leaderboards with matches-based qualification
+
+**Scope.** The public-records remainder deliverable in Session A's lane: a
+fielding board alongside batting and bowling, with a qualification basis that
+has an actual recorded meaning, and an explicit refusal to invent wicketkeeping
+records before a keeper designation exists.
+
+**Implementation.**
+
+- `readPublicFieldingLeaderboard` (apps/web `public-visibility.ts`): ranked by
+  dismissals = catches + run-outs + stumpings. Combined path aggregates
+  `player_season_stats` (published same-league tournaments only); the format
+  path aggregates per-match `fielding_scorecards` through the match's declared
+  `match_format` (joins players → users-left → matches → tournaments; per-match
+  uniqueness makes counted rows an honest "matches" denominator). Verification
+  provenance (`isVerifiedPlayerRecord`) is applied on both paths; ties break on
+  playerId; results remain bounded at 10.
+- Qualification: a new strict `minimumMatches` filter (zod + query parser, same
+  0–10,000 bound). The fielding reader ignores `minimumInnings`/`minimumBalls`
+  BY DESIGN and the page copy discloses that mapping; the parser and HAVING
+  clauses are dialect-tested so nothing can silently re-impose innings/balls.
+- `/leaderboards`: "Top Fielders" card (Dismissals column, sr-only caption,
+  verified tick, same empty state), "Minimum matches" control, updated
+  qualification copy; invalid input still renders the visible error and reads
+  nothing.
+- Deliberate non-feature: no wicketkeeping board — no trustworthy keeper
+  marker exists in the schema; fabrication is refused. This is recorded as the
+  future prerequisite (keeper designation at XI declaration, COMP-06 domain).
+
+**Boundary.** Source + automated dialect/page verification. NOT claimed:
+migration apply (none needed — no schema change), real-data acceptance, browser
+certification, PUB-03 completion. `PUB-03` stays unchecked; roadmap remains
+19 checked / 60 open / 79 IDs. No `@mtk/database` changes; B's branch
+`reg01-league-application` is untouched.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `tsc --noEmit` (from `apps/web`) | **0** errors |
+| `tsc --noEmit` (from `services/scoring-service`) | **0** errors |
+| Focused leaderboard suites (filters, visibility, page) | **100/100** |
+| `corepack pnpm --filter @mtk/web test` | **117** files, **2,713 tests** (+16) |
+| `corepack pnpm test:release` | **87/87** (checker only, not release acceptance) |
+| `corepack pnpm test:roadmap` | **6/6** inventory tests |
+| `git diff --check` | Clean (added-line EOL repair applied to 5 files) |
+| Schema/migration/deploy | None this batch; nothing applied remotely |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

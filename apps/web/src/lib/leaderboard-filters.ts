@@ -18,6 +18,7 @@ const formatFilter = z.enum(PUBLIC_LEADERBOARD_FORMATS).optional()
 export const publicLeaderboardFilters = z.object({
   minimumInnings: minimum,
   minimumBalls: minimum,
+  minimumMatches: minimum,
   format: formatFilter,
 }).strict()
 
@@ -35,14 +36,20 @@ const queryFormat = z.preprocess(
   value => (value === "" ? undefined : value),
   formatFilter,
 )
+/**
+ * Minimum matches: the qualification basis for the fielding board, where
+ * "innings" and "balls" have no recorded meaning (fielding scorecards are
+ * one row per player per match). Batting/bowling boards do not use it.
+ */
 const searchFilters = z.object({
   minimumInnings: queryMinimum,
   minimumBalls: queryMinimum,
+  minimumMatches: queryMinimum,
   format: queryFormat,
 }).pipe(publicLeaderboardFilters)
 
 export function parsePublicLeaderboardSearch(input: PublicLeaderboardSearch) {
-  return searchFilters.safeParse({ minimumInnings: input.minimumInnings, minimumBalls: input.minimumBalls, format: input.format })
+  return searchFilters.safeParse({ minimumInnings: input.minimumInnings, minimumBalls: input.minimumBalls, minimumMatches: input.minimumMatches, format: input.format })
 }
 
 /** Display label for a selected format filter; undefined keeps the combined label. */

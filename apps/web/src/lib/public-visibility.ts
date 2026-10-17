@@ -1,5 +1,5 @@
-import { and, asc, count, desc, eq, gte, inArray, sum } from "drizzle-orm"
-import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards } from "@mtk/database"
+import { and, asc, count, desc, eq, gte, inArray, sql, sum } from "drizzle-orm"
+import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
@@ -247,4 +247,96 @@ export function readPublicBattingLeaderboard(tenantId: string, input: PublicLead
 /** Bowling leaderboard for the public hub, scoped and publication-gated. */
 export function readPublicBowlingLeaderboard(tenantId: string, input: PublicLeaderboardFilterInput = {}) {
   return readPublicLeaderboard(tenantId, "wickets", input)
+}
+
+/**
+ * A fielder's published total is dismissals credited on recorded fielding
+ * scorecards: catches + run-outs + stumpings. `minimumMatches` is the ONLY
+ * qualification that has an honest basis here — fielding scorecards are one
+ * row per player per match, and `minimumInnings`/`minimumBalls` are batting/
+ * bowling notions this reader deliberately ignores (the page copy says so).
+ */
+const FIELDING_DISMISSALS_SEASON = sql<number>`COALESCE(sum(${playerSeasonStats.catches} + ${playerSeasonStats.runOuts} + ${playerSeasonStats.stumpings}), 0)`.mapWith(Number)
+const FIELDING_DISMISSALS_MATCH = sql<number>`COALESCE(sum(${fieldingScorecards.catches} + ${fieldingScorecards.runOuts} + ${fieldingScorecards.stumpings}), 0)`.mapWith(Number)
+
+function toPublicLeaderboardRows(
+  rows: Array<{ playerId: string; playerName: string; total: number; playerUserId: string | null; linkedUserActive: boolean | null }>,
+): PublicLeaderboardRow[] {
+  return rows.map((row) => ({
+    playerId: row.playerId,
+    playerName: row.playerName,
+    total: row.total,
+    playerVerified: isVerifiedPlayerRecord({ userId: row.playerUserId },
+      row.linkedUserActive === null || row.linkedUserActive === undefined ? null : { isActive: row.linkedUserActive }),
+  }))
+}
+
+/**
+ * Public fielding leaderboard for one tenant (PUB-03 remainder).
+ *
+ * Same publication boundary as the batting/bowling boards: pinned to the
+ * active league, joined to a published same-league tournament. Qualification
+ * across qualifying rows happens in HAVING before ranking/limiting, results
+ * are bounded, and ties break deterministically on playerId. The
+ * format-qualified path aggregates the per-match `fielding_scorecards` rows
+ * through the match's declared `matchFormat` — the same authority the batting
+ * and bowling format views use.
+ */
+export async function readPublicFieldingLeaderboard(
+  tenantId: string,
+  input: PublicLeaderboardFilterInput = {},
+): Promise<PublicLeaderboardRow[]> {
+  const filters = publicLeaderboardFilters.parse(input)
+  const playerProvenance = {
+    playerUserId: players.userId,
+    linkedUserActive: users.isActive,
+  }
+  if (filters.format) {
+    const rows = await db
+      .select({
+        playerId: fieldingScorecards.playerId,
+        playerName: players.name,
+        total: FIELDING_DISMISSALS_MATCH,
+        ...playerProvenance,
+      })
+      .from(fieldingScorecards)
+      .innerJoin(players, and(eq(players.id, fieldingScorecards.playerId), eq(players.tenantId, tenantId)))
+      .leftJoin(users, eq(users.id, players.userId))
+      .innerJoin(matches, and(eq(matches.id, fieldingScorecards.matchId), eq(matches.tenantId, tenantId)))
+      .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
+      .where(and(
+        eq(fieldingScorecards.tenantId, tenantId),
+        eq(matches.matchFormat, filters.format),
+        inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
+      ))
+      .groupBy(fieldingScorecards.playerId, players.name, players.userId, users.isActive)
+      // One fielding scorecard per player per match: count rows, not innings.
+      .having(gte(count(fieldingScorecards.id), filters.minimumMatches))
+      .orderBy(desc(FIELDING_DISMISSALS_MATCH), asc(fieldingScorecards.playerId))
+      .limit(PUBLIC_LEADERBOARD_LIMIT)
+    return toPublicLeaderboardRows(rows)
+  }
+  const rows = await db
+    .select({
+      playerId: playerSeasonStats.playerId,
+      playerName: players.name,
+      total: FIELDING_DISMISSALS_SEASON,
+      ...playerProvenance,
+    })
+    .from(playerSeasonStats)
+    .innerJoin(players, and(eq(players.id, playerSeasonStats.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(users, eq(users.id, players.userId))
+    .innerJoin(
+      tournaments,
+      and(eq(tournaments.id, playerSeasonStats.tournamentId), eq(tournaments.tenantId, tenantId)),
+    )
+    .where(and(
+      eq(playerSeasonStats.tenantId, tenantId),
+      inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
+    ))
+    .groupBy(playerSeasonStats.playerId, players.name, players.userId, users.isActive)
+    .having(gte(sql<number>`sum(${playerSeasonStats.matchesPlayed})`.mapWith(Number), filters.minimumMatches))
+    .orderBy(desc(FIELDING_DISMISSALS_SEASON), asc(playerSeasonStats.playerId))
+    .limit(PUBLIC_LEADERBOARD_LIMIT)
+  return toPublicLeaderboardRows(rows)
 }

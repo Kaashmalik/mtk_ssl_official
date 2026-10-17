@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards } from "@mtk/database"
+import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards, fieldingScorecards } from "@mtk/database"
 import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 import {
   isTournamentPublished, isMatchPublished, readPublishedTournament, readPublishedMatch,
   readPublishedMatchTeams, matchHasInnings, readPublicBattingLeaderboard,
-  readPublicBowlingLeaderboard, PUBLIC_LEADERBOARD_LIMIT,
+  readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, PUBLIC_LEADERBOARD_LIMIT,
 } from "@/lib/public-visibility"
 
 const mocks = vi.hoisted(() => ({ select: vi.fn(), queries: [] as any[], state: {} as any }))
@@ -45,7 +45,7 @@ function selectChain() {
         rows = (mocks.state.teams ?? []).filter((t: any) => t.id === wanted)
       } else if (record.table === matchInnings) rows = mocks.state.innings ?? []
       else if (record.table === playerSeasonStats) rows = mocks.state.leaderboard ?? []
-      else if (record.table === battingScorecards || record.table === bowlingScorecards) rows = mocks.state.scorecards ?? []
+      else if (record.table === fieldingScorecards || record.table === battingScorecards || record.table === bowlingScorecards) rows = mocks.state.scorecards ?? []
       return Promise.resolve(rows).then(resolve, reject)
     },
   }
@@ -221,5 +221,81 @@ describe("Public reads are tenant-scoped and publication-gated", () => {
   it("does not hide a leaderboard query failure as an empty ranking", async () => {
     mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
     await expect(readPublicBattingLeaderboard(TENANT, { minimumInnings: 1 })).rejects.toThrow("Database unavailable")
+  })
+})
+
+describe("Public fielding leaderboard (PUB-03 remainder: matches-based qualification)", () => {
+  it("aggregates combined-season dismissals under the same publication boundary", async () => {
+    await readPublicFieldingLeaderboard(TENANT, { minimumMatches: 2 })
+    const query = mocks.queries[0]
+    expect(query.table).toBe(playerSeasonStats)
+    expect(query.params.filter((p: unknown) => p === TENANT)).toHaveLength(3)
+    expect(query.params).toContain("registration")
+    expect(query.params).toContain("completed")
+    expect(query.params).not.toContain("draft")
+    expect(query.params).not.toContain("cancelled")
+    // Qualification for fielding is matches played — never innings or balls.
+    expect(query.having.sql).toContain('sum("player_season_stats"."matches_played")')
+    expect(query.having.params).toEqual([2])
+    expect(query.having.sql).not.toContain("balls")
+    expect(query.limit).toBe(PUBLIC_LEADERBOARD_LIMIT)
+    expect(query.order[1].sql).toContain('"player_season_stats"."player_id" asc')
+  })
+
+  it("ranks format-qualified fielding from per-match scorecards through the declared format", async () => {
+    for (const f of PUBLIC_LEADERBOARD_FORMATS) {
+      await readPublicFieldingLeaderboard(TENANT, { minimumMatches: 3, minimumInnings: 5, minimumBalls: 60, format: f })
+      const query = mocks.queries.at(-1)!
+      expect(query.table).toBe(fieldingScorecards)
+      // fielding_scorecards is per-MATCH: match -> published tournament, no innings join exists.
+      expect(query.joins).toEqual([players, users, matches, tournaments])
+      expect(query.params).toContain(f)
+      expect(query.params.filter((p: unknown) => p === TENANT)).toHaveLength(4)
+      expect(query.params).toContain("registration")
+      expect(query.params).toContain("completed")
+      expect(query.params).not.toContain("draft")
+      expect(query.having.sql).toContain("count(")
+      expect(query.having.sql).not.toContain("balls")
+      expect(query.having.sql).not.toContain("innings")
+      expect(query.limit).toBe(PUBLIC_LEADERBOARD_LIMIT)
+    }
+  })
+
+  it("defaults fielding qualification to zero matches", async () => {
+    await readPublicFieldingLeaderboard(TENANT)
+    expect(mocks.queries[0].having.params).toEqual([0])
+  })
+
+  it("keeps the verification provenance derivation on both fielding aggregation paths", async () => {
+    const provenance = [
+      { playerId: "p1", playerName: "Linked Active", total: 12, playerUserId: "u1", linkedUserActive: true },
+      { playerId: "p2", playerName: "Linked Suspended", total: 11, playerUserId: "u2", linkedUserActive: false },
+      { playerId: "p3", playerName: "Name Only", total: 9, playerUserId: null, linkedUserActive: null },
+    ]
+    const expected = [
+      ["Linked Active", true],
+      ["Linked Suspended", false],
+      ["Name Only", false],
+    ]
+    mocks.state.leaderboard = provenance
+    expect((await readPublicFieldingLeaderboard(TENANT)).map((r) => [r.playerName, r.playerVerified]))
+      .toEqual(expected)
+    mocks.state.leaderboard = []
+    mocks.state.scorecards = provenance
+    expect((await readPublicFieldingLeaderboard(TENANT, { format: "t20" })).map((r) => [r.playerName, r.playerVerified]))
+      .toEqual(expected)
+  })
+
+  it.each([
+    { minimumMatches: -1 }, { minimumMatches: 0.5 }, { minimumMatches: 10_001 },
+    { minimumMatches: "3" }, { format: "t10", minimumMatches: NaN }, { unknownFilter: true },
+  ])("rejects invalid fielding qualification %p before issuing a query", async input => {
+    await expect(readPublicFieldingLeaderboard(TENANT, input as never)).rejects.toThrow()
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
+
+  it("does not hide a fielding query failure as an empty ranking", async () => {
+    mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
+    await expect(readPublicFieldingLeaderboard(TENANT)).rejects.toThrow("Database unavailable")
   })
 })

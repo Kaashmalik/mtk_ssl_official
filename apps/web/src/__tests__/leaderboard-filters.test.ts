@@ -3,8 +3,8 @@ import { parsePublicLeaderboardSearch, publicLeaderboardFilters, PUBLIC_LEADERBO
 
 describe("Public leaderboard qualification filters", () => {
   it("defaults to no minimum without inventing an official qualification policy", () => {
-    expect(parsePublicLeaderboardSearch({})).toMatchObject({ success: true, data: { minimumInnings: 0, minimumBalls: 0 } })
-    expect(publicLeaderboardFilters.parse({})).toEqual({ minimumInnings: 0, minimumBalls: 0 })
+    expect(parsePublicLeaderboardSearch({})).toMatchObject({ success: true, data: { minimumInnings: 0, minimumBalls: 0, minimumMatches: 0 } })
+    expect(publicLeaderboardFilters.parse({})).toEqual({ minimumInnings: 0, minimumBalls: 0, minimumMatches: 0 })
   })
 
   it("parses bounded whole-number query values", () => {
@@ -16,7 +16,14 @@ describe("Public leaderboard qualification filters", () => {
     "rejects ambiguous or invalid qualification %s instead of broadening results", value => {
       expect(parsePublicLeaderboardSearch({ minimumInnings: value }).success).toBe(false)
       expect(parsePublicLeaderboardSearch({ minimumBalls: value }).success).toBe(false)
+      // Fielding qualification (matches) holds the same strictness.
+      expect(parsePublicLeaderboardSearch({ minimumMatches: value }).success).toBe(false)
     })
+
+  it("parses the fielding board's matches qualification on the same bounds", () => {
+    expect(parsePublicLeaderboardSearch({ minimumMatches: "5" })).toMatchObject({ success: true, data: { minimumMatches: 5 } })
+    expect(parsePublicLeaderboardSearch({ minimumMatches: "10000" }).success).toBe(true)
+  })
 
   it("ignores unrelated query parameters without treating them as policy", () => {
     expect(parsePublicLeaderboardSearch({ minimumInnings: "2" })).toMatchObject({ success: true, data: { minimumInnings: 2, minimumBalls: 0 } })
@@ -24,7 +31,7 @@ describe("Public leaderboard qualification filters", () => {
 
   it("defaults to no format filter (combined season aggregates)", () => {
     expect(parsePublicLeaderboardSearch({})).toMatchObject({ success: true, data: { format: undefined } })
-    expect(publicLeaderboardFilters.parse({})).toEqual({ minimumInnings: 0, minimumBalls: 0, format: undefined })
+    expect(publicLeaderboardFilters.parse({})).toEqual({ minimumInnings: 0, minimumBalls: 0, minimumMatches: 0, format: undefined })
   })
 
   it.each(PUBLIC_LEADERBOARD_FORMATS)("parses the canonical match format %s", format => {
