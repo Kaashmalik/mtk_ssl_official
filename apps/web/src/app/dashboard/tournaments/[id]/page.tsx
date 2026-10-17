@@ -21,6 +21,8 @@ import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { hasPermission } from "@/lib/rbac"
 import { readAwardDeclarationContext } from "@/lib/award-records"
 import { AwardDeclarationCard } from "@/components/tournaments/award-declaration-card"
+import { readPrizeManagementContext } from "@/lib/prize-records"
+import { PrizeManagementCard } from "@/components/tournaments/prize-management-card"
 import { computeStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -68,6 +70,12 @@ export default async function TournamentDetailPage({ params }: { params: Promise
   // actually declare — the read is bounded and the write re-checks authority.
   const awardContext = canEdit
     ? await readAwardDeclarationContext(context.tenantId, id)
+    : null
+
+  // Prize-management context (PUB-05): same authority rule as awards — the
+  // read is bounded and every write re-checks the gate server-side.
+  const prizeContext = canEdit
+    ? await readPrizeManagementContext(context.tenantId, id)
     : null
 
   const followingState = await isFollowing("tournament", id)
@@ -253,6 +261,9 @@ export default async function TournamentDetailPage({ params }: { params: Promise
             <TournamentSettingsSummary tournament={tournament} />
             {awardContext && (
               <AwardDeclarationCard tournamentId={id} context={awardContext} />
+            )}
+            {prizeContext && (
+              <PrizeManagementCard tournamentId={id} context={prizeContext} />
             )}
             <Card>
               <CardHeader>

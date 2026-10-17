@@ -1,8 +1,9 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull, sql, sum } from "drizzle-orm"
-import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards } from "@mtk/database"
+import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards, tournamentPrizes } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
 import { isAwardVisible, AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT, type AwardCategory } from "@mtk/database/lib/award-policy"
+import { isPrizePubliclyVisible, PUBLIC_PRIZE_LIMIT } from "@mtk/database/lib/prize-policy"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
@@ -355,6 +356,17 @@ export type PublicTournamentAward = {
   declaredAt: Date
 }
 
+/** A single approved prize gallery row; payout records are deliberately absent. */
+export type PublicTournamentPrize = {
+  id: string
+  categoryName: string
+  placement: string | null
+  /** Null = a non-cash prize. Exact 2dp decimal string. */
+  amount: string | null
+  currency: string
+  sponsor: string | null
+}
+
 /**
  * Official award gallery for a PUBLISHED tournament (PUB-04). The caller must
  * have obtained the tournament through `readPublishedTournament` — this reader
@@ -401,5 +413,47 @@ export async function readPublishedTournamentAwards(
       teamName: row.teamName,
       citation: row.citation,
       declaredAt: row.declaredAt,
+    }))
+}
+
+/**
+ * PUB-05: approved tournament prizes for the public page. The WHERE already
+ * pins tenant + tournament AND status = approved; the shared
+ * `isPrizePubliclyVisible` policy is re-applied in memory so a future
+ * regression in the WHERE clause still cannot publicize a draft row. Payout
+ * records are league-internal and deliberately NOT exposed here — public
+ * copy must never present a payout record as a platform-verified payment.
+ */
+export async function readPublishedTournamentPrizes(
+  tenantId: string,
+  tournamentId: string,
+): Promise<PublicTournamentPrize[]> {
+  const rows = await db
+    .select({
+      id: tournamentPrizes.id,
+      categoryName: tournamentPrizes.categoryName,
+      placement: tournamentPrizes.placement,
+      amount: tournamentPrizes.amount,
+      currency: tournamentPrizes.currency,
+      sponsor: tournamentPrizes.sponsor,
+      status: tournamentPrizes.status,
+    })
+    .from(tournamentPrizes)
+    .where(and(
+      eq(tournamentPrizes.tenantId, tenantId),
+      eq(tournamentPrizes.tournamentId, tournamentId),
+      eq(tournamentPrizes.status, "approved"),
+    ))
+    .orderBy(asc(tournamentPrizes.createdAt), asc(tournamentPrizes.id))
+    .limit(PUBLIC_PRIZE_LIMIT)
+  return rows
+    .filter((row) => isPrizePubliclyVisible(row, true))
+    .map((row) => ({
+      id: row.id,
+      categoryName: row.categoryName,
+      placement: row.placement,
+      amount: row.amount,
+      currency: row.currency,
+      sponsor: row.sponsor,
     }))
 }

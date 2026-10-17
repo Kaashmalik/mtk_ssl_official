@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import PublicTournamentPage from "@/app/tournaments/[id]/page"
 
 const mocks = vi.hoisted(() => ({
-  tenant: vi.fn(), publishedTournament: vi.fn(), awards: vi.fn(),
+  tenant: vi.fn(), publishedTournament: vi.fn(), awards: vi.fn(), prizes: vi.fn(),
 }))
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound") } }))
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }))
@@ -11,6 +11,7 @@ vi.mock("@/lib/public-tenant", () => ({ requirePublicTenantId: mocks.tenant }))
 vi.mock("@/lib/public-visibility", () => ({
   readPublishedTournament: mocks.publishedTournament,
   readPublishedTournamentAwards: mocks.awards,
+  readPublishedTournamentPrizes: mocks.prizes,
 }))
 vi.mock("@/components/tournaments/knockout-bracket", () => ({ KnockoutBracket: () => null }))
 vi.mock("@mtk/database", async (original) => ({
@@ -54,6 +55,7 @@ beforeEach(() => {
   mocks.tenant.mockResolvedValue(TENANT)
   mocks.publishedTournament.mockResolvedValue(tournament)
   mocks.awards.mockResolvedValue(awards)
+  mocks.prizes.mockResolvedValue([])
 })
 
 describe("Public tournament page official awards gallery (PUB-04)", () => {

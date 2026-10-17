@@ -2,7 +2,7 @@ import { randomUUID } from "crypto"
 import { db, tournamentPrizes, tournaments, auditLogs } from "@mtk/database"
 import { normalizePrizeAmount, prizeCanBeEdited } from "@mtk/database/lib/prize-policy"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
-import { and, eq } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import { z } from "zod"
 
 /**
@@ -301,4 +301,58 @@ export async function recordPrizePayout(input: unknown): Promise<PrizeWriteResul
     })
     return { tournamentId: parsed.tournamentId, prizeId: prize.id, changed: true }
   }, { isolationLevel: "read committed" })
+}
+
+/** Bounded management-list size (house bound; overflow is disclosed, not hidden). */
+export const PRIZE_MANAGER_BOUND = 200
+
+export type PrizeManagementRow = {
+  id: string
+  categoryName: string
+  placement: string | null
+  amount: string | null
+  currency: string
+  sponsor: string | null
+  status: "draft" | "approved"
+  recordedPayoutAt: Date | null
+}
+
+export type PrizeManagementContext = {
+  prizes: PrizeManagementRow[]
+  complete: boolean
+}
+
+/**
+ * Bounded read of this tournament's prizes for the organizer's management
+ * card. The caller resolves authority (`canEdit`); every write re-checks it.
+ * Payout reference/note text is NOT returned — the list discloses THAT a
+ * payout was recorded, not its financial details, which stay in the audit
+ * trail.
+ */
+export async function readPrizeManagementContext(
+  tenantId: string,
+  tournamentId: string,
+): Promise<PrizeManagementContext> {
+  const rows = await db
+    .select({
+      id: tournamentPrizes.id,
+      categoryName: tournamentPrizes.categoryName,
+      placement: tournamentPrizes.placement,
+      amount: tournamentPrizes.amount,
+      currency: tournamentPrizes.currency,
+      sponsor: tournamentPrizes.sponsor,
+      status: tournamentPrizes.status,
+      recordedPayoutAt: tournamentPrizes.recordedPayoutAt,
+    })
+    .from(tournamentPrizes)
+    .where(and(
+      eq(tournamentPrizes.tenantId, tenantId),
+      eq(tournamentPrizes.tournamentId, tournamentId),
+    ))
+    .orderBy(asc(tournamentPrizes.createdAt), asc(tournamentPrizes.id))
+    .limit(PRIZE_MANAGER_BOUND + 1)
+  return {
+    prizes: rows.slice(0, PRIZE_MANAGER_BOUND),
+    complete: rows.length <= PRIZE_MANAGER_BOUND,
+  }
 }

@@ -4931,6 +4931,57 @@ UNCHECKED pending real-DB/staging acceptance; roadmap remains
 | `git diff --check` | Clean |
 | Remote apply | `20261017160000_tournament_prizes` applied via `DATABASE_URL` fallback; 17 columns, 4 CHECKs, RLS forced, 0 client grants, history row verified |
 
+## Batch 93 - PUB-05 prizes UI (public gallery + organizer management card)
+
+Second slice of PUB-05, completing parity with the awards pair (88 writer,
+89 UI) for prizes: the public tournament page now shows approved prizes and
+the organizer dashboard gets a management card. **No migration this batch**
+(`PUBLIC_PRIZE_LIMIT` / `PRIZE_MANAGER_BOUND` are code-only bounded-read
+constants; the Batch 92 schema already carries everything).
+
+**Public gallery.** `readPublishedTournamentPrizes` in
+`public-visibility.ts` (same shape as its awards sibling): WHERE pins tenant
++ tournament + `status = 'approved'`, the real `isPrizePubliclyVisible`
+policy is re-applied in memory so a WHERE regression still cannot publicize
+a draft, bounded at `PUBLIC_PRIZE_LIMIT = 20` (new constant in
+`prize-policy`). The public "Prizes" card shows category, placement,
+amount+currency or "Non-cash prize", sponsor — and deliberately NOTHING
+about payout records: public surfaces never discuss payouts (truthfulness
+rule), the payout state is league-internal. `PublicTournamentPrize` type
+omits payout fields by construction.
+
+**Organizer management card** `prize-management-card.tsx` on the dashboard
+tournament page (only rendered when `canEdit`; the read
+`readPrizeManagementContext` in `prize-records.ts` is bounded at
+`PRIZE_MANAGER_BOUND = 200` with disclosed incompleteness, and every write
+re-checks `tournament:update` server-side). Free-text category + placement +
+amount/currency + sponsor; drafts are editable in the form (writer's
+update-draft path), approve is one-way with frozen-record copy, and the
+payout flow records reference/note with the full truthful copy: "Recording a
+payout stores that the league made it. The platform does not verify
+payments." The card refuses an amount that does not look like a 2dp decimal
+before calling the writer (the writer re-checks anyway — defense in depth,
+never the only gate).
+
+**Boundary.** Approved-prize corrections (supersede provenance) still do not
+exist — the schema has no supersede columns yet and the UI now surfaces the
+freeze honestly ("Approved prizes are frozen records — take care before
+approving"). Payout detail text (reference/note) is deliberately excluded
+from the management read; the card shows only THAT a payout was recorded.
+PUB-05 stays UNCHECKED pending real-DB/staging acceptance; roadmap remains
+**19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **125** files, **2,812 tests** (+6: 2 public-reader, 4 truthful-copy) |
+| `npx vitest run` (database) | PASS - **302 tests** (26 files), unchanged |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migrations | None needed (code-only bounds) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

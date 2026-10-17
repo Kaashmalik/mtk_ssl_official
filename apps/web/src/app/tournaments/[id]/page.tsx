@@ -9,7 +9,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { Calendar } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublishedTournament, readPublishedTournamentAwards } from "@/lib/public-visibility"
+import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes } from "@/lib/public-visibility"
 import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -94,6 +94,7 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   // Official award gallery (PUB-04): only ACTIVE, organizer-declared awards of
   // this already-published tournament. Fan favorites do not exist in this data.
   const awards = await readPublishedTournamentAwards(tenantId, id)
+  const prizes = await readPublishedTournamentPrizes(tenantId, id)
   const awardWinnerName = (award: (typeof awards)[number]) =>
     award.playerName ?? award.teamName ?? "Winner record unavailable"
 
@@ -205,6 +206,33 @@ export default async function PublicTournamentPage({ params }: { params: Promise
                 <p className="text-sm mt-1">{awardWinnerName(award)}</p>
                 {award.citation && <p className="text-xs text-muted-foreground mt-1">{award.citation}</p>}
                 <p className="text-xs text-muted-foreground mt-1">Declared {award.declaredAt.toISOString().slice(0, 10)}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {prizes.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Prizes</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Approved prize categories declared by this league&apos;s organizers.
+              Categories and amounts are the league&apos;s own decisions.
+            </p>
+            {prizes.map((prize) => (
+              <div key={prize.id} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{prize.categoryName}</span>
+                  <Badge variant="outline" className="text-[10px]">Approved</Badge>
+                </div>
+                <p className="text-sm mt-1">
+                  {prize.amount === null ? "Non-cash prize" : `${prize.currency} ${prize.amount}`}
+                  {prize.placement ? <span className="text-muted-foreground"> · {prize.placement}</span> : null}
+                </p>
+                {prize.sponsor && (
+                  <p className="text-xs text-muted-foreground mt-1">Sponsored by {prize.sponsor}</p>
+                )}
               </div>
             ))}
           </CardContent>

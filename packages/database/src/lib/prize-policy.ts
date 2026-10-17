@@ -72,3 +72,6 @@ export function normalizePrizeAmount(raw: string): string | null {
 
 /** Upper bound matching the numeric(12,2) column (up to 9,999,999,999.99). */
 export const PRIZE_AMOUNT_MAX = "9999999999.99"
+
+/** Bounded public gallery size; the page discloses incompleteness beyond this. */
+export const PUBLIC_PRIZE_LIMIT = 20
