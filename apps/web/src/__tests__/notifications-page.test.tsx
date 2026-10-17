@@ -2,7 +2,7 @@ import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotificationsPage from "@/app/dashboard/notifications/page"
 
-const mocks = vi.hoisted(() => ({ access: vi.fn(), list: vi.fn() }))
+const mocks = vi.hoisted(() => ({ access: vi.fn(), list: vi.fn(), preferences: vi.fn() }))
 const redirects = vi.hoisted(() => ({ calls: [] as string[] }))
 
 vi.mock("next/navigation", () => ({
@@ -12,6 +12,7 @@ vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/notification-reads", () => ({
   resolveNotificationMemberContext: mocks.access,
   readMyNotifications: mocks.list,
+  readMyNotificationPreferences: mocks.preferences,
 }))
 
 const TENANT = "00000000-0000-4000-8000-000000000001"
@@ -33,6 +34,7 @@ beforeEach(() => {
   redirects.calls.length = 0
   mocks.access.mockResolvedValue(context)
   mocks.list.mockResolvedValue([row])
+  mocks.preferences.mockResolvedValue(null)
 })
 
 describe("Notifications page scopes to the exact active league", () => {
@@ -40,7 +42,10 @@ describe("Notifications page scopes to the exact active league", () => {
     const tree = await NotificationsPage()
     expect(mocks.access).toHaveBeenCalledTimes(1)
     expect(mocks.list).toHaveBeenCalledWith(context, 50)
+    // FAN-02: the preferences card reads the same resolved membership context.
+    expect(mocks.preferences).toHaveBeenCalledWith(context)
     expect(collectTitles(tree)).toContain("Match starting")
+    expect(collectTitles(tree)).toContain("Notification preferences")
   })
 
   it("sends a confirmed non-member to the dashboard without reading", async () => {

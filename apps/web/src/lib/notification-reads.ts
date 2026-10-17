@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
-import { db, users, userTenantRoles, tenants, notifications, membershipGrantsAccess } from "@mtk/database"
+import { db, users, userTenantRoles, tenants, notifications, notificationPreferences, membershipGrantsAccess } from "@mtk/database"
 import { and, desc, eq, isNull, or } from "drizzle-orm"
 import { z } from "zod"
 import { resolveActiveTenantId } from "./rbac-server"
@@ -105,4 +105,35 @@ export async function markAllNotificationsReadFor(context: NotificationMemberCon
   await db.update(notifications)
     .set({ readAt: new Date(), status: "read" })
     .where(and(myNotificationFilter(context.actorId, context.tenantId), isNull(notifications.readAt)))
+}
+
+export type MyNotificationPreferences = {
+  inAppEnabled: boolean
+  quietStartMinute: number | null
+  quietEndMinute: number | null
+  timeZone: string | null
+}
+
+/**
+ * The member's notification preferences in the active league, or `null` when
+ * none were ever saved (policy then applies the historical default). The
+ * lookup is pinned to the resolved membership pair, never a client tenant.
+ */
+export async function readMyNotificationPreferences(
+  context: NotificationMemberContext,
+): Promise<MyNotificationPreferences | null> {
+  const [row] = await db
+    .select({
+      inAppEnabled: notificationPreferences.inAppEnabled,
+      quietStartMinute: notificationPreferences.quietStartMinute,
+      quietEndMinute: notificationPreferences.quietEndMinute,
+      timeZone: notificationPreferences.timeZone,
+    })
+    .from(notificationPreferences)
+    .where(and(
+      eq(notificationPreferences.tenantId, context.tenantId),
+      eq(notificationPreferences.userId, context.actorId),
+    ))
+    .limit(1)
+  return row ?? null
 }

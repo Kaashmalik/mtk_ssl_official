@@ -3,6 +3,26 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 97) - `notification_preferences` APPLIED remotely via
+> the `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261017180000_notification_preferences.sql` creates
+> `notification_preferences` (FAN-02 slice): per-member per-league consent and
+> quiet hours — `in_app_enabled` boolean (default true; absence of a row keeps
+> the historical default), `quiet_start_minute`/`quiet_end_minute` smallint
+> (wall-clock minutes of day, [start, end), both-set-or-both-null +
+> range/boundary CHECKs), `time_zone` text (IANA, null = UTC, length-bounded),
+> `UPDATE`d-only lifecycle (no DELETE grant anywhere). Unique
+> `notification_preferences_member_uidx (tenant_id, user_id)`. Quiet hours gate
+> INTERRUPTING channels only (email/push/sms — none wired yet, reported
+> honestly as `channel_unwired` by the shared policy); the in-app bell never
+> enters a quiet window. Fail-closed posture: RLS enabled+forced, all grants
+> revoked from PUBLIC/anon/authenticated, ssl/service_role only. History row
+> inserted as version `20261017180000`, name `notification_preferences`,
+> `'{}'::text[]` — A's window, right after Batch 94's `20261017170000`; the
+> parallel chain remains intentionally unapplied. Verified remotely: all 9
+> columns, 3 CHECKs, unique index, RLS enabled+forced, 0 client grants,
+> history `17160000` + `17170000` + `17180000`.
+
 > **17 October 2026 (Batch 94) - `prize_supersede` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261017170000_prize_supersede.sql` adds to

@@ -5146,6 +5146,74 @@ UNCHECKED and the roadmap honestly remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Migrations | None needed (filters on existing columns) |
 
+## Batch 97 - FAN-02 consented, deduplicated, quiet-hours-aware notifications
+
+The first implementable slice of FAN-02 (scoped follows/notifications already
+existed since the fan-engagement batches; what was missing was consent,
+quiet hours and deduplication). **Migration `20261017180000`
+`notification_preferences` applied remotely** in A's window and verified
+(all 9 columns, 3 CHECKs, unique `(tenant_id, user_id)` index, RLS enabled+
+forced, 0 anon/authenticated grants, history row `17160000` + `17170000` +
+`17180000`).
+
+**Shared policy (pure, `@mtk/database/lib/notification-policy`).** One
+`memberDeliveryDecision` gates every channel: (1) consent — absence of a
+preferences row keeps the historical default (in-app bell on, external
+channels opt-in/off); (2) quiet hours — wall-clock `[start, end)` minutes in
+the member's IANA zone, wrap-midnight-safe, half-open boundaries, UTC fallback
+when a zone is unresolvable (never fails open); (3) channel wiring. A
+deliberate ordering choice: quiet hours are evaluated BEFORE wiring so a
+member's saved window is observable in the decision today; unwired channels
+(email/push/sms — no provider exists) are reported honestly as
+`channel_unwired`, never pretended to be sent. A second deliberate exclusion:
+the in-app bell never enters a quiet window — it wakes nobody, so withholding
+its rows would only lose history; quiet hours gate INTERRUPTING channels only.
+
+**Locked dispatch writer (`notification-dispatch.ts`).**
+`dispatchNotificationToMember` runs inside a transaction: preferences row read
+`FOR UPDATE` (a concurrent settings save cannot race the decision), policy
+decision, then a dedup check — same league+member+type+`dedupKey` inside a
+24h window is suppressed (`deduplicated`), never bell spam. Only `in_app`
+rows are ever written; nothing is recorded "for later delivery", because a row
+that promises a send nobody performs would be a fabricated delivery.
+`dispatchNotificationToTournamentFollowers` fans out to a bounded 200
+newest-first active followers, each through the same gate; one member's
+failure never aborts the others.
+
+**Real wiring, not dead code.** `declareTournamentAward` fans out to the
+tournament's followers after its transaction commits — only when `changed`
+(a replay dispatches nothing, so re-runs are durable), keyed by the award id,
+titled "Award declared for a tournament you follow" with the league's category
+label. The fan-out is fire-and-forget by design: a delivery problem NEVER
+fails the declaration, which is the official record.
+
+**Consent UI.** A preferences card on `/dashboard/notifications` (in-app
+toggle, quiet-hours window in half-hour wall-clock steps, IANA-zone input
+prefilled server-side, validated at the boundary by `isValidTimeZone`). The
+save writer is upsert-with-lock and replay-honest: an identical set reports
+`changed: false` and rewrites nothing, and the previous values are returned so
+the UI can toast "Nothing changed - preferences were already saved" instead of
+pretending to save.
+
+**Boundary (recorded honestly).** No external delivery provider is integrated,
+so quiet hours' only live consumers are the shared decision (which future
+provider passes MUST call — the policy is the enforcement point, not a UI
+promise) and the preference record; email/push/sms rows are never written.
+FAN-02's provider delivery tracking and non-award notification triggers remain
+open. FAN-02 stays UNCHECKED; roadmap honestly remains **19 checked / 60 open
+/ 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **128** files, **2,843 tests** (+10 dispatch, +2 page) |
+| `npx vitest run` (database) | PASS - **27** files, **321 tests** (+16 policy) |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | `20261017180000` APPLIED remotely + verified + history row |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

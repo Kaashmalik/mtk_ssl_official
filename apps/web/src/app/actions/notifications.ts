@@ -3,7 +3,9 @@
 import {
   requireNotificationMemberContext, readMyNotifications, readUnreadNotificationCount,
   markNotificationReadById, markAllNotificationsReadFor, notificationListLimit,
+  readMyNotificationPreferences,
 } from "@/lib/notification-reads"
+import { saveNotificationPreferencesForMember } from "@/lib/notification-dispatch"
 
 /**
  * Notifications are inherently personal — there is no league-wide "read"
@@ -52,4 +54,35 @@ export async function markAllNotificationsRead() {
   const context = await requireNotificationMemberContext()
   await markAllNotificationsReadFor(context)
   return { success: true }
+}
+
+/**
+ * The member's saved notification preferences in the active league, or `null`
+ * when none were ever saved. Personal settings - no broader permission, same
+ * verified-membership gate as the bell itself.
+ */
+export async function getMyNotificationPreferences() {
+  return readOrEmpty(readMyNotificationPreferences, null)
+}
+
+/**
+ * Save notification preferences (consent + quiet hours) for the member in the
+ * active league. Returns `changed` and the PREVIOUS values, so the UI can tell
+ * an identical replay ("Nothing changed - already saved") from a real update.
+ */
+export async function saveNotificationPreferences(input: {
+  inAppEnabled: boolean
+  quietEnabled: boolean
+  quietStartMinute: number
+  quietEndMinute: number
+  timeZone: string | null
+}) {
+  const context = await requireNotificationMemberContext()
+  const result = await saveNotificationPreferencesForMember(context.tenantId, context.actorId, {
+    inAppEnabled: input.inAppEnabled,
+    quietStartMinute: input.quietEnabled ? input.quietStartMinute : null,
+    quietEndMinute: input.quietEnabled ? input.quietEndMinute : null,
+    timeZone: input.quietEnabled ? input.timeZone : null,
+  })
+  return result
 }

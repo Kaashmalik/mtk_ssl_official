@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto"
 import { db, tournamentAwards, tournaments, players, teams, leagueRegistrations, auditLogs } from "@mtk/database"
-import { AWARD_CATEGORIES, isAwardVisible, type AwardCategory } from "@mtk/database/lib/award-policy"
+import { AWARD_CATEGORIES, AWARD_CATEGORY_LABELS, isAwardVisible, type AwardCategory } from "@mtk/database/lib/award-policy"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
+import { dispatchNotificationToTournamentFollowers } from "@/lib/notification-dispatch"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
 
@@ -51,15 +52,18 @@ export async function declareTournamentAward(input: unknown): Promise<DeclareAwa
   const parsed = declareAwardInputSchema.parse(input)
   const citation = parsed.citation?.trim() || null
   const context = await requireActiveLeagueContext("tournament:update")
+  // Captured inside the transaction (step 1) for the post-commit notification.
+  let declaredTournamentName = ""
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     // (1) The tournament must exist in the SAME league.
     const [tournament] = await tx
-      .select({ id: tournaments.id })
+      .select({ id: tournaments.id, name: tournaments.name })
       .from(tournaments)
       .where(and(eq(tournaments.id, parsed.tournamentId), eq(tournaments.tenantId, context.tenantId)))
       .limit(1)
     if (!tournament) throw new Error("Forbidden: tournament not found in this league")
+    declaredTournamentName = tournament.name
 
     // (2, 3) Registered winner-eligibility set: approved registrations + legacy teams.
     const registrationRows = await tx
@@ -172,6 +176,28 @@ export async function declareTournamentAward(input: unknown): Promise<DeclareAwa
       supersededId: active?.id ?? null,
     }
   }, { isolationLevel: "read committed" })
+
+  // FAN-02: followers of the tournament learn about a new/corrected award.
+  // A replay (`changed: false`) dispatches nothing, so re-runs are durable. The
+  // fan-out itself is consented (per-member policy), deduplicated (award id)
+  // and fire-and-forget: a delivery problem NEVER fails the declaration, which
+  // is the official record; notification delivery is an ancillary courtesy.
+  if (result.changed && declaredTournamentName) {
+    try {
+      await dispatchNotificationToTournamentFollowers({
+        tenantId: context.tenantId,
+        tournamentId: parsed.tournamentId,
+        type: "award_declared",
+        title: "Award declared for a tournament you follow",
+        body: `${declaredTournamentName}: ${AWARD_CATEGORY_LABELS[result.category]} was declared.`,
+        dedupKey: `award:${result.awardId}`,
+      })
+    } catch {
+      // Ancillary by design; the official record and its audit already exist.
+    }
+  }
+
+  return result
 }
 
 /** Bounded picker snapshot size (house bound; overflow is disclosed, not hidden). */
