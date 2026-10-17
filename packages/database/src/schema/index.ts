@@ -31,6 +31,7 @@ export * from "./scorecard-projections";
 // Fan Engagement
 export * from "./fan-follows";
 export * from "./notification-preferences";
+export * from "./fan-reactions";
 
 // League Management
 export * from "./league-registrations";

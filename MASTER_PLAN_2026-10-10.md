@@ -5214,6 +5214,68 @@ open. FAN-02 stays UNCHECKED; roadmap honestly remains **19 checked / 60 open
 | `git diff --check` | Clean |
 | Migration | `20261017180000` APPLIED remotely + verified + history row |
 
+## Batch 98 - FAN-01 moderated fan reactions (anti-abuse first slice)
+
+The first FAN-01 slice, built from zero (no reaction surface existed anywhere;
+Batch 61's "reactions" was gateway room scoping for a broadcast that never
+shipped). **Migration `20261017190000` `fan_reactions` applied remotely** in
+A's window and verified (all 6 columns, `fan_reactions_type_check` CHECK,
+`fan_reactions_member_uidx` + match index, RLS enabled+forced, 0
+anon/authenticated grants, history rows `17160000` through `17190000`).
+
+**Fixed, non-official reaction set.** Fans react to a published match from a
+platform-chosen set pinned in THREE places that must agree: the shared pure
+policy (`FAN_REACTION_TYPES = four/six/wicket/clap/fire`), the zod boundary,
+and a DB CHECK. No free text exists anywhere, so nothing offensive can be
+stored — moderation is about BEHAVIOR (floods), not content. Reactions are
+engagement signals only: no scoring, standings or award path reads them, and a
+policy guard test refuses set members that would look like official inputs.
+
+**Shared policy ordering.** `reactionTargetDecision` reuses the house
+publication gate verbatim (published tournament + published match statuses;
+a cancelled fixture is simply outside that set and refuses with the same
+honest `target_unpublished` reason rather than a special case). A foreign-
+league match id reads as unpublished — the public host's tenant can never
+widen what a signed-in fan may react to, structurally.
+
+**Anti-abuse floor.** `reactionRateDecision` limits ADDS to 20 per
+60-second window per fan (removals are never rate-limited — deleting is not
+abuse); the writer counts recent adds under the visible window before any
+insert. The unique index makes a duplicate add a no-op under a race, mirroring
+the Batch 23 fan-follow idempotency.
+
+**Locked writer + thin action.** `toggleFanReaction` gates identity/league/
+`fan:follow` through `requireFanContext` exactly as follows do, decides the
+target, then toggles — DELETE belongs to the fan's own row (the migration is
+the one place DELETE is granted, deliberately: reactions are user-deletable
+engagement, not records). The reply carries fresh per-type counts so the UI
+never shows a stale number. `toggleMatchReaction` is a zod-only thin delegate.
+Counts are public and aggregate (never per-fan); the viewer's own rows fail
+closed to an empty set for unauthenticated visits — never an error page.
+
+**UI.** `MatchReactionBar` on the public match page (below the fixture
+header): accessible toggle buttons (`aria-pressed`, per-type labelled counts,
+visible group label stating reactions never affect results), local state
+updated from the writer's counts, honest toasts for `rate_limited` and
+unrefusable targets.
+
+**Boundary (recorded honestly).** Moderated POLLS/VOTES, report/block
+user-tooling and reaction HIDDEN/moderation surfaces (owner hides a reaction,
+command-fence style) are NOT in this slice and remain FAN-01 scope; there is
+deliberately no free-text reaction. FAN-01 stays UNCHECKED; roadmap honestly
+remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **129** files, **2,851 tests** (+8 writer/page-affecting) |
+| `npx vitest run` (database) | PASS - **28** files, **325 tests** (+4 policy) |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | `20261017190000` APPLIED remotely + verified + history row |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -11,6 +11,9 @@ import { ShareButton } from "@/components/share/share-button"
 import { PrintButton } from "@/components/share/print-button"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedMatch, readPublishedMatchTeams } from "@/lib/public-visibility"
+import type { FanReactionType } from "@mtk/database/lib/fan-reaction-policy"
+import { readFanReactionCounts, readMyFanReactions } from "@/lib/fan-reactions"
+import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
@@ -25,6 +28,17 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
   const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
   if (!teamA || !teamB) notFound()
+
+  // FAN-01: engagement-only reactions on this published match. Counts are
+  // public and aggregate (never per-fan); the viewer's own rows fail closed to
+  // an empty set for an unauthenticated or non-fan visit - never an error page.
+  const reactionCounts = await readFanReactionCounts(tenantId, matchId)
+  let myReactions: FanReactionType[] = []
+  try {
+    myReactions = await readMyFanReactions(tenantId, matchId)
+  } catch {
+    myReactions = []
+  }
 
   let venueName = "TBD Venue"
   if (match.venueId) {
@@ -172,6 +186,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
               <Badge variant="outline" className="text-xs border-white/30 text-white bg-white/10">{formattedDate}</Badge>
             </div>
           </div>
+          <MatchReactionBar matchId={matchId} initialCounts={reactionCounts} initialMine={myReactions} />
           <div className="flex items-center justify-between gap-4">
             <div className="text-center flex-1">
               <div className="h-16 w-16 rounded-2xl mx-auto flex items-center justify-center text-white font-bold text-xl mb-3 border-2 border-white/20" style={{ backgroundColor: teamAColor }}>{teamAShort}</div>

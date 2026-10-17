@@ -3,6 +3,28 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 98) - `fan_reactions` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261017190000_fan_reactions.sql` creates
+> `fan_reactions` (FAN-01 first slice): moderated fan reactions on published
+> matches from a FIXED platform-chosen set (DB CHECK
+> `fan_reactions_type_check` pins `four/six/wicket/clap/fire` - no free text
+> surface exists, so nothing offensive can be stored), one active reaction per
+> type per fan per match (`fan_reactions_member_uidx`), and a
+> `fan_reactions_match_idx` for the public counts read. Reactions are
+> engagement signals ONLY - no scoring, standings or award path reads them.
+> Anti-abuse (flood floor) lives in the shared pure policy + locked writer,
+> not in this file. Fail-closed posture: RLS enabled+forced, all grants
+> revoked from PUBLIC/anon/authenticated, ssl/service_role SELECT/INSERT/DELETE
+> only - DELETE is granted (unlike prizes/preferences) because toggling OFF
+> removes the fan's own row: reactions stay user-deletable engagement, not
+> records. History row inserted as version `20261017190000`, name
+> `fan_reactions`, `'{}'::text[]` - A's window, right after Batch 97's
+> `20261017180000`; the parallel chain remains intentionally unapplied.
+> Verified remotely: all 6 columns, type CHECK, both indexes, RLS
+> enabled+forced, 0 client grants, history `17160000` + `17170000` +
+> `17180000` + `17190000`.
+
 > **17 October 2026 (Batch 97) - `notification_preferences` APPLIED remotely via
 > the `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261017180000_notification_preferences.sql` creates

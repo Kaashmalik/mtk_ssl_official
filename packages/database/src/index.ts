@@ -75,6 +75,7 @@ export * from "./schema/fantasy-leagues";
 export * from "./schema/player-season-stats";
 export * from "./schema/fan-follows";
 export * from "./schema/notification-preferences";
+export * from "./schema/fan-reactions";
 export * from "./schema/league-registrations";
 export * from "./schema/scorecards";
 export * from "./schema/player-ids";
