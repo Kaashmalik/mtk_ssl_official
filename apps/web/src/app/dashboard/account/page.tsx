@@ -75,6 +75,16 @@ export default async function AccountPage() {
                     </tr>
                   </tbody>
                 </table>
+                {hubResult.hub.profilePath && (
+                  <p className="mt-3 text-sm">
+                    With linking allowed, this career is also on the public hub at{" "}
+                    <Link href={hubResult.hub.profilePath} className="underline underline-offset-4">
+                      your shareable profile link
+                    </Link>
+                    . It shows league names and totals only — never your account name, email or
+                    roster names — and only leagues that have published themselves to the hub.
+                  </p>
+                )}
               </>
             ) : (
               <p className="mt-2 text-sm text-muted-foreground">

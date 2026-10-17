@@ -35,10 +35,15 @@ const isPublicRoute = createRouteMatcher([
   "/matches/(.*)",
   "/tournaments/(.*)",
   "/leaderboards",
-  // NOTE: there is deliberately no `/teams` or `/players` entry. No such
-  // top-level routes exist — team/player screens live under `/dashboard/*`,
-  // which is already protected. Previously listed here, which would have
-  // silently publicised them had the routes ever been added.
+  // The cross-league public hub (PUB-02) and the consent-gated career
+  // profiles beneath it are anonymous surfaces: the data gates (consent,
+  // hub listing, publication predicates) live in the readers, not here.
+  // There is still deliberately no `/teams` or `/players` top-level entry —
+  // team/player screens live under `/dashboard/*`, which stays protected.
+  "/hub",
+  "/hub/(.*)",
+  // NOTE: no top-level `/players` entry exists on purpose (see note above);
+  // public career profiles live only under /hub/players/<id>.
 ]);
 
 /** Edge-safe request id: prefer the inbound header, else generate a UUIDv4. */

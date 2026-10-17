@@ -4805,6 +4805,60 @@ unchecked; roadmap remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Remote apply | `20261017150000_competition_locks` applied via `DATABASE_URL` fallback; columns verified, history row moved and verified |
 
+## Batch 91 - PUB-02 public cross-league career profile (+ /hub made actually public)
+
+**Shared pure gate** (`packages/database/src/lib/career-records.ts`, root-exported through the
+existing `export *`): `careerProfilePublishable` — the ANONYMOUS hub surface may show a person's
+folded career only when the account is active AND `publicCareerConsentAt` is set; missing row,
+suspended account or absent consent all fail closed to `false`, so on a public page ineligibility
+is indistinguishable from nonexistence. The per-league publication predicates stay the authority
+for the underlying numbers; the gate decides only whether the FOLD itself may be shown.
+
+**Public read model** `apps/web/src/lib/public-career-profile.ts` (`readPublicCareerProfile`),
+the second and only other cross-tenant public read. Three independent authorities, all expressed
+IN THE WHERE clause so an over-read cannot even execute: (1) consent + active account via the
+pure gate — with no consent the module returns `null` after the account lookup alone and issues
+NO aggregate query; (2) the league-owner's hub-listing decision — only `hubListingEligible`
+leagues contribute (active + explicitly listed + recorded `hub_listed_at`), so nothing from a
+league kept out of the public hub can leak through one of its players; (3) the exact
+`PUBLISHED_TOURNAMENT_STATUS_VALUES` predicates the single-league pages use. Bounded read
+(limit 50, `complete` disclosure); the fold covers ONLY the shown page, so hidden overflow
+leagues can never inflate the headline total. Reuses `hubLeagueUrl` for verified-domain links.
+
+**No migration** — everything builds on existing columns (`users.public_career_consent_at`,
+`tenants.hub_listing_status` / `hub_listed_at`); the batch adds zero schema.
+
+**Middleware fix (real bug found by recon):** `/hub` and `/hub/(.*)` were missing from the public
+route matcher, so the "public" hub page (Batch 86) redirected anonymous visitors to sign-in. Now
+public, with the reader-level gates unchanged. There is still deliberately no top-level `/players`
+entry; public profiles live only under `/hub/players/<userId>`.
+
+**Pages and wiring.** New `/hub/players/[userId]` page: `notFound()` for unknown/inactive/
+unconsenting ids (plain notFound, indistinguishable), honest empty state ("only leagues that have
+published themselves to the hub contribute"), `complete: false` overflow note, `role="alert"`
+failure state that exposes nothing. The profile deliberately renders NO personal identity — no
+account name, no email, no roster names — and there is no public directory of profiles; a profile
+is reachable only via its own link. `readConsentedCareerByClerkId` now returns `profilePath`
+(null while consent withheld) and the account page shows the shareable link once consented; the
+consent card copy documents exactly what allowing now publishes. Middleware has no test (recorded
+gap; Edge matcher behaviour can't be exercised in this suite's stack).
+
+**Boundary.** `PUB-02` stays UNCHECKED pending real-DB/staging acceptance (RLS behaviour on the
+cross-tenant read, listing interplay, browser acceptance); identity display on public profiles
+would need its own explicit consent axis and is not claimed. Roadmap remains
+**19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **124** files, **2,797 tests** |
+| `npx vitest run` (database) | PASS - 24 files, **294 tests** |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migrations | None needed this batch (existing columns only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

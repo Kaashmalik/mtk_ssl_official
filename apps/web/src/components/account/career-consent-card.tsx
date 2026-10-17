@@ -55,7 +55,9 @@ export function CareerConsentCard({ granted, consentedAt }: { granted: boolean; 
       <p className="mt-2 text-sm text-muted-foreground">
         Your statistics stay inside each league unless you allow more. This decision governs only
         whether your published, per-league performances may also be combined into one cross-league
-        career view. It never changes what any single league already publishes about its own competitions.
+        career view — on this page and, while allowed, on a shareable public hub profile that shows
+        league names and totals only (no personal details, and only hub-listed leagues). It never
+        changes what any single league already publishes about its own competitions.
       </p>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         Cross-league career linking: <strong>{decision}</strong>

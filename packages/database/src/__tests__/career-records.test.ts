@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest"
-import { isVerifiedPlayerRecord, careerConsentGranted, mergeConsentedCareer } from "../lib/career-records"
+import {
+  careerConsentGranted,
+  careerProfilePublishable,
+  isVerifiedPlayerRecord,
+  mergeConsentedCareer,
+} from "../lib/career-records"
+
+describe("Public career profile gate (PUB-02)", () => {
+  const consented = { isActive: true, publicCareerConsentAt: new Date("2026-10-17T00:00:00Z") }
+  it("publishes only an active, consenting account to the anonymous surface", () => {
+    expect(careerProfilePublishable(consented)).toBe(true)
+  })
+
+  it("fails closed on inactive, unconsenting, missing or undefined accounts", () => {
+    expect(careerProfilePublishable({ ...consented, isActive: false })).toBe(false)
+    expect(careerProfilePublishable({ ...consented, publicCareerConsentAt: null })).toBe(false)
+    expect(careerProfilePublishable(null)).toBe(false)
+    expect(careerProfilePublishable(undefined)).toBe(false)
+  })
+})
 
 describe("Verified player records (PUB-03)", () => {
   it("verifies only a roster entry linked to an ACTIVE account", () => {

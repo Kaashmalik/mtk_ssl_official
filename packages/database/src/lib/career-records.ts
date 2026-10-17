@@ -66,6 +66,22 @@ export type ConsentedCareer<L extends CareerLeagueTotals = CareerLeagueTotals> =
 }
 
 /**
+ * Public cross-league profile gate (PUB-02): the ANONYMOUS hub surface may
+ * show a person's folded career only when the account is active AND the same
+ * affirmative consent that governs linkage has been granted. A missing row,
+ * a suspended account or an absent consent each fail closed to `false` — on
+ * a public page, ineligibility must be indistinguishable from nonexistence.
+ * The per-league publication predicates remain the authority for the
+ * underlying numbers; this gate decides only whether the FOLD itself may be
+ * shown to anonymous visitors.
+ */
+export function careerProfilePublishable(
+  user: { isActive: boolean; publicCareerConsentAt: Date | null } | null | undefined,
+): boolean {
+  return !!user && user.isActive === true && user.publicCareerConsentAt !== null
+}
+
+/**
  * Consent gate + fold for cross-league career linkage (PUB-02's hub calls
  * this; nothing else may merge across leagues). Without consent the result
  * is `null` — fail closed. A league appearing more than once is a caller

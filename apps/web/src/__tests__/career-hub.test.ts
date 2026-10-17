@@ -72,10 +72,10 @@ describe("Consented career hub (PUB-02 slice)", () => {
     await expect(readConsentedCareerByClerkId(CLERK)).rejects.toThrow("Forbidden: career account unavailable")
   })
 
-  it("without consent returns no career and issues no cross-league query", async () => {
+  it("without consent returns no career, no profile path, and issues no cross-league query", async () => {
     queueSelects([{ id: USER, isActive: true, publicCareerConsentAt: null }])
     const hub = await readConsentedCareerByClerkId(CLERK)
-    expect(hub).toEqual({ consented: false, career: null, leagues: [] })
+    expect(hub).toEqual({ consented: false, career: null, leagues: [], profilePath: null })
     // The cross-league aggregate select was never issued.
     expect((db as any).select).toHaveBeenCalledTimes(1)
   })
@@ -87,6 +87,7 @@ describe("Consented career hub (PUB-02 slice)", () => {
     ])
     const hub = await readConsentedCareerByClerkId(CLERK)
     expect(hub.consented).toBe(true)
+    expect(hub.profilePath).toBe(`/hub/players/${USER}`)
     expect(hub.career).toEqual({
       leagues: [
         { tenantId: "t1", leagueName: "Alpha", runsScored: 120, wicketsTaken: 3 },

@@ -14,8 +14,9 @@ import { and, eq, inArray, sum } from "drizzle-orm"
  * is the authority for folding across league boundaries: without the
  * person's affirmative consent this read returns no career at all.
  * Everything here is the person's OWN view (session-derived identity, never
- * a client argument) — no public cross-league surface exists yet, so the
- * linkage stays private until a public-profile design ships.
+ * a client argument); the public counterpart surface lives in
+ * `lib/public-career-profile.ts` and `/hub/players/[userId]` behind the same
+ * consent flag.
  */
 export type CareerHubLeague = {
   tenantId: string
@@ -30,6 +31,12 @@ export type CareerHub = {
   career: ConsentedCareer<CareerHubLeague> | null
   /** Display-enriched league rows; zeros are never fabricated for leagues without published stats. */
   leagues: CareerHubLeague[]
+  /**
+   * Path of the person's PUBLIC hub profile once linking is allowed
+   * (PUB-02); null while consent is withheld. Reachable only by link —
+   * no public directory of profiles exists.
+   */
+  profilePath: string | null
 }
 
 type LeagueAggregateRow = {
@@ -90,13 +97,13 @@ export async function readConsentedCareerByClerkId(clerkId: string): Promise<Car
   if (!account || account.isActive !== true) throw new Error("Forbidden: career account unavailable")
 
   const consented = careerConsentGranted(account)
-  if (!consented) return { consented: false, career: null, leagues: [] }
+  if (!consented) return { consented: false, career: null, leagues: [], profilePath: null }
 
   const aggregates = await readPublishedLeagueTotals(account.id)
   const leagues = toCareerLeagues(aggregates)
   // One authoritative fold; duplicate league totals here would be a query bug.
   const career = mergeConsentedCareer(leagues, consented)
-  return { consented, career, leagues }
+  return { consented, career, leagues, profilePath: `/hub/players/${account.id}` }
 }
 
 /** Session-authenticated wrapper for server pages. */

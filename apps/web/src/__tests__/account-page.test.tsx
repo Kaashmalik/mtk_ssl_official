@@ -1,5 +1,6 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import Link from "next/link"
 import AccountPage from "@/app/dashboard/account/page"
 
 const mocks = vi.hoisted(() => ({
@@ -103,6 +104,32 @@ describe("Personal account page (PUB-03/PUB-02 surfaces)", () => {
     expect(text).toContain("Career total")
     expect(text).toContain("200")
     expect(text).toContain("14")
+  })
+
+  it("shows the public hub profile link once linking is allowed and leagues exist", async () => {
+    mocks.consent.mockResolvedValue({ granted: true, consentedAt: CONSENTED_AT })
+    mocks.hub.mockResolvedValue({
+      consented: true,
+      profilePath: "/hub/players/u1",
+      career: {
+        leagues: [{ tenantId: "t1", leagueName: "Alpha", runsScored: 120, wicketsTaken: 3 }],
+        totalRunsScored: 120,
+        totalWicketsTaken: 3,
+      },
+      leagues: [{ tenantId: "t1", leagueName: "Alpha", runsScored: 120, wicketsTaken: 3 }],
+    })
+    const text = collectText(await AccountPage()).join(" ")
+    expect(text).toContain("your shareable profile link")
+    const tree = await AccountPage()
+    const links: unknown[] = []
+    const walk = (node: unknown) => {
+      if (!React.isValidElement(node)) return
+      const props = node.props as { children?: React.ReactNode; href?: string }
+      if (node.type === "a" || node.type === Link) links.push(props.href)
+      React.Children.forEach(props.children, walk)
+    }
+    walk(tree)
+    expect(links).toContain("/hub/players/u1")
   })
 
   it("keeps the linked career view empty-with-explainer while consent is withheld", async () => {
