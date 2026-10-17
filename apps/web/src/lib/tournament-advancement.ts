@@ -66,7 +66,7 @@ export async function advanceKnockoutTournament(clerkId: string, tenantId: strin
 
     if (plan.kind === "complete") {
       const [updated] = await tx.update(tournaments)
-        .set({ status: "completed", updatedAt: new Date() })
+        .set({ status: "completed", championTeamId: plan.championId, updatedAt: new Date() })
         .where(and(eq(tournaments.id, tournamentId), eq(tournaments.tenantId, tenantId),
           ne(tournaments.status, "completed"))).returning()
       if (!updated) throw new Error("Tournament changed. Reload before advancing.")
@@ -75,7 +75,8 @@ export async function advanceKnockoutTournament(clerkId: string, tenantId: strin
         method: "TOURNAMENT_ADVANCE", path: `/dashboard/tournaments/${tournamentId}`,
         statusCode: "200",
         payload: { resourceId: tournamentId, before: { status: tournament.status },
-          after: { status: "completed" }, changedFields: ["status"],
+          after: { status: "completed", championTeamId: plan.championId },
+          changedFields: ["status", "championTeamId"],
           format: tournament.format, stage: "Final decided" },
       })
       return { tournament: updated as Tournament, completed: true, stage: "Final decided" }

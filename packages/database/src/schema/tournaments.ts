@@ -2,6 +2,11 @@ import { pgTable, uuid, text, timestamp, date, integer, boolean, jsonb, numeric,
 import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { users } from "./users";
+// NOTE: the champion FK (champion_team_id -> teams.id) is deliberately NOT
+// declared with references() here - teams.ts already imports tournaments,
+// and a schema-level back-reference created a TS7022 circular-init error.
+// The FK is owned by migration 20261018100000; joins to the champion team
+// are made explicitly by the readers that need it.
 
 /**
  * Tournament format enum
@@ -37,6 +42,12 @@ export const tournaments = pgTable("tournaments", {
   liveStreamUrl: text("live_stream_url"),
   isFeatured: boolean("is_featured").default(false).notNull(),
   status: tournamentStatusEnum("status").notNull().default("draft"),
+  // FAN-03 hall of fame: the champion of a completed knockout competition,
+  // written exactly once by the TOURNAMENT_ADVANCE completion claim from the
+  // decided final's winner. Never backfilled - legacy completed tournaments
+  // read champion-less rather than guess which fixture was the final. The
+  // teams FK is migration-owned (see the note at the top of this file).
+  championTeamId: uuid("champion_team_id"),
   // COMP-07 competition lock: engagement is EXPLICIT ONLY (audited
   // setCompetitionLock by a league owner) — status transitions never set
   // or clear these. See packages/database/src/lib/competition-locks.ts

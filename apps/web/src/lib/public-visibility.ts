@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, isNull, sql, sum } from "drizzle-orm"
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, sql, sum } from "drizzle-orm"
 import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards, tournamentPrizes } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
@@ -493,4 +493,75 @@ export async function readPublishedTournamentPrizes(
       currency: row.currency,
       sponsor: row.sponsor,
     }))
+}
+
+/** Hall of fame rows are bounded, newest-completed-first and disclosed. */
+export const PUBLIC_HALL_OF_FAME_LIMIT = 20
+
+export type HallOfFameEntry = {
+  tournamentId: string
+  name: string
+  championTeamId: string
+  championTeamName: string
+  completedAt: string | null
+}
+
+/**
+ * FAN-03 league hall of fame: completed, published competitions with a
+ * PERSISTED champion (written once by the completion claim). Legacy completed
+ * tournaments without a champion read absent here - never re-derived, because
+ * guessing which old fixture was the final is not a record. Aggregate names
+ * only: no entrant-level detail leaks through this surface.
+ */
+export async function readPublishedHallOfFame(tenantId: string): Promise<HallOfFameEntry[]> {
+  const rows = await db
+    .select({
+      tournamentId: tournaments.id,
+      name: tournaments.name,
+      championTeamId: tournaments.championTeamId,
+      championTeamName: teams.name,
+      updatedAt: tournaments.updatedAt,
+    })
+    .from(tournaments)
+    .innerJoin(teams, and(eq(teams.id, tournaments.championTeamId), eq(teams.tenantId, tournaments.tenantId)))
+    .where(and(
+      eq(tournaments.tenantId, tenantId),
+      inArray(tournaments.status, PUBLISHED_TOURNAMENT_STATUS_VALUES),
+      isNotNull(tournaments.championTeamId),
+    ))
+    .orderBy(desc(tournaments.updatedAt))
+    .limit(PUBLIC_HALL_OF_FAME_LIMIT)
+  return rows
+    .filter(row => row.championTeamId !== null)
+    .map(row => ({
+      tournamentId: row.tournamentId,
+      name: row.name,
+      championTeamId: row.championTeamId as string,
+      championTeamName: row.championTeamName,
+      completedAt: row.updatedAt.toISOString(),
+    }))
+}
+
+/**
+ * The persisted champion of ONE published tournament (for the public page
+ * banner). A champion-less, draft or cancelled tournament reads `null`.
+ */
+export async function readPublishedTournamentChampion(
+  tenantId: string,
+  id: string,
+): Promise<{ championTeamName: string; championTeamId: string } | null> {
+  const [row] = await db
+    .select({
+      status: tournaments.status,
+      championTeamId: tournaments.championTeamId,
+      championTeamName: teams.name,
+      teamTenantOk: teams.tenantId,
+    })
+    .from(tournaments)
+    .leftJoin(teams, and(eq(teams.id, tournaments.championTeamId), eq(teams.tenantId, tournaments.tenantId)))
+    .where(and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId)))
+    .limit(1)
+  if (!row || !isTournamentPublished(row.status)) return null
+  if (row.championTeamId === null || row.championTeamName === null) return null
+  return { championTeamName: row.championTeamName, championTeamId: row.championTeamId }
 }

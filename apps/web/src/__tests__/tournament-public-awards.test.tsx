@@ -4,6 +4,7 @@ import PublicTournamentPage from "@/app/tournaments/[id]/page"
 
 const mocks = vi.hoisted(() => ({
   tenant: vi.fn(), publishedTournament: vi.fn(), awards: vi.fn(), prizes: vi.fn(),
+  championCalls: [] as unknown[][],
 }))
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound") } }))
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }))
@@ -12,6 +13,11 @@ vi.mock("@/lib/public-visibility", () => ({
   readPublishedTournament: mocks.publishedTournament,
   readPublishedTournamentAwards: mocks.awards,
   readPublishedTournamentPrizes: mocks.prizes,
+  // FAN-03: the champion banner read - champion-less in these scenarios.
+  readPublishedTournamentChampion: (...args: unknown[]) => {
+    mocks.championCalls.push(args)
+    return Promise.resolve(null)
+  },
 }))
 vi.mock("@/components/tournaments/knockout-bracket", () => ({ KnockoutBracket: () => null }))
 vi.mock("@mtk/database", async (original) => ({

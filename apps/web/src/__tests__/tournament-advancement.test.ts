@@ -42,7 +42,8 @@ const state: {
     teamAId: string; teamBId: string; matchType: string }[]
   fixtureCount: number
   auditValues: Record<string, any> | undefined
-} = { tournament: {}, fixtures: [], fixtureCount: 0, auditValues: undefined }
+  updatedValues: Record<string, unknown> | undefined
+} = { tournament: {}, fixtures: [], fixtureCount: 0, auditValues: undefined, updatedValues: undefined }
 
 /** An 8-team knockout after its quarter-finals: 4 decided fixtures. */
 const quarterFinalsDone = (): [string, string][] =>
@@ -58,6 +59,7 @@ beforeEach(() => {
   state.tournament = knockTournament()
   state.fixtureCount = 0
   state.auditValues = undefined
+  state.updatedValues = undefined
   state.fixtures = quarterFinalsDone().map(([a, b], i) => ({
     id: `qf-${i + 1}`, matchNumber: i + 1, status: "completed",
     winnerId: a, teamAId: a, teamBId: b, matchType: "quarter_final",
@@ -91,7 +93,10 @@ beforeEach(() => {
   mocks.update.mockReturnValue({
     set: (set: Record<string, unknown>) => ({
       where: () => ({
-        returning: () => Promise.resolve([{ ...state.tournament, ...set }]),
+        returning: () => {
+          state.updatedValues = set
+          return Promise.resolve([{ ...state.tournament, ...set }])
+        },
       }),
     }),
   })
@@ -195,8 +200,11 @@ describe("advancing the knockout bracket", () => {
     expect(result.completed).toBe(true)
     expect(result.stage).toBe("Final decided")
     expect(mocks.insert.mock.calls.filter(([table]) => table === matches)).toHaveLength(0)
+    // FAN-03: the completion claim writes the final's winner as champion,
+    // once, in the same transaction.
+    expect(state.updatedValues).toMatchObject({ status: "completed", championTeamId: T(1) })
     expect(state.auditValues?.payload).toMatchObject({ stage: "Final decided",
-      after: { status: "completed" } })
+      after: { status: "completed", championTeamId: T(1) } })
   })
 
   it("requires wizard configuration when creating a stage", async () => {

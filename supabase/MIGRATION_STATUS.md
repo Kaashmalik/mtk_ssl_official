@@ -3,6 +3,22 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 102) - `tournament_champion` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261018100000_tournament_champion.sql` adds
+> `tournaments.champion_team_id` (FAN-03 hall of fame): nullable FK to
+> `teams` ON DELETE SET NULL, written EXACTLY ONCE by the
+> `TOURNAMENT_ADVANCE` completion claim from the decided final's winnerId -
+> never re-derived at read time. **No backfill** - legacy completed
+> tournaments read champion-less rather than guess which old fixture was the
+> final (guesses are not records); partial index
+> `tournaments_champion_idx` on `(tenant_id) WHERE champion_team_id IS NOT
+> NULL` serves the bounded newest-first hall-of-fame read. History row
+> `20261018100000` `'{}'::text[]` - A's Oct-18 window, clear of Session B's
+> chain (ends `20261018090000`). Verified remotely: uuid column, FK
+> `tournaments_champion_team_id_fkey` (ondelete=set-null), index definition,
+> history `17190000` + `18100000`.
+
 > **17 October 2026 (Batch 98) - `fan_reactions` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261017190000_fan_reactions.sql` creates

@@ -6,10 +6,10 @@ import { db, teams, matches, matchInnings, leagueRegistrations } from "@mtk/data
 import { eq, asc, and, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
-import { Calendar } from "lucide-react"
+import { Calendar, Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes } from "@/lib/public-visibility"
+import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion } from "@/lib/public-visibility"
 import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -26,6 +26,9 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   const tenantId = await requirePublicTenantId()
   const tournament = await readPublishedTournament(tenantId, id)
   if (!tournament) notFound()
+  // FAN-03: the PERSISTED champion (written once by the completion claim) -
+  // not a re-derivation from current standings, which can change.
+  const champion = await readPublishedTournamentChampion(tenantId, id)
 
   const approvedRegs = await db.select().from(leagueRegistrations)
     .where(and(
@@ -145,6 +148,20 @@ export default async function PublicTournamentPage({ params }: { params: Promise
         </div>
         <Badge variant="outline">{STATUS_LABELS[tournament.status] ?? tournament.status}</Badge>
       </div>
+
+      {/* FAN-03 hall of fame: persisted champion, shown exactly as recorded. */}
+      {champion && (
+        <Card className="border-yellow-500/40 bg-gradient-to-r from-yellow-500/10 to-transparent">
+          <CardContent className="flex items-center gap-3 py-4">
+            <Trophy className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Champion</p>
+              <p className="text-lg font-bold">{champion.championTeamName}</p>
+            </div>
+            <span className="sr-only">{champion.championTeamName} won {tournament.name}</span>
+          </CardContent>
+        </Card>
+      )}
 
       {bracketMatches.length > 0 && (
         <div className="space-y-2">

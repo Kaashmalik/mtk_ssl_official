@@ -176,9 +176,9 @@ describe("knockout advancement planning", () => {
     expect(plan).toMatchObject({ kind: "stage", matchType: "final", stageLabel: "Final" })
     expect(plan.kind === "stage" && plan.pairs).toEqual([[T(5), T(6)]])
 
-    // Final number 7 decided: chain complete.
+    // Final number 7 decided: chain complete, champion is the final's winner.
     const finish = planKnockoutAdvancement([...semisDone, { matchNumber: 7, status: "completed", winnerId: T(5) }])
-    expect(finish).toEqual({ kind: "complete" })
+    expect(finish).toEqual({ kind: "complete", championId: T(5) })
   })
 
   it("fails closed on empty, undecided, no-result or non-chain fixture sets", () => {

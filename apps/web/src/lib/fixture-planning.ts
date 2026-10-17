@@ -193,7 +193,7 @@ export type AdvancementFixture = {
 
 export type AdvancementPlan =
   | { kind: "stage"; teamsRemaining: number; matchType: PlannedFixture["matchType"]; stageLabel: string; pairs: [string, string][]; winnersByIdentity: string[] }
-  | { kind: "complete" }
+  | { kind: "complete"; championId: string }
 
 function cumulativeStageSums(n: number): number[] {
   const sums: number[] = []
@@ -248,7 +248,13 @@ export function planKnockoutAdvancement(fixtures: AdvancementFixture[]): Advance
   const sums = cumulativeStageSums(bracketTeams)
   const doneIndex = sums.findIndex(sum => sum === total)
   const fullChain = doneIndex === sums.length - 1
-  if (fullChain) return { kind: "complete" }
+  if (fullChain) {
+    // FAN-03: the champion is the winner of the LAST fixture (the final of
+    // the bracket chain) - derived purely, written once by the completion
+    // claim, and never re-derived at read time. `decided` is non-null
+    // string[] by the fail-closed guard above.
+    return { kind: "complete", championId: decided[decided.length - 1] }
+  }
 
   // The most recent completed stage has (bracketTeams >> doneIndex) / 2 fixtures.
   const lastStageFixtureCount = (bracketTeams / 2 ** doneIndex) / 2

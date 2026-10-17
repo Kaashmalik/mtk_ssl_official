@@ -5421,6 +5421,51 @@ localized/RTL/timezone preferences remain. Roadmap honestly remains
 | `git diff --check` | Clean |
 | Migration | None (client-only slice) |
 
+## Batch 102 - FAN-03 persisted champions + public hall of fame (first slice)
+
+The first FAN-03 slice: knockout champions become a **persisted record**, not
+a live re-derivation. **Migration `20261018100000` `tournament_champion`
+applied remotely** (A's Oct-18 window, clear of Session B's chain): nullable
+`tournaments.champion_team_id` FK to teams (ON DELETE SET NULL) + partial
+index for the bounded hall-of-fame read.
+
+**Written exactly once** by the completion claim (`TOURNAMENT_ADVANCE`): the
+pure planner (`planKnockoutAdvancement`) now carries `championId` on its
+`complete` plan - the winner of the LAST fixture of the verified bracket
+chain - and the writer sets `championTeamId` in the same conditional update,
+with the audit recording the champion in `after`. **No backfill, honestly:**
+legacy completed tournaments read champion-less rather than guess which old
+fixture was "the final" - guesses are not records; those tournaments keep
+the live standings view.
+
+**Public reads and UI** (`public-visibility.ts`): `readPublishedHallOfFame`
+(bounded 20, newest-completed-first, published-status gated, champion team
+name joined) and `readPublishedTournamentChampion` (single-tournament
+banner read). The public tournament page renders a gold Champion banner -
+**exactly as recorded at completion**, never re-computed from current
+standings, which can move later; a champion-less tournament renders nothing.
+Schema note: the FK is deliberately NOT declared via drizzle `references()`
+(`teams` already imports `tournaments`, so a schema-level back-reference
+was a TS7022 circular-init error) - the migration owns the constraint and
+readers join teams explicitly.
+
+**Boundary (recorded honestly).** FAN-03 stays OPEN: milestone/share cards,
+hall-of-fame surfaces beyond the tournament page (a league-scoped list needs
+a public tournaments index that doesn't exist), recap/highlight tools and
+approved analytic packages. Roadmap honestly remains
+**19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **133** files, **2,873 tests** (planner + advancement champion assertions) |
+| `npx vitest run` (database) | PASS - **29** files, **329 tests** |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | `20261018100000` APPLIED remotely + verified + history row |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
