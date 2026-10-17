@@ -8,6 +8,8 @@
  * instead of a generic failure.
  */
 
+import { ScoringRevisionConflict, type ScoringRevisionFailure } from "./scoring-revision-client";
+
 export const HANDOVER_RESYNC_COPY =
   "A scorer handover occurred. Reload the scoring session before writing.";
 
@@ -18,7 +20,13 @@ export type ScoringFenceFailure = {
 };
 
 /** Expected action errors must survive production Server Action serialization. */
-export function unwrapScoringFenceResult<T>(result: T | ScoringFenceFailure): T {
+export function unwrapScoringFenceResult<T>(result: T | ScoringFenceFailure | ScoringRevisionFailure): T {
+  if (result && typeof result === "object" && "code" in result &&
+      result.code === "SCORING_REVISION_CONFLICT" && "currentRevision" in result &&
+      typeof result.currentRevision === "number") {
+    throw new ScoringRevisionConflict(result.currentRevision,
+      "message" in result && typeof result.message === "string" ? result.message : undefined);
+  }
   if (result && typeof result === "object" && "code" in result &&
       result.code === "SCORING_SESSION_FENCED") {
     // Construct this in the browser: Next redacts thrown server messages.
@@ -38,6 +46,12 @@ export function isHandoverFencingError(error: unknown): boolean {
     : typeof error === "string" ? error : null;
   if (!message) return false;
   return FENCE_MARKERS.some((marker) => message.includes(marker));
+}
+
+export function scoringWriteConflictMessage(error: unknown): string | undefined {
+  if (error instanceof ScoringRevisionConflict) return error.message;
+  if (isHandoverFencingError(error)) return HANDOVER_RESYNC_COPY;
+  return undefined;
 }
 
 /**

@@ -39,6 +39,8 @@ function actorIdOf(req: Request): string {
 }
 
 class RecordBallDto {
+  expectedRevision?: number;
+  review?: { reason: string; previousEpoch?: number; previousRevision?: number };
   matchId: string;
   inningsId: string;
   over: number;
@@ -54,6 +56,7 @@ class RecordBallDto {
 }
 
 class CreateInningsDto {
+  expectedRevision?: number;
   matchId: string;
   teamId: string;
   inningsNumber: number;
@@ -113,7 +116,7 @@ export class ScoringController {
   @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 undos per minute
   async undoBall(
     @Req() req: Request,
-    @Body() body: { matchId: string; ballId: string; handoverEpoch?: number },
+    @Body() body: { matchId: string; ballId: string; handoverEpoch?: number; expectedRevision?: number },
   ) {
     const result = await this.scoringService.undoBall(
       tenantIdOf(req),
@@ -121,6 +124,7 @@ export class ScoringController {
       body.matchId,
       body.ballId,
       body.handoverEpoch ?? null,
+      body.expectedRevision ?? null,
     );
     await this.gateway.broadcastMatchState(tenantIdOf(req), body.matchId);
     return result;
@@ -136,6 +140,7 @@ export class ScoringController {
       teamId: dto.teamId,
       inningsNumber: Number(dto.inningsNumber),
       handoverEpoch: dto.handoverEpoch,
+      expectedRevision: dto.expectedRevision,
     });
     await this.gateway.broadcastMatchState(tenantIdOf(req), dto.matchId);
     return result;
@@ -152,7 +157,7 @@ export class ScoringController {
   async completeInnings(
     @Req() req: Request,
     @Param('inningsId') inningsId: string,
-    @Body() body: { matchId: string; handoverEpoch?: number },
+    @Body() body: { matchId: string; handoverEpoch?: number; expectedRevision?: number },
   ) {
     const result = await this.scoringService.completeInnings(
       tenantIdOf(req),
@@ -160,6 +165,7 @@ export class ScoringController {
       body.matchId,
       inningsId,
       body.handoverEpoch ?? null,
+      body.expectedRevision ?? null,
     );
     await this.gateway.broadcastMatchState(tenantIdOf(req), body.matchId);
     return result;
@@ -172,9 +178,9 @@ export class ScoringController {
   async completeMatch(
     @Req() req: Request,
     @Param('matchId') matchId: string,
-    @Body() body: { winnerId?: string; result?: string; manOfMatchId?: string; handoverEpoch?: number },
+    @Body() body: { winnerId?: string; result?: string; manOfMatchId?: string; handoverEpoch?: number; expectedRevision?: number },
   ) {
-    await this.scoringService.completeMatch(
+    const scoringRevision = await this.scoringService.completeMatch(
       tenantIdOf(req),
       actorIdOf(req),
       matchId,
@@ -182,8 +188,9 @@ export class ScoringController {
       body.result,
       body.manOfMatchId,
       body.handoverEpoch ?? null,
+      body.expectedRevision ?? null,
     );
     await this.gateway.broadcastMatchState(tenantIdOf(req), matchId);
-    return { success: true, matchId, status: 'completed' };
+    return { success: true, matchId, status: 'completed', scoringRevision };
   }
 }

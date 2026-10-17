@@ -347,6 +347,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
           matchId={match.id}
           status={match.status}
           handoverEpoch={match.scorerHandoverEpoch}
+          scoringRevision={match.scoringRevision}
           teamA={{ id: teamA.id, name: teamA.name }}
           teamB={{ id: teamB.id, name: teamB.name }}
           players={matchPlayers}

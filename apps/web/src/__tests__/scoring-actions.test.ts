@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { recordBall, undoBall, createInnings, completeInnings, getMatchPlayersForScoring, type RecordBallInput } from "@/app/actions/scoring"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { HANDOVER_RESYNC_COPY, unwrapScoringFenceResult } from "@/lib/scoring-fence"
+import { ScoringRevisionConflict } from "@/lib/scoring-revision-client"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), resolveTenant: vi.fn(), authorize: vi.fn(), findTenant: vi.fn(),
@@ -91,6 +92,21 @@ describe("Scoring action explicit command bridge", () => {
     await recordBall(input())
     expect(mocks.proxy.mock.calls[1][0].handoverEpoch).toBeUndefined()
   })
+  it("preserves explicit review provenance and expected revision in the canonical command", async () => {
+    const review = { reason: "Compared against the official score", previousEpoch: 1, previousRevision: 5 }
+    await recordBall(input({ expectedRevision: 7, handoverEpoch: 3, review }))
+    expect(mocks.proxy.mock.calls[0][0]).toMatchObject({ expectedRevision: 7, handoverEpoch: 3, review })
+    await expect(recordBall(input({ review: { reason: "short" } }))).rejects.toThrow()
+  })
+  it.each(["record", "undo", "create", "complete"])("returns serializable revision conflicts for %s", async operation => {
+    const proxy = { record: mocks.proxy, undo: mocks.undo, create: mocks.create, complete: mocks.complete }[operation]!
+    proxy.mockRejectedValueOnce(new ScoringRevisionConflict(7))
+    const result = await (operation === "record" ? recordBall(input({ expectedRevision: 6 }))
+      : operation === "undo" ? undoBall(MATCH, input().inningsId, 3, 6)
+      : operation === "create" ? createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1, expectedRevision: 6 })
+      : completeInnings(MATCH, input().inningsId, 3, 6))
+    expect(JSON.parse(JSON.stringify(result))).toMatchObject({ success: false, code: "SCORING_REVISION_CONFLICT", currentRevision: 7 })
+  })
 
   it.each(["record", "undo", "create", "complete"])("returns a safe serializable fence failure for %s", async (operation) => {
     const proxy = { record: mocks.proxy, undo: mocks.undo, create: mocks.create, complete: mocks.complete }[operation]!
@@ -107,9 +123,9 @@ describe("Scoring action explicit command bridge", () => {
     await undoBall(MATCH, input().inningsId, 7)
     await createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1, handoverEpoch: 7 })
     await completeInnings(MATCH, input().inningsId, 7)
-    expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, 7)
+    expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, 7, undefined)
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ handoverEpoch: 7 }), TENANT, ACTOR)
-    expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, 7)
+    expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, 7, undefined)
   })
 
   it("lets the canonical service decide whether a completed match request is a replay", async () => {
@@ -137,13 +153,13 @@ describe("Scoring action explicit command bridge", () => {
     } else if (operation === "undo") {
       await undoBall(MATCH, input().inningsId)
       // SCORE-11: the action threads the (here absent) handover token through.
-      expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, undefined)
+      expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, undefined, undefined)
     } else if (operation === "create") {
       await createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1 })
       expect(mocks.create.mock.calls[0][2]).toBe(ACTOR)
     } else {
       await completeInnings(MATCH, input().inningsId)
-      expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, undefined)
+      expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, undefined, undefined)
     }
     expect(mocks.actor).toHaveBeenCalledWith("user_clerk")
   })

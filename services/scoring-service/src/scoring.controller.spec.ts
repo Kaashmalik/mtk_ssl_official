@@ -51,6 +51,19 @@ describe('Post-commit match-state broadcast', () => {
       batsmanId: MATCH, bowlerId: MATCH, clientOpId: 'op', scoringActorId: 'forged' } as never);
     expect(service.recordBall.mock.calls[0][1]).toBe('00000000-0000-4000-8000-000000000006');
   });
+  it('threads expected revisions through every canonical mutation', async () => {
+    await controller.recordBall(request, { matchId: MATCH, inningsId: MATCH, over: 0, ball: 1, runs: 1,
+      batsmanId: MATCH, bowlerId: MATCH, clientOpId: 'op', expectedRevision: 7 });
+    expect(service.recordBall.mock.calls[0][2]).toMatchObject({ expectedRevision: 7 });
+    await controller.undoBall(request, { matchId: MATCH, ballId: MATCH, expectedRevision: 7 });
+    expect(service.undoBall.mock.calls[0].at(-1)).toBe(7);
+    await controller.createInnings(request, { matchId: MATCH, teamId: MATCH, inningsNumber: 1, expectedRevision: 7 });
+    expect(service.createInnings.mock.calls[0][2]).toMatchObject({ expectedRevision: 7 });
+    await controller.completeInnings(request, MATCH, { matchId: MATCH, expectedRevision: 7 });
+    expect(service.completeInnings.mock.calls[0].at(-1)).toBe(7);
+    await controller.completeMatch(request, MATCH, { expectedRevision: 7 });
+    expect(service.completeMatch.mock.calls[0].at(-1)).toBe(7);
+  });
 
   it('rejects a missing actor before calling the canonical service', async () => {
     await expect(controller.undoBall({ tenantId: 'tenant' } as unknown as Request,
@@ -62,7 +75,7 @@ describe('Post-commit match-state broadcast', () => {
       tenantId: 'forged', actorId: 'forged' } as never);
     expect(service.completeMatch).toHaveBeenCalledWith('tenant', '00000000-0000-4000-8000-000000000006', MATCH, MATCH, 'Won', MATCH,
       // SCORE-11: the optional body token is passed through (null when absent).
-      null);
+      null, null);
   });
 
   it.each(Object.keys(service))('protects the real %s route with ordered token, tenant, and actor guards', (operation) => {

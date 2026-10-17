@@ -43,7 +43,9 @@ import { CommentaryFeed } from "@/components/scoring/commentary-feed";
 import { LanguageSelector } from "@/components/scoring/language-selector";
 import { queueBall, removeQueuedBall } from "@/lib/offline-ball-queue";
 import { resolveActionError } from "@/lib/plan-limit-error";
-import { isHandoverFencingError, HANDOVER_RESYNC_COPY, unwrapScoringFenceResult } from "@/lib/scoring-fence";
+import { scoringWriteConflictMessage, HANDOVER_RESYNC_COPY, unwrapScoringFenceResult } from "@/lib/scoring-fence";
+import { pendingDeliveryRevision } from "@/lib/scoring-recovery";
+import { ScoringRecoveryPanel } from "@/components/scoring/scoring-recovery-panel";
 import { useOfflineBallSync } from "@/hooks/use-offline-ball-sync";
 import { hydrateScoringState, type ScoringPageSnapshot } from "@/lib/scoring-hydration";
 import { voiceDeliveryFlags } from "@/lib/scoring-voice-input";
@@ -101,7 +103,19 @@ function ScoringInterface() {
 
   const [dbWriteFailed, setDbWriteFailed] = useState(false);
   const [sessionFenced, setSessionFenced] = useState(false);
+  const [conflictMessage, setConflictMessage] = useState<string>();
   const canWrite = !!matchData?.canScore && !sessionFenced;
+
+  const acknowledgeSavedBall = useCallback((result: { ballId: string; clientOpId: string | null; scoringRevision: number }) => {
+    const state = useScoringStore.getState();
+    if (state.matchId !== matchId) return;
+    for (const innings of [state.innings1, state.innings2, state.superOver]) {
+      const local = innings?.balls.find(ball => ball.clientOpId === result.clientOpId ||
+        `${state.matchId}:${innings.inningsId}:${ball.id}` === result.clientOpId);
+      if (local && result.clientOpId) state.acknowledgeBall(local.id, result.ballId, result.clientOpId, result.scoringRevision);
+    }
+    useScoringStore.getState().observeScoringRevision(result.scoringRevision);
+  }, [matchId]);
 
   // Offline ball queue: replays persisted balls once the connection returns.
   const offlineSync = useOfflineBallSync(matchId);
@@ -111,29 +125,22 @@ function ScoringInterface() {
       try {
         const acknowledgement = unwrapScoringFenceResult(await recordBallAction(input as RecordBallInput));
         setDbWriteFailed(false);
-        const state = useScoringStore.getState();
-        for (const innings of [state.innings1, state.innings2, state.superOver]) {
-          if (!innings) continue;
-          const localBall = innings.balls.find((ball) =>
-            ball.clientOpId === acknowledgement.clientOpId ||
-            `${state.matchId}:${innings.inningsId}:${ball.id}` === acknowledgement.clientOpId);
-          if (localBall && acknowledgement.clientOpId) {
-            state.acknowledgeBall(localBall.id, acknowledgement.ballId, acknowledgement.clientOpId);
-          }
-        }
+        acknowledgeSavedBall(acknowledgement);
         return acknowledgement;
       } catch (err) {
         // A fenced offline replay stays queued (entries only leave the queue on
         // success). Never replace its original epoch: reconciliation is required
         // before pre-handover work can become authoritative.
-        if (isHandoverFencingError(err)) {
+        const conflict = scoringWriteConflictMessage(err);
+        if (conflict) {
           setSessionFenced(true);
-          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+          setConflictMessage(conflict);
+          toast.error(conflict, { duration: 10000 });
         }
         throw err;
       }
     });
-  }, [offlineSync.sync, canWrite]);
+  }, [offlineSync.sync, canWrite, acknowledgeSavedBall]);
 
   useEffect(() => {
     if (isOnline && offlineSync.pending > 0) void syncSavedBalls();
@@ -209,19 +216,31 @@ function ScoringInterface() {
           teamId: currentInnings.teamId,
           inningsNumber,
           handoverEpoch: state.handoverEpoch,
+          expectedRevision: state.scoringRevision,
         }));
         if (result.innings) {
+          if (useScoringStore.getState().matchId !== state.matchId) return;
           inningsId = result.innings.id;
           // Update store with real ID
-          useScoringStore.setState({
-            [inningsKey]: { ...currentInnings, inningsId },
-          } as Partial<typeof state>);
+          useScoringStore.setState((latest) => ({
+            [inningsKey]: { ...latest[inningsKey], inningsId,
+              // Creating the innings consumes one revision before its first
+              // queued delivery. Do not rebase over intervening score writes.
+              balls: latest[inningsKey]?.balls.map(ball => ball.id.startsWith("ball-") &&
+                latest[inningsKey]?.inningsId.startsWith("pending-innings-") &&
+                result.innings.scoringRevision === (state.scoringRevision ?? 0) + 1
+                ? { ...ball, expectedRevision: (ball.expectedRevision ?? 0) + 1 } : ball),
+            },
+          } as Partial<typeof state>));
+          useScoringStore.getState().observeScoringRevision(result.innings.scoringRevision);
         }
       } catch (err) {
         console.error("Failed to create innings:", err);
-        if (isHandoverFencingError(err)) {
+        const conflict = scoringWriteConflictMessage(err);
+        if (conflict) {
           setSessionFenced(true);
-          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+          setConflictMessage(conflict);
+          toast.error(conflict, { duration: 10000 });
           return;
         }
         toast.error("Failed to create innings in database. Please try again.");
@@ -248,6 +267,8 @@ function ScoringInterface() {
       isSix: lastBall.isSix ?? false,
       // SCORE-11 writer fencing: echo the epoch this session observed.
       handoverEpoch: state.handoverEpoch,
+      expectedRevision: useScoringStore.getState()[inningsKey]?.balls.find(ball => ball.id === lastBall.id)?.expectedRevision
+        ?? pendingDeliveryRevision(useScoringStore.getState()),
     };
 
     // Save the operation before the first request. A reload or lost response
@@ -274,17 +295,21 @@ function ScoringInterface() {
     while (attempt < MAX_RETRIES) {
       try {
         const acknowledgement = unwrapScoringFenceResult(await recordBallAction(ballInput));
-        useScoringStore.getState().acknowledgeBall(lastBall.id, acknowledgement.ballId, ballInput.clientOpId);
+        if (useScoringStore.getState().matchId === state.matchId) {
+          useScoringStore.getState().acknowledgeBall(lastBall.id, acknowledgement.ballId, ballInput.clientOpId, acknowledgement.scoringRevision);
+        }
         await removeQueuedBall(ballInput.clientOpId);
         await refreshOfflineQueue();
         setDbWriteFailed(false);
         return; // Success
       } catch (err) {
         lastError = err;
-        if (isHandoverFencingError(err)) {
+        const conflict = scoringWriteConflictMessage(err);
+        if (conflict) {
           setSessionFenced(true);
+          setConflictMessage(conflict);
           await refreshOfflineQueue();
-          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+          toast.error(conflict, { duration: 10000 });
           setDbWriteFailed(true);
           return;
         }
@@ -324,10 +349,13 @@ function ScoringInterface() {
         startTransition(async () => {
           let confirmed = false;
           try {
-            unwrapScoringFenceResult(await undoBallAction(state.matchId, lastBall.id, state.handoverEpoch));
+            const result = unwrapScoringFenceResult(await undoBallAction(state.matchId, lastBall.id, state.handoverEpoch, state.scoringRevision));
+            if (useScoringStore.getState().matchId !== state.matchId) return;
+            useScoringStore.getState().observeScoringRevision(result.scoringRevision);
             confirmed = true;
             if (lastBall.clientOpId) await removeQueuedBall(lastBall.clientOpId);
             const snapshot = await getMatchForScoring(state.matchId);
+            if (useScoringStore.getState().matchId !== state.matchId) return;
             const innings = snapshot.innings.find((value) => value.id === currentInningsState.inningsId);
             if (!innings) throw new Error("Updated innings snapshot unavailable");
             // Keep the session's original epoch even if a handover raced this
@@ -335,9 +363,11 @@ function ScoringInterface() {
             useScoringStore.getState().applyConfirmedUndo(lastBall.id, innings);
           } catch (err) {
             console.error("Failed to undo ball in DB:", err);
-            if (!confirmed && isHandoverFencingError(err)) {
+            const conflict = scoringWriteConflictMessage(err);
+            if (!confirmed && conflict) {
               setSessionFenced(true);
-              toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+              setConflictMessage(conflict);
+              toast.error(conflict, { duration: 10000 });
               return;
             }
             toast.error(confirmed
@@ -493,8 +523,9 @@ function ScoringInterface() {
 
       {sessionFenced && (
         <Card className="p-3 space-y-2 text-sm" role="alert">
-          <p>{HANDOVER_RESYNC_COPY} Saved deliveries have not been discarded or reauthorized.</p>
+          <p>{conflictMessage ?? HANDOVER_RESYNC_COPY} Saved deliveries have not been discarded or reauthorized.</p>
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Reload session</Button>
+          <ScoringRecoveryPanel matchId={matchId} onConfirmed={acknowledgeSavedBall} />
         </Card>
       )}
 
@@ -640,16 +671,21 @@ function ScoringInterface() {
                     disabled={!canWrite || isPending || offlineSync.syncing || offlineSync.pending > 0}
                     onClick={async () => {
                       try {
-                        unwrapScoringFenceResult(await completeInningsAction(
+                        const result = unwrapScoringFenceResult(await completeInningsAction(
                           matchId,
                           currentInningsData.inningsId,
                           useScoringStore.getState().handoverEpoch,
+                          useScoringStore.getState().scoringRevision,
                         ));
+                        if (useScoringStore.getState().matchId !== matchId) return;
+                        useScoringStore.getState().observeScoringRevision(result.scoringRevision);
                         toast.success("Innings completed");
                       } catch (e) {
-                        if (isHandoverFencingError(e)) {
+                        const conflict = scoringWriteConflictMessage(e);
+                        if (conflict) {
                           setSessionFenced(true);
-                          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+                          setConflictMessage(conflict);
+                          toast.error(conflict, { duration: 10000 });
                           return;
                         }
                         // Route through the shared resolver so a plan-limit

@@ -16,6 +16,7 @@ interface MatchLifecycleControlsProps {
   matchId: string
   status: string
   handoverEpoch?: number
+  scoringRevision?: number
   teamA: { id: string; name: string }
   teamB: { id: string; name: string }
   players?: { id: string; name: string }[]
@@ -25,6 +26,7 @@ export function MatchLifecycleControls({
   matchId,
   status,
   handoverEpoch,
+  scoringRevision,
   teamA,
   teamB,
   players = [],
@@ -161,6 +163,7 @@ export function MatchLifecycleControls({
                         : `${winnerId === teamA.id ? teamA.name : teamB.name} won`,
                       manOfMatchId || null,
                       handoverEpoch,
+                      scoringRevision,
                     ),
                   "Match completed",
                 )

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { proxyRecordBall, proxyUndoBall, proxyCreateInnings, proxyCompleteInnings, proxyCompleteMatch } from "@/lib/scoring-service-client"
+import { ScoringRevisionConflict } from "@/lib/scoring-revision-client"
 
 const TENANT = "00000000-0000-7000-8000-000000000001"
 const ACTOR = "00000000-0000-7000-8000-000000000006"
@@ -16,11 +17,30 @@ const fetchMock = vi.fn()
 beforeEach(() => {
   vi.stubEnv("SCORING_SERVICE_TOKEN", " internal-test-secret ")
   vi.stubGlobal("fetch", fetchMock)
-  fetchMock.mockReset().mockResolvedValue({ ok: true, json: async () => ({ success: true, matchId: MATCH, status: "completed" }) })
+  fetchMock.mockReset().mockResolvedValue({ ok: true, json: async () => ({ success: true, matchId: MATCH, status: "completed", scoringRevision: 7 }) })
 })
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 
 describe("Server-only scoring actor transport", () => {
+  it("retains a typed conflict for safe Server Action serialization without HTTP retries", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 409, statusText: "Conflict", json: async () => ({
+      code: "SCORING_REVISION_CONFLICT", message: "The official score changed", currentRevision: 7,
+    }) })
+    await expect(proxyRecordBall({ ...command, expectedRevision: 6 }, TENANT, ACTOR)).rejects.toBeInstanceOf(ScoringRevisionConflict)
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+  it("echoes expected revisions on all scoring transports", async () => {
+    await proxyRecordBall({ ...command, expectedRevision: 7 }, TENANT, ACTOR)
+    await proxyUndoBall(MATCH, MATCH, TENANT, ACTOR, 3, 7)
+    await proxyCreateInnings({ matchId: MATCH, teamId: MATCH, inningsNumber: 1, expectedRevision: 7 }, TENANT, ACTOR)
+    await proxyCompleteInnings(MATCH, MATCH, TENANT, ACTOR, 3, 7)
+    await proxyCompleteMatch(MATCH, { expectedRevision: 7, result: "Won" }, TENANT, ACTOR)
+    for (const [, request] of fetchMock.mock.calls) expect(JSON.parse(request.body).expectedRevision).toBe(7)
+  })
+  it.each(calls)("$name refuses a response from an uncoordinated writer without a durable revision", async ({ run }) => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, matchId: MATCH, status: "completed" }) })
+    await expect(run()).rejects.toThrow("did not acknowledge")
+  })
   it.each(calls)("$name sends trusted tenant, actor, and internal token only as headers", async ({ run }) => {
     await run()
     const request = fetchMock.mock.calls[0][1]

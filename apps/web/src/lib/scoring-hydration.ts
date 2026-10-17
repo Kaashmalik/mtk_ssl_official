@@ -54,6 +54,7 @@ export function hydrateScoringState(state: ScoringState, snapshot: ScoringPageSn
     handoverEpoch: state.handoverEpoch !== undefined &&
       (observedEpoch === undefined || state.handoverEpoch > observedEpoch)
       ? state.handoverEpoch : observedEpoch,
+    scoringRevision: Math.max(state.scoringRevision ?? 0, snapshot.match.scoringRevision ?? 0),
     ...(matchIsNewer ? { matchStatus: snapshot.match.status, matchUpdatedAt: snapshot.match.updatedAt.toISOString() } : {}),
     currentInnings: superOver ? "super_over" : innings2 ? 2 : 1,
     innings1History: emptyHistory(), innings2History: emptyHistory(), superOverHistory: emptyHistory() }

@@ -136,6 +136,8 @@ export const matches = pgTable("matches", {
    * rows default to 0 and keep pre-fencing behavior.
    */
   scorerHandoverEpoch: integer("scorer_handover_epoch").notNull().default(0),
+  /** Durable optimistic concurrency; only canonical scoring mutations bump it. */
+  scoringRevision: integer("scoring_revision").notNull().default(0),
   /**
    * Playing-XI gate (COMP-06 slice): armed by XI declaration writes; legacy
    * matches stay false and keep registered-squad-only eligibility. While

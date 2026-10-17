@@ -4508,6 +4508,74 @@ its timeout. No deployment acceptance is inferred from these automated checks.
 Next source work: SCORE-11 durable revisions/reconciliation, PUB-02 public page,
 COMP-07 remainder, release gates. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+## Batch 85 - consolidated delivery, durable scoring revisions and explicit review
+
+**Delivery method changed.** `docs/DELIVERY_EXECUTION_GROUPS.md` consolidates
+all 60 open IDs into seven coherent delivery groups, not sixty assumed batches.
+Already-built slices are not treated as untouched. Source completion and real
+release acceptance stay separate. `roadmap:status` inventories the authoritative
+checklist; its six tests prevent duplicate/unclassified scope omissions.
+
+**Integrated feature source.** SCORE-11 now includes a durable match revision,
+canonical enforcement/audit, all-five-path HTTP/proxy/actions and web token
+wiring, persisted/ordered offline revisions, safe conflict responses and an
+explicit reasoned saved-delivery review UI:
+
+- CLI-created local migration `20261017093925_scoring_revisions.sql` adds a
+  nonnegative integer revision with default zero. No remote apply.
+- Each real record/undo/create/complete-innings/complete-match mutation compares
+  its expected revision after current authorization and increments under the
+  existing match lock with tenant/match/revision CAS plus `SCORING_REVISION`
+  audit in the same transaction. Missing tokens work only at revision zero.
+  Same-position illegal balls cannot evade the stale-write check.
+- Accepted delivery/undo retries, same-team existing innings and matching
+  lifecycle retries do not increment. Undo's immutable event recovers a lost
+  response. Corrupt/exhausted revisions refuse new writes. Revision and review
+  metadata are excluded from delivery fingerprints.
+- The web server returns typed serializable expected conflicts and requires
+  durable revision acknowledgements from HTTP writers. The client preserves
+  ordered original queue tokens, reserves local revisions and stops on conflicts.
+- Review rereads current authorized state and the first saved delivery, requires
+  a bounded reason and explicit confirmation, preserves operation identity,
+  content and position, and retries through the ordinary canonical writer with
+  fresh tokens. Current authority/eligibility/lifecycle/position are still
+  checked. Accepted client-reported review provenance is audited; local cleanup
+  follows acknowledgement. Races/rejections retain work. No forced positional
+  correction, overwrite, discard or new official-correction workflow.
+
+**Boundary.** This is source plus automated boundary verification, not a claim
+that the whole task or product is complete. The XI/handover/revision migrations
+remain unapplied. Real PostgreSQL CAS/locking/rollback, browser/mobile/provider,
+deployment, restore and owner approvals remain open. Drain old writers and
+coordinate schema/web/service rollout before relying on the revision contract.
+`LEAGUE_MEMBERSHIP_CONTROLS_READY` stays default-off.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/database test` | PASS - **19** files, **243 tests** (+12) |
+| `corepack pnpm --filter @mtk/web test` | PASS - **114** files, **2,671 tests** (+28) |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS - **13** files, **331 tests** (+15) |
+| `corepack pnpm --filter @ssl/ai-commentary-service test` | PASS - **4** files, **39 tests** |
+| `corepack pnpm test:release` | PASS - **87/87** checker tests, not release acceptance |
+| `corepack pnpm test:roadmap` | PASS - **6/6** inventory tests |
+| `corepack pnpm roadmap:status` | **19 checked / 60 open / 79 IDs**, seven groups cover all open IDs |
+| `tsc --noEmit` (from `apps/web`) | **0** errors |
+| `tsc --noEmit` (scoring service) | **0** errors |
+| `git diff --check` | Clean |
+| Remote apply/deployment | None |
+
+The review panel intentionally handles existing queued deliveries in a real
+innings. Provisional-innings/local-only work remains retained; automatic remapping
+or forced positional correction is not an implemented recovery path. These and
+the real acceptance gates remain part of the match-day backlog.
+
+Next: use the consolidated groups for the public hub/competition source and
+independent release-evidence infrastructure work; do not reimplement delivered
+source or infer production completion from test counts.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

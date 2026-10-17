@@ -22,6 +22,13 @@ export const deliveryCommandSchema = z.object({
   // observed. Deliberately NOT part of deliveryFingerprint — an idempotent
   // retry after a handover must still dedupe against the recorded event.
   handoverEpoch: z.number().int().min(0).optional(),
+  expectedRevision: z.number().int().min(0).max(2147483647).optional(),
+  // Explicit human review only. This metadata is client-reported provenance,
+  // never authority, and deliberately excluded from deliveryFingerprint.
+  review: z.object({ reason: z.string().trim().min(10).max(1000),
+    previousEpoch: z.number().int().min(0).optional(),
+    previousRevision: z.number().int().min(0).optional(),
+  }).optional(),
 });
 
 export type DeliveryCommand = z.infer<typeof deliveryCommandSchema>;

@@ -9,6 +9,7 @@ export type WicketType = "bowled" | "caught" | "lbw" | "run_out" | "stumped" | "
 export interface BallData {
   id: string;
   clientOpId?: string;
+  expectedRevision?: number;
   overNumber: number;
   ballNumber: number;
   input: BallInput;
@@ -61,6 +62,7 @@ export interface ScoringState {
   matchUpdatedAt?: string;
   /** SCORE-11: the handover epoch this scoring session last observed. */
   handoverEpoch?: number;
+  scoringRevision?: number;
   currentInnings: 1 | 2 | "super_over";
   innings1: InningsState | null;
   innings2: InningsState | null;
@@ -77,7 +79,8 @@ export interface ScoringState {
   setOnline: (online: boolean) => void;
   resetInnings: (innings: 1 | 2 | "super_over") => void;
   setMatchId: (matchId: string) => void;
-  acknowledgeBall: (localId: string, serverId: string, clientOpId: string) => void;
+  acknowledgeBall: (localId: string, serverId: string, clientOpId: string, revision?: number) => void;
+  observeScoringRevision: (revision?: number) => void;
   applyConfirmedUndo: (ballId: string, accounting: InningsAccounting) => void;
 }
 
@@ -142,13 +145,16 @@ export const useScoringStore = create<ScoringState>()(
       isOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
 
       setMatchId: (matchId: string) => set((state) => state.matchId === matchId ? {} : ({
-        matchId, matchStatus: "scheduled", matchUpdatedAt: undefined, handoverEpoch: undefined,
+        matchId, matchStatus: "scheduled", matchUpdatedAt: undefined, handoverEpoch: undefined, scoringRevision: undefined,
         currentInnings: 1, innings1: null, innings2: null, superOver: null,
         innings1History: createEmptyHistory(), innings2History: createEmptyHistory(),
         superOverHistory: createEmptyHistory(),
       })),
 
-      acknowledgeBall: (localId, serverId, clientOpId) => set((state) => {
+      observeScoringRevision: (revision) => set((state) => Number.isInteger(revision) && revision! >= 0
+        ? { scoringRevision: Math.max(state.scoringRevision ?? 0, revision!) } : {}),
+
+      acknowledgeBall: (localId, serverId, clientOpId, revision) => set((state) => {
         const acknowledge = (innings: InningsState | null): InningsState | null => innings && ({
           ...innings,
           balls: innings.balls.map((ball) => ball.id === localId
@@ -158,6 +164,8 @@ export const useScoringStore = create<ScoringState>()(
           ...value, history: value.history.map((innings) => acknowledge(innings)!),
         });
         return {
+          ...(Number.isInteger(revision) && revision! >= 0
+            ? { scoringRevision: Math.max(state.scoringRevision ?? 0, revision!) } : {}),
           innings1: acknowledge(state.innings1), innings2: acknowledge(state.innings2),
           superOver: acknowledge(state.superOver),
           innings1History: history(state.innings1History),
@@ -191,10 +199,14 @@ export const useScoringStore = create<ScoringState>()(
 
         if (!currentInnings) return;
 
+        const pendingCount = [state.innings1, state.innings2, state.superOver].reduce((count, innings) =>
+          count + (innings?.balls.filter(value => value.id.startsWith("ball-")).length ?? 0), 0);
+
         const ball: BallData = {
           ...ballData,
           id: `ball-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           timestamp: Date.now(),
+          expectedRevision: (state.scoringRevision ?? 0) + pendingCount,
           ...calculateBallData(ballData.input, ballData.wicketType, ballData.runs),
         };
         const delta = calculateDeliveryDelta(scorerRunsToDelivery(ball));
@@ -344,6 +356,7 @@ export const useScoringStore = create<ScoringState>()(
       partialize: (state) => ({
         matchId: state.matchId,
         handoverEpoch: state.handoverEpoch,
+        scoringRevision: state.scoringRevision,
         currentInnings: state.currentInnings,
         innings1: state.innings1,
         innings2: state.innings2,

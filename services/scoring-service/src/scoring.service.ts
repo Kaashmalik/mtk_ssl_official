@@ -32,6 +32,8 @@ import { requireScoringWriteAccess, requireDeliveryParticipants, requireMatchTea
 import type { ScoringTransaction } from './scoring-write-access';
 import { BALL_TOPIC, MATCH_TOPIC, enqueueScoringMessage } from './scoring-outbox';
 import { requirePublishedScoringMatch, validatePublicReadIds } from './scoring-public-access';
+import { requireScoringRevision, commitScoringRevision } from './scoring-revision';
+import type { DeliveryCommand } from './delivery-command';
 import {
   ScoringBallEventPayload,
 } from './kafka-scoring-publisher.service';
@@ -48,6 +50,9 @@ import {
 export type { MatchState, MatchStatus, Scorecard };
 
 export interface BallEvent {
+  handoverEpoch?: number;
+  expectedRevision?: number;
+  review?: DeliveryCommand['review'];
   clientOpId: string;
   matchId: string;
   inningsId: string;
@@ -70,6 +75,7 @@ export interface BallEvent {
 
 
 export interface BallResult {
+  scoringRevision: number;
   ballId: string;
   clientOpId?: string;
   scorecard: Scorecard;
@@ -111,9 +117,11 @@ export interface CreateInningsInput {
   inningsNumber: number;
   /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
   handoverEpoch?: number;
+  expectedRevision?: number;
 }
 
 export interface InningsSummary {
+  scoringRevision?: number;
   id: string;
   matchId: string;
   teamId: string;
@@ -122,6 +130,7 @@ export interface InningsSummary {
 }
 
 export interface CompleteInningsResult {
+  scoringRevision: number;
   innings: InningsSummary;
   /** Parent match status after the completion. */
   matchStatus: MatchStatus;
@@ -315,10 +324,12 @@ export class ScoringService {
           });
           if (!existing) throw new ConflictException('This delivery was undone; use a new operation ID');
           return { result: { ballId: existing.id, clientOpId: command.clientOpId,
+            scoringRevision: match.scoringRevision ?? 0,
             scorecard: scorecardFor(innings), replayed: true }, recorded: false };
         }
       }
 
+      requireScoringRevision(match, command.expectedRevision);
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException(`Match ${matchId} cannot be scored while ${match.status}`);
       }
@@ -327,7 +338,8 @@ export class ScoringService {
       const expectedOver = Math.floor(innings.totalBalls / 6);
       const expectedBall = (innings.totalBalls % 6) + 1;
       if (command.over !== expectedOver || command.ball !== expectedBall) {
-        throw new ConflictException(`Expected delivery ${expectedOver}.${expectedBall}; refresh match state`);
+        throw new ConflictException({ code: 'SCORING_REVISION_CONFLICT', currentRevision: match.scoringRevision ?? 0,
+          message: `Expected delivery ${expectedOver}.${expectedBall}; refresh match state. Saved delivery coordinates cannot be silently changed.` });
       }
       await requireDeliveryParticipants(tx, tenantId, match, innings.teamId, command);
 
@@ -480,6 +492,10 @@ export class ScoringService {
         ballId: insertedBall.id,
         clientOpId: command.clientOpId,
         scorecard,
+        scoringRevision: await commitScoringRevision(tx, match, actorId, command.expectedRevision, 'record_ball', {
+          clientOpId: command.clientOpId, ballId: insertedBall.id,
+          ...(command.review ? { clientReportedReview: command.review } : {}),
+        }),
       };
 
       // Resolve player names for downstream consumers (commentary fallback,
@@ -562,7 +578,7 @@ export class ScoringService {
   }
 
   async undoBall(tenantId: string, actorId: string, matchId: string, ballId: string,
-    fence?: number | null): Promise<BallResult> {
+    fence?: number | null, expectedRevision?: number | null): Promise<BallResult> {
     validateMutationIds(matchId, ballId);
     const result = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
@@ -572,6 +588,20 @@ export class ScoringService {
       });
       assertTenantScope(tenantId, match, 'Match', matchId);
       await requireScoringWriteAccess(tx, tenantId, actorId, match, fence);
+      // A response lost after commit must not turn an accepted undo into an
+      // unrecoverable revision conflict. The immutable undo event is its key.
+      const undone = await tx.query.scoringEvents.findFirst({ where: and(
+        eq(scoringEvents.tenantId, tenantId), eq(scoringEvents.matchId, matchId),
+        eq(scoringEvents.eventType, 'ball_undone'), sql`${scoringEvents.payload}->>'ball_id' = ${ballId}`,
+      ) });
+      if (undone) {
+        const innings = await tx.query.matchInnings.findFirst({ where: and(
+          eq(matchInnings.id, undone.inningsId), eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId),
+        ) });
+        assertTenantScope(tenantId, innings, 'Innings', undone.inningsId);
+        return { ballId, scorecard: scorecardFor(innings), scoringRevision: match.scoringRevision ?? 0, replayed: true };
+      }
+      requireScoringRevision(match, expectedRevision);
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException('This match can no longer be edited');
       }
@@ -755,6 +785,7 @@ export class ScoringService {
       const result = {
         ballId,
         scorecard,
+        scoringRevision: await commitScoringRevision(tx, match, actorId, expectedRevision, 'undo_ball', { ballId }),
       };
 
       return result;
@@ -822,9 +853,10 @@ export class ScoringService {
   async createInnings(tenantId: string, actorId: string, input: CreateInningsInput): Promise<InningsSummary> {
     const parsed = z.object({ matchId: z.string().uuid(), teamId: z.string().uuid(),
       inningsNumber: z.number().int().min(1).max(3),
-      handoverEpoch: z.number().int().min(0).optional() }).safeParse(input);
+      handoverEpoch: z.number().int().min(0).optional(),
+      expectedRevision: z.number().int().min(0).max(2147483647).optional() }).safeParse(input);
     if (!parsed.success) throw new BadRequestException('Invalid innings command');
-    const { matchId, teamId, inningsNumber, handoverEpoch } = parsed.data;
+    const { matchId, teamId, inningsNumber, handoverEpoch, expectedRevision } = parsed.data;
     let created: InningsSummary;
     try {
       created = await db.transaction(async (tx) => {
@@ -846,13 +878,19 @@ export class ScoringService {
           where: and(eq(matchInnings.matchId, matchId), eq(matchInnings.inningsNumber, inningsNumber),
             eq(matchInnings.tenantId, tenantId)),
         });
-        if (existing) throw new BadRequestException(`Innings ${inningsNumber} already exists for match ${matchId}`);
+        if (existing) {
+          if (existing.teamId !== teamId) throw new BadRequestException(`Innings ${inningsNumber} already exists for another team`);
+          return { id: existing.id, matchId: existing.matchId, teamId: existing.teamId,
+            inningsNumber: existing.inningsNumber, status: existing.status, scoringRevision: match.scoringRevision ?? 0 };
+        }
+        requireScoringRevision(match, expectedRevision);
         const [innings] = await tx.insert(matchInnings).values({
           tenantId, matchId, teamId, inningsNumber, status: 'not_started',
         }).returning();
         if (!innings) throw new InternalServerErrorException('Innings insert returned no row');
         return { id: innings.id, matchId: innings.matchId, teamId: innings.teamId,
-          inningsNumber: innings.inningsNumber, status: innings.status };
+          inningsNumber: innings.inningsNumber, status: innings.status,
+          scoringRevision: await commitScoringRevision(tx, match, actorId, expectedRevision, 'create_innings', { inningsId: innings.id }) };
       }, { isolationLevel: 'read committed' });
     } catch (err) {
       // Constraint remains a backstop for writers outside this service.
@@ -885,6 +923,7 @@ export class ScoringService {
     matchId: string,
     inningsId: string,
     fence?: number | null,
+    expectedRevision?: number | null,
   ): Promise<CompleteInningsResult> {
     validateMutationIds(matchId, inningsId);
     const result = await db.transaction(async (tx) => {
@@ -909,8 +948,9 @@ export class ScoringService {
       if (innings.status === 'completed') {
         return { innings: { id: innings.id, matchId: innings.matchId, teamId: innings.teamId,
           inningsNumber: innings.inningsNumber, status: innings.status },
-          matchStatus: match.status, inningsBreakApplied: false };
+          matchStatus: match.status, inningsBreakApplied: false, scoringRevision: match.scoringRevision ?? 0 };
       }
+      requireScoringRevision(match, expectedRevision);
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException('This match can no longer be edited');
       }
@@ -953,6 +993,7 @@ export class ScoringService {
         },
         matchStatus,
         inningsBreakApplied,
+        scoringRevision: await commitScoringRevision(tx, match, actorId, expectedRevision, 'complete_innings', { inningsId }),
       };
     }, { isolationLevel: 'read committed' });
 
@@ -984,12 +1025,13 @@ export class ScoringService {
     result?: string,
     manOfMatchId?: string,
     fence?: number | null,
-  ): Promise<void> {
+    expectedRevision?: number | null,
+  ): Promise<number> {
     validateMutationIds(matchId);
     const completion = z.object({ winnerId: z.string().uuid().optional(), result: z.string().min(1).max(2000).optional(),
       manOfMatchId: z.string().uuid().optional() }).safeParse({ winnerId, result, manOfMatchId });
     if (!completion.success) throw new BadRequestException('Invalid match completion command');
-    await db.transaction(async (tx) => {
+    const scoringRevision = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches}
         WHERE ${matches.id} = ${matchId} AND ${matches.tenantId} = ${tenantId} FOR UPDATE`);
       const match = await tx.query.matches.findFirst({
@@ -1006,8 +1048,9 @@ export class ScoringService {
           || (manOfMatchId !== undefined && manOfMatchId !== match.manOfMatchId)) {
           throw new ConflictException('Completed result requires an audited correction');
         }
-        return true;
+        return match.scoringRevision ?? 0;
       }
+      requireScoringRevision(match, expectedRevision);
       if (!['scheduled', 'toss', 'live', 'innings_break'].includes(match.status)) {
         throw new BadRequestException('This match can no longer be completed');
       }
@@ -1032,7 +1075,7 @@ export class ScoringService {
           after: { status: 'completed', winnerId: winnerId || null, result: result || null, manOfMatchId: awardId } },
       });
       await this.enqueueMatchEnded(tx, matchId, tenantId, winnerId, result, awardId);
-      return false;
+      return commitScoringRevision(tx, match, actorId, expectedRevision, 'complete_match');
     }, { isolationLevel: 'read committed' });
 
     // Same reasoning as completeInnings: the match-state cache holds a stale
@@ -1044,7 +1087,7 @@ export class ScoringService {
     );
 
     this.logger.log(`Match ${matchId} marked as completed`);
-
+    return scoringRevision;
   }
 
   /**

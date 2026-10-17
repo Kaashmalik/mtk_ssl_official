@@ -3,6 +3,18 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 85) - `scoring_revisions` LOCAL ONLY, unapplied.**
+> CLI-created file `supabase/migrations/20261017093925_scoring_revisions.sql`
+> adds `matches.scoring_revision integer NOT NULL DEFAULT 0` plus a nonnegative
+> CHECK. Canonical scoring owns increments, committed under the match lock with
+> tenant/match/revision CAS and an atomic audit; accepted retries/no-ops do not
+> increment. No remote apply or database acceptance ran. The XI and handover
+> migrations below also remain pending. This timestamp precedes the existing
+> handover file; the column addition is independent of it. Apply the complete
+> reviewed chain before the coordinated release, drain old writers and verify
+> real stale-write/rollback/locking behavior. Do not roll back by re-enabling
+> an old unfenced writer against live scoring. Gate remains default-off.
+
 > **17 October 2026 (Batch 84) - no schema change or remote apply.** Web
 > session-token wiring consumes the Batch 83 handover epoch on all five write
 > paths; serializable expected errors and retained original queue epochs do

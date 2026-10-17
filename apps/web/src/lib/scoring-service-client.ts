@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { ScoringRevisionConflict } from "./scoring-revision-client";
 
 const DEFAULT_SCORING_URL = "http://localhost:4002";
 
@@ -38,9 +39,12 @@ export type ScoringProxyBallInput = {
   wicket?: { type: string; playerId: string; fielderId?: string };
   /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
   handoverEpoch?: number;
+  expectedRevision?: number;
+  review?: { reason: string; previousEpoch?: number; previousRevision?: number };
 };
 
 export type ScoringProxyBallResult = {
+  scoringRevision: number;
   ballId: string;
   clientOpId?: string;
   replayed?: boolean;
@@ -56,6 +60,7 @@ export type ScoringProxyBallResult = {
 };
 
 export type ScoringInnings = {
+  scoringRevision?: number;
   id: string;
   matchId: string;
   teamId: string;
@@ -64,6 +69,7 @@ export type ScoringInnings = {
 };
 
 export type ScoringCompleteInningsResult = {
+  scoringRevision: number;
   innings: ScoringInnings;
   /** Parent match status after the completion. */
   matchStatus: string;
@@ -120,13 +126,19 @@ async function scoringFetch<T>(
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const body = (await res.json()) as { message?: string | string[] };
+      const body = (await res.json()) as { message?: string | string[]; code?: string; currentRevision?: number };
+      if (res.status === 409 && body.code === "SCORING_REVISION_CONFLICT" &&
+          Number.isInteger(body.currentRevision) && body.currentRevision! >= 0) {
+        throw new ScoringRevisionConflict(body.currentRevision!,
+          typeof body.message === "string" ? body.message : undefined);
+      }
       if (body.message) {
         detail = Array.isArray(body.message)
           ? body.message.join(", ")
           : body.message;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof ScoringRevisionConflict) throw error;
       /* ignore */
     }
     throw new Error(`Scoring service error (${res.status}): ${detail}`);
@@ -135,12 +147,19 @@ async function scoringFetch<T>(
   return (await res.json()) as T;
 }
 
+function requireRevisionAcknowledgement<T extends { scoringRevision?: number }>(response: T): T {
+  if (!z.number().int().min(0).max(2147483647).safeParse(response?.scoringRevision).success) {
+    throw new Error("Scoring service did not acknowledge a durable revision. Keep saved deliveries and check the coordinated deployment.");
+  }
+  return response;
+}
+
 export async function proxyRecordBall(
   input: ScoringProxyBallInput,
   tenantId: string,
   actorId: string,
 ): Promise<ScoringProxyBallResult> {
-  return scoringFetch<ScoringProxyBallResult>(
+  return requireRevisionAcknowledgement(await scoringFetch<ScoringProxyBallResult>(
     "/scoring/ball",
     {
       method: "POST",
@@ -148,7 +167,7 @@ export async function proxyRecordBall(
     },
     tenantId,
     actorId,
-  );
+  ));
 }
 
 /**
@@ -161,16 +180,17 @@ export async function proxyUndoBall(
   tenantId: string,
   actorId: string,
   handoverEpoch?: number,
-): Promise<unknown> {
-  return scoringFetch(
+  expectedRevision?: number,
+): Promise<ScoringProxyBallResult> {
+  return requireRevisionAcknowledgement(await scoringFetch<ScoringProxyBallResult>(
     "/scoring/ball/undo",
     {
       method: "POST",
-      body: JSON.stringify({ matchId, ballId, handoverEpoch }),
+      body: JSON.stringify({ matchId, ballId, handoverEpoch, expectedRevision }),
     },
     tenantId,
     actorId,
-  );
+  ));
 }
 
 /**
@@ -183,11 +203,12 @@ export async function proxyCreateInnings(
     teamId: string;
     inningsNumber: number;
     handoverEpoch?: number;
+    expectedRevision?: number;
   },
   tenantId: string,
   actorId: string,
 ): Promise<ScoringInnings> {
-  return scoringFetch<ScoringInnings>(
+  return requireRevisionAcknowledgement(await scoringFetch<ScoringInnings>(
     "/scoring/innings",
     {
       method: "POST",
@@ -195,7 +216,7 @@ export async function proxyCreateInnings(
     },
     tenantId,
     actorId,
-  );
+  ));
 }
 
 /**
@@ -208,27 +229,29 @@ export async function proxyCompleteInnings(
   tenantId: string,
   actorId: string,
   handoverEpoch?: number,
+  expectedRevision?: number,
 ): Promise<ScoringCompleteInningsResult> {
-  return scoringFetch<ScoringCompleteInningsResult>(
+  return requireRevisionAcknowledgement(await scoringFetch<ScoringCompleteInningsResult>(
     `/scoring/innings/${encodeURIComponent(inningsId)}/complete`,
     {
       method: "POST",
-      body: JSON.stringify({ matchId, handoverEpoch }),
+      body: JSON.stringify({ matchId, handoverEpoch, expectedRevision }),
     },
     tenantId,
     actorId,
-  );
+  ));
 }
 
 /** Match completion stays in the canonical writer, including optional awards. */
 export async function proxyCompleteMatch(matchId: string,
-  input: { winnerId?: string; result?: string; manOfMatchId?: string; handoverEpoch?: number },
+  input: { winnerId?: string; result?: string; manOfMatchId?: string; handoverEpoch?: number; expectedRevision?: number },
   tenantId: string, actorId: string,
-): Promise<{ success: true; matchId: string; status: "completed" }> {
+): Promise<{ success: true; matchId: string; status: "completed"; scoringRevision: number }> {
   const response = await scoringFetch<unknown>(`/scoring/match/${encodeURIComponent(matchId)}/complete`, {
     method: "POST", body: JSON.stringify(input),
   }, tenantId, actorId);
-  const accepted = z.object({ success: z.literal(true), matchId: z.literal(matchId), status: z.literal("completed") })
+  const accepted = z.object({ success: z.literal(true), matchId: z.literal(matchId), status: z.literal("completed"),
+    scoringRevision: z.number().int().min(0).max(2147483647) })
     .safeParse(response);
   if (!accepted.success) throw new Error("Scoring service did not acknowledge this match completion");
   return accepted.data;

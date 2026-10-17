@@ -15,7 +15,7 @@ function fixture() {
   // Only the database projection consumed by hydration is relevant here.
   return { match: { id: MATCH, status: "live", teamAId: "team-a", teamBId: "team-b",
     tossWinnerId: "team-b", tossDecision: "bat", updatedAt: new Date("2026-10-12T12:00:00.000Z"),
-    handoverEpoch: 4 },
+    handoverEpoch: 4, scoringRevision: 8 },
     innings: [row(1), row(2)], recentBalls: [] } as unknown as ScoringPageSnapshot
 }
 function row(number: number) {
@@ -28,7 +28,7 @@ function apply(snapshot = fixture()) {
 }
 describe("Scorer page reload hydration", () => {
   beforeEach(() => useScoringStore.setState({ matchId: MATCH, innings1: null, innings2: null,
-    superOver: null, matchUpdatedAt: undefined, currentInnings: 1, handoverEpoch: undefined }))
+    superOver: null, matchUpdatedAt: undefined, currentInnings: 1, handoverEpoch: undefined, scoringRevision: undefined }))
   it("restores the current chase instead of resetting every reload to innings one", () => {
     apply()
     expect(useScoringStore.getState()).toMatchObject({ currentInnings: 2,
@@ -100,6 +100,21 @@ describe("Scorer page reload hydration", () => {
     apply()
     useScoringStore.getState().setMatchId("another-match")
     expect(useScoringStore.getState().handoverEpoch).toBeUndefined()
+  })
+  it("reserves stable ordered revisions for offline deliveries and never lowers confirmed state", () => {
+    apply()
+    const add = () => useScoringStore.getState().addBall({ input: 1, runs: 1, overNumber: 1, ballNumber: 1, isWicket: false,
+      isWide: false, isNoBall: false, isBye: false, isLegBye: false })
+    add()
+    add()
+    const balls = useScoringStore.getState().innings2!.balls
+    expect(balls.map(ball => ball.expectedRevision)).toEqual([8, 9])
+    useScoringStore.getState().acknowledgeBall(balls[0].id, "canonical", "op-1", 9)
+    useScoringStore.getState().observeScoringRevision(2)
+    expect(useScoringStore.getState().scoringRevision).toBe(9)
+    expect(useScoringStore.getState().innings2!.balls[1].expectedRevision).toBe(9)
+    useScoringStore.getState().setMatchId("another")
+    expect(useScoringStore.getState().scoringRevision).toBeUndefined()
   })
   it("keeps database operation IDs and orders repeated extras by sequence", () => {
     const snapshot = fixture()

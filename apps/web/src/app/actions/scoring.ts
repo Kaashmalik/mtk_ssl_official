@@ -40,6 +40,11 @@ const recordBallSchema = z.object({
   isSix: z.boolean().default(false),
   // SCORE-11 writer fencing: the handover epoch the scoring session observed.
   handoverEpoch: z.number().int().min(0).optional(),
+  expectedRevision: z.number().int().min(0).max(2147483647).optional(),
+  review: z.object({ reason: z.string().trim().min(10).max(1000),
+    previousEpoch: z.number().int().min(0).optional(),
+    previousRevision: z.number().int().min(0).optional(),
+  }).optional(),
 })
 
 export type RecordBallInput = z.infer<typeof recordBallSchema>
@@ -50,6 +55,7 @@ const createInningsSchema = z.object({
   inningsNumber: z.number().int().min(1).max(3), // 1, 2, or 3 for super over
   /** SCORE-11 writer fencing: the handover epoch the scoring session observed. */
   handoverEpoch: z.number().int().min(0).optional(),
+  expectedRevision: z.number().int().min(0).max(2147483647).optional(),
 })
 
 export type CreateInningsInput = z.infer<typeof createInningsSchema>
@@ -103,6 +109,8 @@ export const recordBall = withAuth("match:score", withScoringFence(async (input:
     extras: delivery.extras,
     wicket,
     handoverEpoch: validated.handoverEpoch,
+    expectedRevision: validated.expectedRevision,
+    review: validated.review,
   }, tenant.id, actorId)
 
   if (validated.clientOpId && result.clientOpId !== validated.clientOpId) {
@@ -116,6 +124,7 @@ export const recordBall = withAuth("match:score", withScoringFence(async (input:
   return {
     success: true,
     ballId: result.ballId,
+    scoringRevision: result.scoringRevision,
     clientOpId: validated.clientOpId ?? null,
     replayed: result.replayed ?? false,
     scorecard: {
@@ -138,6 +147,7 @@ export const undoBall = withAuth("match:score", withScoringFence(async (
   matchId: string,
   ballId: string,
   handoverEpoch?: number,
+  expectedRevision?: number,
 ) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
@@ -148,12 +158,12 @@ export const undoBall = withAuth("match:score", withScoringFence(async (
   await requireMatchScoringAccess(userId, tenant.id, matchId)
   const actorId = await requireScoringActorId(userId)
 
-  await proxyUndoBall(matchId, ballId, tenant.id, actorId, handoverEpoch)
+  const result = await proxyUndoBall(matchId, ballId, tenant.id, actorId, handoverEpoch, expectedRevision)
 
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)
 
-  return { success: true }
+  return { success: true, scoringRevision: result?.scoringRevision }
 }))
 
 // ─── Create Innings ───────────────────────────────────────────
@@ -208,6 +218,7 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
       // SCORE-11 writer fencing: echoed by every scoring write this session
       // issues; the canonical service fences stale sessions (reload prompt).
       handoverEpoch: match.scorerHandoverEpoch,
+      scoringRevision: match.scoringRevision,
     },
     teamA: teamA[0] ?? { id: match.teamAId, name: "Team A" },
     teamB: teamB[0] ?? { id: match.teamBId, name: "Team B" },
@@ -239,6 +250,7 @@ export const completeInnings = withAuth("match:score", withScoringFence(async (
   matchId: string,
   inningsId: string,
   handoverEpoch?: number,
+  expectedRevision?: number,
 ) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
@@ -253,7 +265,7 @@ export const completeInnings = withAuth("match:score", withScoringFence(async (
   const owned = await findInningsId(inningsId, matchId, tenant.id)
   if (!owned) throw new Error("Innings not found")
 
-  const result = await proxyCompleteInnings(matchId, inningsId, tenant.id, actorId, handoverEpoch)
+  const result = await proxyCompleteInnings(matchId, inningsId, tenant.id, actorId, handoverEpoch, expectedRevision)
 
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)
@@ -263,6 +275,7 @@ export const completeInnings = withAuth("match:score", withScoringFence(async (
     innings: result.innings,
     matchStatus: result.matchStatus,
     inningsBreakApplied: result.inningsBreakApplied,
+    scoringRevision: result.scoringRevision,
   }
 }))
 

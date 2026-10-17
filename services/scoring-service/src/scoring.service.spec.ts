@@ -52,7 +52,7 @@ function createTransaction() {
     },
     match: { id: MATCH, tenantId: TENANT, tournamentId: null as string | null, scorerId: ACTOR as string | null, backupScorerId: null as string | null, teamAId: TENANT, teamBId: TEAM_B,
       winnerId: null as string | null, result: null as string | null, manOfMatchId: null as string | null,
-      status: 'live', startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
+      status: 'live', scoringRevision: 0, scorerHandoverEpoch: 0, startDate: new Date(), updatedAt: new Date('2026-10-12T12:00:00.000Z') },
     actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
     membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active', expiresAt: null } as { userId: string; tenantId: string; role: string; status: string; expiresAt?: string | null } | null,
     roster: new Map<string, Record<string, any>>([
@@ -96,7 +96,8 @@ function createTransaction() {
       scoringEvents: { findFirst: jest.fn(async ({ where }) => {
         const query = dialect.sqlToQuery(where);
         const key = query.sql.includes('client_op_id') ? 'client_op_id' : 'ball_id';
-        return state.events.find((event) => event.eventType === 'ball_recorded' &&
+        const eventType = query.params.includes('ball_undone') ? 'ball_undone' : 'ball_recorded';
+        return state.events.find((event) => event.eventType === eventType &&
           event.payload[key] != null && query.params.includes(event.payload[key]));
       }) },
     },
@@ -143,7 +144,7 @@ function ball(input: Partial<BallEvent> = {}): BallEvent {
   return {
     matchId: MATCH, inningsId: INNINGS, over: 0, ball: 1, runs: 0,
     batsmanId: BATTER, bowlerId: BOWLER, timestamp: new Date(),
-    clientOpId: uuid(), ...input,
+    clientOpId: uuid(), expectedRevision: mockTx.state.match.scoringRevision, ...input,
   };
 }
 
@@ -159,6 +160,95 @@ describe('Canonical delivery record, replay and undo', () => {
       return 1;
     });
     service = new ScoringService();
+  });
+
+  it('commits one revision with the score and audit, but not on an accepted replay', async () => {
+    const command = ball({ extras: { type: 'wide', runs: 1 } });
+    const first = await service.recordBall(TENANT, ACTOR, command);
+    expect(first.scoringRevision).toBe(1);
+    expect(mockTx.state.match.scoringRevision).toBe(1);
+    expect(mockTx.state.audits).toEqual([expect.objectContaining({ method: 'SCORING_REVISION',
+      payload: expect.objectContaining({ beforeRevision: 0, afterRevision: 1, operation: 'record_ball' }) })]);
+    const replay = await service.recordBall(TENANT, ACTOR, command);
+    expect(replay).toMatchObject({ replayed: true, scoringRevision: 1, ballId: first.ballId });
+    expect(mockTx.state.audits).toHaveLength(1);
+    // Coordinates remain 0.1 after a wide; revision still prevents both writers
+    // from accepting distinct deliveries based on the same observed score.
+    await expect(service.recordBall(TENANT, ACTOR, ball({ expectedRevision: 0 }))).rejects.toBeInstanceOf(ConflictException);
+    expect(mockTx.state.balls).toHaveLength(1);
+  });
+
+  it.each(['record', 'undo', 'create', 'complete innings', 'complete match'])(
+    'rejects a stale revision without side effects for %s', async operation => {
+      const accepted = await service.recordBall(TENANT, ACTOR, ball());
+      const before = structuredClone(mockTx.state);
+      if (operation === 'create') mockTx.query.matchInnings.findFirst.mockResolvedValueOnce(undefined);
+      const attempt = operation === 'record' ? service.recordBall(TENANT, ACTOR, ball({ ball: 2, expectedRevision: 0 }))
+        : operation === 'undo' ? service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, 0, 0)
+        : operation === 'create' ? service.createInnings(TENANT, ACTOR, { matchId: MATCH, teamId: TENANT, inningsNumber: 2, expectedRevision: 0 })
+        : operation === 'complete innings' ? service.completeInnings(TENANT, ACTOR, MATCH, INNINGS, 0, 0)
+        : service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', undefined, 0, 0);
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      expect(mockTx.state).toEqual(before);
+    });
+
+  it('rolls back score, revision, audit and outbox together when revision audit fails', async () => {
+    const insert = mockTx.insert.getMockImplementation()!;
+    mockTx.insert.mockImplementation(table => {
+      if (table === auditLogs) throw new Error('Audit storage failed');
+      return insert(table);
+    });
+    await expect(service.recordBall(TENANT, ACTOR, ball())).rejects.toThrow('Audit storage failed');
+    expect(mockTx.state.match.scoringRevision).toBe(0);
+    expect(mockTx.state.innings.totalRuns).toBe(0);
+    expect(mockTx.state.balls).toEqual([]);
+    expect(mockTx.state.events).toEqual([]);
+    expect(mockTx.state.audits).toEqual([]);
+    expect(mockTx.state.outbox).toEqual([]);
+  });
+
+  it('increments lifecycle revisions only for real mutations, not matching retries', async () => {
+    mockTx.query.matchInnings.findFirst.mockResolvedValueOnce(undefined);
+    const created = await service.createInnings(TENANT, ACTOR, { matchId: MATCH, teamId: TENANT, inningsNumber: 1, expectedRevision: 0 });
+    expect(created.scoringRevision).toBe(1);
+    const completed = await service.completeInnings(TENANT, ACTOR, MATCH, created.id, 0, 1);
+    expect(completed.scoringRevision).toBe(2);
+    expect((await service.completeInnings(TENANT, ACTOR, MATCH, created.id, 0, 1)).scoringRevision).toBe(2);
+    expect(await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', undefined, 0, 2)).toBe(3);
+    expect(await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', undefined, 0, 2)).toBe(3);
+    expect(mockTx.state.audits.filter(row => row.method === 'SCORING_REVISION')).toHaveLength(3);
+  });
+
+  it('audits explicit reviewed retries while rechecking handover and normal eligibility', async () => {
+    mockTx.state.match.scorerHandoverEpoch = 2;
+    const original = ball({ handoverEpoch: 0, expectedRevision: 0 });
+    await expect(service.recordBall(TENANT, ACTOR, original)).rejects.toBeInstanceOf(ForbiddenException);
+    const reviewed = { ...original, handoverEpoch: 2, review: { reason: 'Reviewed against the official score', previousEpoch: 0, previousRevision: 0 } };
+    await service.recordBall(TENANT, ACTOR, reviewed);
+    expect(mockTx.state.audits[0].payload).toMatchObject({ clientOpId: original.clientOpId,
+      clientReportedReview: reviewed.review, beforeRevision: 0, afterRevision: 1 });
+    expect((await service.recordBall(TENANT, ACTOR, reviewed)).replayed).toBe(true);
+    expect(mockTx.state.audits).toHaveLength(1);
+    mockTx.state.membership.status = 'suspended';
+    await expect(service.recordBall(TENANT, ACTOR, { ...reviewed, clientOpId: uuid(), expectedRevision: 1, ball: 2 })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('does not move a reviewed delivery to a different position', async () => {
+    await service.recordBall(TENANT, ACTOR, ball());
+    await expect(service.recordBall(TENANT, ACTOR, ball({ ball: 1,
+      review: { reason: 'Explicit review is not a forced position change' } }))).rejects.toThrow('Expected delivery 0.2');
+    expect(mockTx.state.match.scoringRevision).toBe(1);
+    expect(mockTx.state.balls).toHaveLength(1);
+  });
+
+  it('acknowledges a lost undo response without a second revision or undo effect', async () => {
+    const saved = await service.recordBall(TENANT, ACTOR, ball({ runs: 4 }));
+    const first = await service.undoBall(TENANT, ACTOR, MATCH, saved.ballId, 0, 1);
+    expect(first.scoringRevision).toBe(2);
+    const replay = await service.undoBall(TENANT, ACTOR, MATCH, saved.ballId, 0, 1);
+    expect(replay).toMatchObject({ replayed: true, scoringRevision: 2 });
+    expect(mockTx.state.events.filter(event => event.eventType === 'ball_undone')).toHaveLength(1);
+    expect(mockTx.state.audits.filter(row => row.method === 'SCORING_REVISION')).toHaveLength(2);
   });
 
   it('returns complete live metadata from a tenant-scoped consistent read transaction', async () => {
@@ -202,7 +292,7 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.balls[0].runs).toBe(total);
     expect(mockTx.state.events[0]).toMatchObject({ eventVersion: 2, sequenceNumber: 1 });
 
-    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId);
+    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision);
     expect(mockTx.state.innings).toMatchObject({ totalRuns: 0, totalBalls: 0, totalWickets: 0,
       extras: 0, byes: 0, legByes: 0, wides: 0, noBalls: 0 });
     expect(mockTx.state.projection).toMatchObject({ totalRuns: 0, totalExtras: 0, byes: 0, legByes: 0 });
@@ -299,7 +389,7 @@ describe('Canonical delivery record, replay and undo', () => {
   it('does not resurrect an undone operation, but allows a new command at the same position', async () => {
     const input = ball({ runs: 1 });
     const accepted = await service.recordBall(TENANT, ACTOR, input);
-    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId);
+    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision);
     await expect(service.recordBall(TENANT, ACTOR, input)).rejects.toBeInstanceOf(ConflictException);
     await service.recordBall(TENANT, ACTOR, ball({ runs: 2 }));
     expect(mockTx.state.innings.totalRuns).toBe(2);
@@ -325,16 +415,16 @@ describe('Canonical delivery record, replay and undo', () => {
   it('only undoes the last delivery in sequence order', async () => {
     const first = await service.recordBall(TENANT, ACTOR, ball({ extras: { type: 'wide', runs: 1 } }));
     await service.recordBall(TENANT, ACTOR, ball({ runs: 1 }));
-    await expect(service.undoBall(TENANT, ACTOR, MATCH, first.ballId)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.undoBall(TENANT, ACTOR, MATCH, first.ballId, undefined, mockTx.state.match.scoringRevision)).rejects.toBeInstanceOf(BadRequestException);
     expect(mockTx.state.balls).toHaveLength(2);
   });
 
   it('refuses ambiguous legacy extras and corrupted deltas instead of guessing', async () => {
     const accepted = await service.recordBall(TENANT, ACTOR, ball({ extras: { type: 'wide', runs: 5 } }));
     mockTx.state.events[0].payload.delta.totalRuns = 99;
-    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision)).rejects.toBeInstanceOf(ConflictException);
     mockTx.state.events = [];
-    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision)).rejects.toBeInstanceOf(ConflictException);
     expect(mockTx.delete).not.toHaveBeenCalled();
     expect(mockTx.state.innings.totalRuns).toBe(5);
   });
@@ -342,14 +432,14 @@ describe('Canonical delivery record, replay and undo', () => {
   it('does not silently clamp inconsistent innings totals on undo', async () => {
     const accepted = await service.recordBall(TENANT, ACTOR, ball({ runs: 4 }));
     mockTx.state.innings.totalRuns = 1;
-    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision)).rejects.toBeInstanceOf(ConflictException);
     expect(mockTx.delete).not.toHaveBeenCalled();
   });
 
   it('rejects a corrupted legal-ball delta even when its run totals look valid', async () => {
     const accepted = await service.recordBall(TENANT, ACTOR, ball({ runs: 1 }));
     mockTx.state.events[0].payload.delta.legalBalls = 0;
-    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision)).rejects.toBeInstanceOf(ConflictException);
     expect(mockTx.delete).not.toHaveBeenCalled();
   });
 
@@ -358,7 +448,7 @@ describe('Canonical delivery record, replay and undo', () => {
       wicket: { type: 'run_out', playerId: BATTER },
     }));
     expect(mockTx.state.innings.totalWickets).toBe(1);
-    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId);
+    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision);
     expect(mockTx.state.innings.totalWickets).toBe(0);
   });
 
@@ -404,7 +494,7 @@ describe('Canonical delivery record, replay and undo', () => {
     const accepted = await service.recordBall(TENANT, ACTOR, input);
     expect(mockTx.state.innings.totalRuns).toBe(4);
     expect((await service.recordBall(TENANT, ACTOR, input)).replayed).toBe(true);
-    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId);
+    await service.undoBall(TENANT, ACTOR, MATCH, accepted.ballId, undefined, mockTx.state.match.scoringRevision);
     expect(mockTx.state.innings.totalRuns).toBe(0);
     expect(mockTx.state.match.scorerId).toBe(TEAM_B);
     expect(mockTx.state.match.backupScorerId).toBe(ACTOR);
@@ -521,13 +611,15 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(lock.params).toEqual([BATTER, TENANT]);
     expect(lock.sql).toContain('FOR SHARE');
     expect(dialect.sqlToQuery(mockTx.query.players.findFirst.mock.calls[0][0].where).params).toEqual([BATTER, TENANT]);
-    expect(mockTx.state.audits).toEqual([expect.objectContaining({ method: 'MATCH_COMPLETE', tenantId: TENANT, actorId: ACTOR,
+    expect(mockTx.state.audits.filter(row => row.method === 'MATCH_COMPLETE')).toEqual([expect.objectContaining({ method: 'MATCH_COMPLETE', tenantId: TENANT, actorId: ACTOR,
       payload: expect.objectContaining({ before: expect.objectContaining({ status: 'live', manOfMatchId: null }),
         after: expect.objectContaining({ status: 'completed', manOfMatchId: BATTER }) }) })]);
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BATTER);
     // Legacy clients omit the award; a retry must not clear the committed one.
     await service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won');
-    expect(mockTx.state.audits).toHaveLength(1);
+    expect(mockTx.state.audits).toHaveLength(2);
+    expect(mockTx.state.audits[1]).toMatchObject({ method: 'SCORING_REVISION', payload: {
+      beforeRevision: 0, afterRevision: 1, operation: 'complete_match' } });
     expect(mockTx.state.outbox).toHaveLength(1);
     expect(mockTx.state.outbox[0].payload.data.motmName).toBe('Batter');
     await expect(service.completeMatch(TENANT, ACTOR, MATCH, TENANT, 'Won', BOWLER)).rejects.toBeInstanceOf(ConflictException);

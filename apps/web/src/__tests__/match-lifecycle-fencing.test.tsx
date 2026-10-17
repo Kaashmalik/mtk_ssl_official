@@ -34,17 +34,21 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-function render(epoch?: number) {
-  renderToStaticMarkup(<MatchLifecycleControls matchId="match" status="live" handoverEpoch={epoch}
+function render(epoch?: number, revision?: number) {
+  renderToStaticMarkup(<MatchLifecycleControls matchId="match" status="live" handoverEpoch={epoch} scoringRevision={revision}
     teamA={{ id: "a", name: "Team A" }} teamB={{ id: "b", name: "Team B" }} />)
   mocks.buttons.find(button => button.label === "End Match")!.click()
   return Promise.all(mocks.pending)
 }
 
 describe("Dashboard match completion session token", () => {
+  it("sends the server-rendered revision alongside the handover token", async () => {
+    await render(3, 7)
+    expect(mocks.complete).toHaveBeenCalledExactlyOnceWith("match", "a", "Team A won", null, 3, 7)
+  })
   it.each([0, 6, undefined])("echoes the epoch rendered by the server (%s)", async epoch => {
     await render(epoch)
-    expect(mocks.complete).toHaveBeenCalledExactlyOnceWith("match", "a", "Team A won", null, epoch)
+    expect(mocks.complete).toHaveBeenCalledExactlyOnceWith("match", "a", "Team A won", null, epoch, undefined)
     expect(mocks.success).toHaveBeenCalledWith("Match completed")
     expect(mocks.refresh).toHaveBeenCalledOnce()
   })
