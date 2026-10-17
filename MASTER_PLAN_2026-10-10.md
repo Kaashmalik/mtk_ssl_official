@@ -4859,6 +4859,78 @@ would need its own explicit consent axis and is not claimed. Roadmap remains
 | `git diff --check` | Clean |
 | Migrations | None needed this batch (existing columns only) |
 
+## Batch 92 - PUB-05 tournament prizes (configurable categories, approval, truthful payout records)
+
+First slice of PUB-05, mirroring the PUB-04 awards shape: schema + migration +
+pure policy + locked audited writer + thin actions. Owner UI and the public
+prizes gallery are the NEXT slice (the awards precedent: 88 writer, 89 UI);
+nothing here renders publicly yet.
+
+**Shared pure policy** `packages/database/src/lib/prize-policy.ts` (subpath
+`@mtk/database/lib/prize-policy`, like `award-policy`): lifecycle
+`draft -> approved` with `prizeCanBeEdited` (drafts only),
+`prizeCanBeApproved`, `prizePayoutRecordable` (exactly once, approved only),
+fail-closed `isPrizePubliclyVisible` (approved rows only, publication gate
+applied by the caller), and `normalizePrizeAmount` (exact 2dp numeric(12,2)
+strings; negatives / >2dp / absurd magnitudes are refused, never rounded).
+Categories are deliberately league-defined free text (configurable — unlike
+PUB-04's fixed award set); the DB bounds are in the migration CHECKs.
+
+**Schema + migration.** `packages/database/src/schema/tournament-prizes.ts`
+(root-exported through the barrel): `tournament_prizes` with enum
+`tournament_prize_status` (`draft` default, `approved`), free-text
+`category_name`/`placement`, nullable `amount` numeric(12,2) (null = non-cash
+prize) + `currency` (default `PKR`), `sponsor`, approval provenance
+(`approved_by`/`approved_at`), and payout fields deliberately named
+`recorded_payout_at`/`payout_reference`/`payout_note` — a RECORD the league
+makes, never a platform-verified fact. Migration
+`20261017160000_tournament_prizes.sql` **APPLIED remotely via the
+`DATABASE_URL` fallback** (history row `20261017160000`, A's window, right
+after Batch 90's `17150000`); idempotent DDL with four DB CHECKs (approval
+provenance, payout-requires-approval, payout-attribution cohesion, amount
+non-negative + bounded), RLS enabled + forced, revoked from
+PUBLIC/anon/authenticated, grants only for internal `ssl`/`service_role`, no
+DELETE grant. Remote verification: 17 columns, all four CHECKs, RLS forced, 0
+client grants, history `17150000` + `17160000`.
+
+**Writer** `apps/web/src/lib/prize-records.ts`:
+`requireActiveLeagueContext("tournament:update")` (identity re-derived
+server-side) -> transaction (read committed) -> tournament row pinned to the
+league -> prize row `FOR UPDATE` tenant/tournament-pinned. Three commands:
+`saveTournamentPrize` (create draft / edit existing draft; approved rows are
+frozen — "Approved prizes are frozen records"; unchanged replay = pure read,
+no audit; audited `PRIZE_RECORDED`/`PRIZE_UPDATED` with before/after),
+`approveTournamentPrize` (one-way; replay no-op without duplicate audit;
+`PRIZE_APPROVED`), `recordPrizePayout` (approved + unrecorded only; an
+IDENTICAL replay reads, a DIFFERING second record is REFUSED so the league's
+payout history is never silently rewritten; `PRIZE_PAYOUT_RECORDED`). A
+currency without an amount is refused ("only meaningful together with an
+amount").
+
+**Actions** `apps/web/src/app/actions/prizes.ts`: pure delegates
+(`savePrize`, `approvePrize`, `recordPayout`) revalidating the public
+tournament page; all validation and gating live in the writer.
+
+**Boundary.** No owner UI and no public display yet (next slice; the public
+reader needs the publication gate composed with `isPrizePubliclyVisible`).
+Approved-prize correction is deliberately out of scope this slice — replaced
+rows with supersede provenance land with the UI slice. Payout records are
+league-recorded facts and every future surface must NOT present them as
+verified payments (SAAS plan's truthfulness warning). `PUB-05` stays
+UNCHECKED pending real-DB/staging acceptance; roadmap remains
+**19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **125** files, **2,806 tests** |
+| `npx vitest run` (database) | PASS - **302 tests**, includes 8 policy + 4 schema-contract + 8 writer |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply | `20261017160000_tournament_prizes` applied via `DATABASE_URL` fallback; 17 columns, 4 CHECKs, RLS forced, 0 client grants, history row verified |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

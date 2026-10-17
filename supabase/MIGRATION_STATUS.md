@@ -3,6 +3,25 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 92) - `tournament_prizes` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261017160000_tournament_prizes.sql` creates the
+> `tournament_prize_status` enum and `public.tournament_prizes` (PUB-05 first
+> slice: league-declared prizes with configurable free-text categories,
+> optional amount/currency/sponsor, one-way draft -> approved lifecycle, and a
+> league-RECORDED payout record the platform never verifies). Additive and
+> idempotent; DB CHECKs enforce approval provenance, payout-requires-approval,
+> payout-attribution cohesion and non-negative amounts. RLS enabled + forced,
+> all access revoked from PUBLIC/anon/authenticated, grants only for internal
+> `ssl`/`service_role`, NO DELETE grant. History row inserted as version
+> `20261017160000`, name `tournament_prizes`, `'{}'::text[]` — inside A's
+> window (101000-195959), after Batch 90's `20261017150000`; the parallel
+> chain (20261017090000-20261018090000) remains intentionally unapplied.
+> Verified remotely in one fold: 17 columns, all four CHECK constraints,
+> RLS enabled+forced, 0 anon/authenticated grants, history rows `20261017150000`
+> + `20261017160000`. Enforcement is application-side (pure `prize-policy` +
+> `tournament:update`-gated audited writers in `lib/prize-records.ts`).
+
 > **17 October 2026 (Batch 90) - `competition_locks` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261017150000_competition_locks.sql` adds
