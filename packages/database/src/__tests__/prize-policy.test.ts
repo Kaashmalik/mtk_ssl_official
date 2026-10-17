@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   isPrizePubliclyVisible,
+  prizeCanBeSuperseded,
   normalizePrizeAmount,
   prizeCanBeApproved,
   prizeCanBeEdited,
@@ -24,11 +25,25 @@ describe("Tournament prize lifecycle policy (PUB-05)", () => {
     expect(prizePayoutRecordable(null)).toBe(false)
   })
 
-  it("shows only approved prizes for a published tournament", () => {
-    expect(isPrizePubliclyVisible({ status: "approved" }, true)).toBe(true)
-    expect(isPrizePubliclyVisible({ status: "draft" }, true)).toBe(false)
-    expect(isPrizePubliclyVisible({ status: "approved" }, false)).toBe(false)
+  it("shows only approved, ACTIVE prizes for a published tournament (supersede fails closed)", () => {
+    expect(isPrizePubliclyVisible({ status: "approved", supersededAt: null }, true)).toBe(true)
+    expect(isPrizePubliclyVisible({ status: "draft", supersededAt: null }, true)).toBe(false)
+    expect(isPrizePubliclyVisible({ status: "approved", supersededAt: null }, false)).toBe(false)
     expect(isPrizePubliclyVisible(null, true)).toBe(false)
+    // A superseded prize is corrected history — never public.
+    expect(isPrizePubliclyVisible({ status: "approved", supersededAt: new Date() }, true)).toBe(false)
+    // Fail closed on an UNKNOWN supersede state: a reader that forgets the
+    // column can never publicize a retired value.
+    expect(isPrizePubliclyVisible({ status: "approved" }, true)).toBe(false)
+  })
+
+  it("supersedes only an approved, not-yet-superseded prize; unknown state fails closed", () => {
+    expect(prizeCanBeSuperseded({ status: "approved", supersededAt: null })).toBe(true)
+    expect(prizeCanBeSuperseded({ status: "draft", supersededAt: null })).toBe(false)
+    expect(prizeCanBeSuperseded({ status: "approved", supersededAt: new Date() })).toBe(false)
+    // Unknown supersede state (not selected): refuse, never guess.
+    expect(prizeCanBeSuperseded({ status: "approved" })).toBe(false)
+    expect(prizeCanBeSuperseded(null)).toBe(false)
   })
 
   it("normalizes amounts to exact 2dp strings and refuses malformed ones", () => {

@@ -417,12 +417,13 @@ export async function readPublishedTournamentAwards(
 }
 
 /**
- * PUB-05: approved tournament prizes for the public page. The WHERE already
- * pins tenant + tournament AND status = approved; the shared
- * `isPrizePubliclyVisible` policy is re-applied in memory so a future
- * regression in the WHERE clause still cannot publicize a draft row. Payout
- * records are league-internal and deliberately NOT exposed here — public
- * copy must never present a payout record as a platform-verified payment.
+ * PUB-05: approved, NOT-superseded tournament prizes for the public page. The
+ * WHERE already pins tenant + tournament AND status = approved AND active
+ * (superseded rows are corrected history); the shared `isPrizePubliclyVisible`
+ * policy is re-applied in memory so a future regression in the WHERE clause
+ * still cannot publicize a draft or a superseded row. Payout records are
+ * league-internal and deliberately NOT exposed here — public copy must never
+ * present a payout record as a platform-verified payment.
  */
 export async function readPublishedTournamentPrizes(
   tenantId: string,
@@ -437,12 +438,14 @@ export async function readPublishedTournamentPrizes(
       currency: tournamentPrizes.currency,
       sponsor: tournamentPrizes.sponsor,
       status: tournamentPrizes.status,
+      supersededAt: tournamentPrizes.supersededAt,
     })
     .from(tournamentPrizes)
     .where(and(
       eq(tournamentPrizes.tenantId, tenantId),
       eq(tournamentPrizes.tournamentId, tournamentId),
       eq(tournamentPrizes.status, "approved"),
+      isNull(tournamentPrizes.supersededAt),
     ))
     .orderBy(asc(tournamentPrizes.createdAt), asc(tournamentPrizes.id))
     .limit(PUBLIC_PRIZE_LIMIT)

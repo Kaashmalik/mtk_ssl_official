@@ -19,6 +19,7 @@ export type PrizeStatus = (typeof PRIZE_STATUSES)[number]
 export type PrizeLifecycleRow = {
   status?: string | null
   recordedPayoutAt?: Date | string | null
+  supersededAt?: Date | string | null
 }
 
 /** Only a draft is editable — approval freezes the row as recorded truth. */
@@ -40,20 +41,39 @@ export function prizePayoutRecordable(row: PrizeLifecycleRow | null | undefined)
   return !!row && row.status === "approved" && row.recordedPayoutAt == null
 }
 
+/**
+ * Approved-prize CORRECTION (supersede): only an approved, not-yet-superseded
+ * row can be superseded by a corrected replacement. A draft is edited
+ * directly; an already-superseded row is history and can never be revived or
+ * superseded twice.
+ */
+export function prizeCanBeSuperseded(row: PrizeLifecycleRow | null | undefined): boolean {
+  if (!row || row.status !== "approved") return false
+  // Fail closed on an UNKNOWN supersede state (not selected): a caller that
+  // forgets the column can never double-supersede a history row.
+  return row.supersededAt === null
+}
+
 export type PrizeVisibilityRow = {
   status?: string | null
+  supersededAt?: Date | string | null
 }
 
 /**
- * Visible on a public tournament surface: an APPROVED prize only, shown only
- * for a tournament the publication policy already admits (the caller must
- * apply the published-tournament gate). Drafts and ambiguous rows fail closed.
+ * Visible on a public tournament surface: an APPROVED, NOT-superseded prize
+ * only, shown only for a tournament the publication policy already admits
+ * (the caller must apply the published-tournament gate). Drafts and ambiguous
+ * rows fail closed — including rows whose supersede state is UNKNOWN (not
+ * selected), so a reader that forgets the column can never publicize a
+ * retired value. A superseded prize is corrected history: the corrected
+ * replacement shows publicly once approved, the superseded row never does.
  */
 export function isPrizePubliclyVisible(
   row: PrizeVisibilityRow | null | undefined,
   tournamentPublished: boolean,
 ): boolean {
   if (!row || !tournamentPublished) return false
+  if (row.supersededAt !== null) return false
   return row.status === "approved"
 }
 

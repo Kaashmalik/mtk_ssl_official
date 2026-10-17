@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import { tournamentPrizes } from "../schema/tournament-prizes"
 
 const migration = readFileSync(new URL("../../../../supabase/migrations/20261017160000_tournament_prizes.sql", import.meta.url), "utf8")
+const supersedeMigration = readFileSync(new URL("../../../../supabase/migrations/20261017170000_prize_supersede.sql", import.meta.url), "utf8")
 
 describe("Tournament prize schema and migration contracts (not real SQL execution)", () => {
   it("models configurable categories with a draft-default lifecycle and money columns", () => {
@@ -43,5 +44,28 @@ describe("Tournament prize schema and migration contracts (not real SQL executio
     expect(migration).toContain("GRANT SELECT, INSERT, UPDATE ON public.tournament_prizes TO service_role")
     expect(migration).not.toMatch(/GRANT[\s\S]*?TO\s+anon/i)
     expect(migration).not.toMatch(/GRANT[\s\S]*?TO\s+authenticated/i)
+  })
+
+  it("models supersede provenance so approved-prize corrections append history", () => {
+    const config = getTableConfig(tournamentPrizes)
+    const column = (name: string) => config.columns.find(c => c.name === name)
+    expect(column("superseded_at")?.notNull).toBe(false)
+    expect(column("superseded_by_prize_id")?.notNull).toBe(false)
+    // The index mirrors the drizzle schema's (tournament_id, superseded_at).
+    const indexNames = config.indexes.map((i: any) => i.config?.name ?? i.name)
+    expect(indexNames).toContain("tournament_prizes_superseded_idx")
+  })
+
+  it("keeps the supersede migration idempotent, cohesive and non-destructive", () => {
+    expect(supersedeMigration).toContain("ADD COLUMN IF NOT EXISTS superseded_at timestamptz")
+    expect(supersedeMigration).toContain("ADD COLUMN IF NOT EXISTS superseded_by_prize_id uuid")
+    expect(supersedeMigration).toContain("REFERENCES public.tournament_prizes(id) ON DELETE SET NULL")
+    expect(supersedeMigration).toContain("tournament_prizes_supersede_cohesion_check")
+    expect(supersedeMigration).toContain("CHECK ((superseded_at IS NULL) = (superseded_by_prize_id IS NULL))")
+    expect(supersedeMigration).toContain("CREATE INDEX IF NOT EXISTS tournament_prizes_superseded_idx")
+    expect(supersedeMigration).toContain("BEGIN;")
+    expect(supersedeMigration.trim()).toMatch(/COMMIT;$/)
+    expect(supersedeMigration).not.toMatch(/DROP TABLE|DELETE FROM|TRUNCATE/i)
+    expect(supersedeMigration).not.toMatch(/GRANT[\s\S]*?TO\s+(anon|authenticated)/i)
   })
 })

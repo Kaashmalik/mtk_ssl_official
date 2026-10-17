@@ -1,8 +1,8 @@
 import { randomUUID } from "crypto"
 import { db, tournamentPrizes, tournaments, auditLogs } from "@mtk/database"
-import { normalizePrizeAmount, prizeCanBeEdited } from "@mtk/database/lib/prize-policy"
+import { normalizePrizeAmount, prizeCanBeEdited, prizeCanBeSuperseded } from "@mtk/database/lib/prize-policy"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, isNull } from "drizzle-orm"
 import { z } from "zod"
 
 /**
@@ -31,6 +31,13 @@ const savePrizeInputSchema = z.object({
   tournamentId: z.string().uuid(),
   /** Null = create a new draft; set = update that existing draft. */
   prizeId: z.string().uuid().nullish(),
+  /**
+   * Correction flag: with prizeId set and `supersede: true`, an APPROVED
+   * prize is never edited in place — the new values become a fresh DRAFT and
+   * the frozen row is marked superseded (provenance chains the two). Drafts
+   * are edited directly and refuse this flag.
+   */
+  supersede: z.boolean().nullish(),
   categoryName: z.string().trim().min(1).max(120),
   placement: z.string().trim().min(1).max(120).nullish(),
   /** Exact 2dp decimal string the numeric(12,2) column stores; null = non-cash. */
@@ -111,9 +118,10 @@ export async function saveTournamentPrize(input: unknown): Promise<PrizeWriteRes
       return { tournamentId: parsed.tournamentId, prizeId: inserted.id, changed: true }
     }
 
-    // (2b) Update an EXISTING draft; serialize on the row lock.
+    // (2b) Update an EXISTING draft, or CORRECT an approved prize via supersede;
+    // serialize on the row lock.
     const [prize] = await tx
-      .select({ id: tournamentPrizes.id, status: tournamentPrizes.status, categoryName: tournamentPrizes.categoryName, placement: tournamentPrizes.placement, amount: tournamentPrizes.amount, currency: tournamentPrizes.currency, sponsor: tournamentPrizes.sponsor })
+      .select({ id: tournamentPrizes.id, status: tournamentPrizes.status, categoryName: tournamentPrizes.categoryName, placement: tournamentPrizes.placement, amount: tournamentPrizes.amount, currency: tournamentPrizes.currency, sponsor: tournamentPrizes.sponsor, supersededAt: tournamentPrizes.supersededAt })
       .from(tournamentPrizes)
       .where(and(
         eq(tournamentPrizes.id, parsed.prizeId),
@@ -123,8 +131,66 @@ export async function saveTournamentPrize(input: unknown): Promise<PrizeWriteRes
       .for("update")
       .limit(1)
     if (!prize) throw new Error("Forbidden: prize not found in this tournament")
-    if (!prizeCanBeEdited(prize)) {
+    if (parsed.supersede === true && prizeCanBeEdited(prize)) {
+      throw new Error("Only an approved prize can be superseded — edit the draft directly")
+    }
+    if (!prizeCanBeEdited(prize) && parsed.supersede !== true) {
       throw new Error("Approved prizes are frozen records and can no longer be edited")
+    }
+
+    if (parsed.supersede === true) {
+      // (2c) APPROVED-PRIZE CORRECTION via supersede. The frozen row keeps its
+      // history (including any recorded payout); the new values become a fresh
+      // draft that must be approved on its own merits.
+      if (!prizeCanBeSuperseded(prize)) {
+        throw new Error("This prize has already been superseded — correct its active replacement instead")
+      }
+      const unchanged = prize.categoryName === parsed.categoryName
+        && (prize.placement ?? null) === placement
+        && (prize.amount ?? null) === amount
+        && prize.currency === currency
+        && (prize.sponsor ?? null) === sponsor
+      if (unchanged) {
+        throw new Error("A correction must change at least one prize field")
+      }
+
+      const [inserted] = await tx
+        .insert(tournamentPrizes)
+        .values({
+          tenantId: context.tenantId,
+          tournamentId: parsed.tournamentId,
+          categoryName: parsed.categoryName,
+          placement,
+          amount,
+          currency,
+          sponsor,
+          status: "draft",
+          createdBy: context.actorId,
+        })
+        .returning({ id: tournamentPrizes.id })
+      if (!inserted) throw new Error("The prize correction could not be recorded. Please retry.")
+
+      await tx.update(tournamentPrizes)
+        .set({ supersededAt: new Date(), supersededByPrizeId: inserted.id, updatedAt: new Date() })
+        .where(eq(tournamentPrizes.id, prize.id))
+
+      await tx.insert(auditLogs).values({
+        requestId: randomUUID(),
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.role,
+        method: "PRIZE_CORRECTED",
+        path: "/actions/prizes",
+        statusCode: "200",
+        payload: {
+          tournamentId: parsed.tournamentId,
+          supersededPrizeId: prize.id,
+          newPrizeId: inserted.id,
+          before: { categoryName: prize.categoryName, placement: prize.placement, amount: prize.amount, currency: prize.currency, sponsor: prize.sponsor },
+          after: { categoryName: parsed.categoryName, placement, amount, currency: amount == null ? null : currency, sponsor },
+        },
+      })
+      return { tournamentId: parsed.tournamentId, prizeId: inserted.id, changed: true }
     }
 
     const unchanged = prize.categoryName === parsed.categoryName
@@ -323,11 +389,12 @@ export type PrizeManagementContext = {
 }
 
 /**
- * Bounded read of this tournament's prizes for the organizer's management
- * card. The caller resolves authority (`canEdit`); every write re-checks it.
- * Payout reference/note text is NOT returned — the list discloses THAT a
- * payout was recorded, not its financial details, which stay in the audit
- * trail.
+ * Bounded read of this tournament's ACTIVE prizes for the organizer's
+ * management card — superseded rows are correction history and deliberately
+ * absent here (the audit trail holds the full chain). The caller resolves
+ * authority (`canEdit`); every write re-checks it. Payout reference/note text
+ * is NOT returned — the list discloses THAT a payout was recorded, not its
+ * financial details, which stay in the audit trail.
  */
 export async function readPrizeManagementContext(
   tenantId: string,
@@ -348,6 +415,7 @@ export async function readPrizeManagementContext(
     .where(and(
       eq(tournamentPrizes.tenantId, tenantId),
       eq(tournamentPrizes.tournamentId, tournamentId),
+      isNull(tournamentPrizes.supersededAt),
     ))
     .orderBy(asc(tournamentPrizes.createdAt), asc(tournamentPrizes.id))
     .limit(PRIZE_MANAGER_BOUND + 1)

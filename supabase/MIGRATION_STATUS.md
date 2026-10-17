@@ -3,6 +3,23 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 94) - `prize_supersede` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261017170000_prize_supersede.sql` adds to
+> `tournament_prizes` (PUB-05 corrections): `superseded_at` timestamptz +
+> `superseded_by_prize_id` uuid FK self-reference (ON DELETE SET NULL), the
+> `tournament_prizes_supersede_cohesion_check` CHECK (both null or both
+> present), and the `tournament_prizes_superseded_idx` index. Additive +
+> idempotent; no new grants (the Batch 92 table-level RLS/revoke already
+> covers new columns; still no DELETE anywhere). Approved prizes are never
+> rewritten — a correction supersedes the frozen row with a new draft and
+> keeps the history. History row inserted as version `20261017170000`, name
+> `prize_supersede`, `'{}'::text[]` — A's window, right after Batch 92's
+> `20261017160000`; the parallel chain remains intentionally unapplied.
+> Verified remotely: both columns present, all 5 CHECKs (4 original +
+> cohesion), index present, RLS enabled+forced, 0 anon/authenticated grants,
+> history `17160000` + `17170000`.
+
 > **17 October 2026 (Batch 92) - `tournament_prizes` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261017160000_tournament_prizes.sql` creates the

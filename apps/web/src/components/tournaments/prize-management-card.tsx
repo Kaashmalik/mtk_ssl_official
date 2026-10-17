@@ -33,7 +33,11 @@ export const PRIZE_MANAGER_LABELS = {
   sponsorPlaceholder: "e.g. MalikTech",
   save: "Add prize",
   saveEdit: "Save draft changes",
+  saveCorrection: "Save correction draft",
   editDraft: "Edit draft",
+  correct: "Correct",
+  correctingNotice: "Corrections never edit the frozen record — your changes become a new draft and the approved prize is marked superseded. Approve the draft to make the correction public.",
+  successCorrected: "Correction draft saved — approve it to replace the frozen record",
   cancelEdit: "Cancel edit",
   saving: "Saving…",
   approve: "Approve",
@@ -87,7 +91,7 @@ const DRAFT_BADGE = {
   approved: "default" as const,
 }
 
-function PrizeRow({ tournamentId, prize, onEditDraft }: { tournamentId: string; prize: PrizeManagementRow; onEditDraft?: (prize: PrizeManagementRow) => void }) {
+function PrizeRow({ tournamentId, prize, onEditDraft, onCorrectApproved }: { tournamentId: string; prize: PrizeManagementRow; onEditDraft?: (prize: PrizeManagementRow) => void; onCorrectApproved?: (prize: PrizeManagementRow) => void }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [payoutOpen, setPayoutOpen] = useState(false)
@@ -148,31 +152,42 @@ function PrizeRow({ tournamentId, prize, onEditDraft }: { tournamentId: string; 
           </Button>
         </div>
       )}
-      {prize.status === "approved" && prize.recordedPayoutAt === null && (
-        <div className="mt-2 space-y-2">
-          <p role="note" className="text-xs text-muted-foreground">{PRIZE_MANAGER_LABELS.payoutTruth}</p>
-          {!payoutOpen ? (
+      {prize.status === "approved" && (
+        <div className="mt-2">
+          {onCorrectApproved && (
             <div className="flex justify-end">
-              <Button size="sm" variant="secondary" onClick={() => setPayoutOpen(true)} disabled={isPending}>
-                {PRIZE_MANAGER_LABELS.payout}
+              <Button size="sm" variant="ghost" onClick={() => onCorrectApproved(prize)}>
+                {PRIZE_MANAGER_LABELS.correct}
               </Button>
             </div>
-          ) : (
-            <div className="space-y-2">
-              <div>
-                <Label htmlFor={`payout-reference-${prize.id}`}>{PRIZE_MANAGER_LABELS.payoutReference}</Label>
-                <Input id={`payout-reference-${prize.id}`} value={payoutReference} onChange={(event) => setPayoutReference(event.target.value)} placeholder={PRIZE_MANAGER_LABELS.payoutReferencePlaceholder} className="mt-1.5" />
-              </div>
-              <div>
-                <Label htmlFor={`payout-note-${prize.id}`}>{PRIZE_MANAGER_LABELS.payoutNote}</Label>
-                <Input id={`payout-note-${prize.id}`} value={payoutNote} onChange={(event) => setPayoutNote(event.target.value)} className="mt-1.5" />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setPayoutOpen(false)} disabled={isPending}>Cancel</Button>
-                <Button size="sm" onClick={recordPayoutRecord} disabled={isPending}>
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : PRIZE_MANAGER_LABELS.recordPayout}
-                </Button>
-              </div>
+          )}
+          {prize.recordedPayoutAt === null && (
+            <div className="mt-2 space-y-2">
+              <p role="note" className="text-xs text-muted-foreground">{PRIZE_MANAGER_LABELS.payoutTruth}</p>
+              {!payoutOpen ? (
+                <div className="flex justify-end">
+                  <Button size="sm" variant="secondary" onClick={() => setPayoutOpen(true)} disabled={isPending}>
+                    {PRIZE_MANAGER_LABELS.payout}
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor={`payout-reference-${prize.id}`}>{PRIZE_MANAGER_LABELS.payoutReference}</Label>
+                    <Input id={`payout-reference-${prize.id}`} value={payoutReference} onChange={(event) => setPayoutReference(event.target.value)} placeholder={PRIZE_MANAGER_LABELS.payoutReferencePlaceholder} className="mt-1.5" />
+                  </div>
+                  <div>
+                    <Label htmlFor={`payout-note-${prize.id}`}>{PRIZE_MANAGER_LABELS.payoutNote}</Label>
+                    <Input id={`payout-note-${prize.id}`} value={payoutNote} onChange={(event) => setPayoutNote(event.target.value)} className="mt-1.5" />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setPayoutOpen(false)} disabled={isPending}>Cancel</Button>
+                    <Button size="sm" onClick={recordPayoutRecord} disabled={isPending}>
+                      {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : PRIZE_MANAGER_LABELS.recordPayout}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -188,6 +203,7 @@ export function PrizeManagementCard({ tournamentId, context }: {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [editingPrizeId, setEditingPrizeId] = useState<string | null>(null)
+  const [correctingPrizeId, setCorrectingPrizeId] = useState<string | null>(null)
   const [categoryName, setCategoryName] = useState("")
   const [placement, setPlacement] = useState("")
   const [amount, setAmount] = useState("")
@@ -200,8 +216,7 @@ export function PrizeManagementCard({ tournamentId, context }: {
   const amountLooksNumeric = amountTrimmed === "" || /^-?\d+(\.\d{1,2})?$/.test(amountWithoutSeparator)
   const canSubmit = trimmedCategory !== "" && amountLooksNumeric && !isPending
 
-  const loadDraftForEdit = (prize: PrizeManagementRow) => {
-    setEditingPrizeId(prize.id)
+  const loadValues = (prize: PrizeManagementRow) => {
     setCategoryName(prize.categoryName)
     setPlacement(prize.placement ?? "")
     setAmount(prize.amount ?? "")
@@ -209,8 +224,21 @@ export function PrizeManagementCard({ tournamentId, context }: {
     setSponsor(prize.sponsor ?? "")
   }
 
+  const loadDraftForEdit = (prize: PrizeManagementRow) => {
+    setEditingPrizeId(prize.id)
+    setCorrectingPrizeId(null)
+    loadValues(prize)
+  }
+
+  const correctApproved = (prize: PrizeManagementRow) => {
+    setCorrectingPrizeId(prize.id)
+    setEditingPrizeId(null)
+    loadValues(prize)
+  }
+
   const cancelEdit = () => {
     setEditingPrizeId(null)
+    setCorrectingPrizeId(null)
     setCategoryName("")
     setPlacement("")
     setAmount("")
@@ -223,7 +251,10 @@ export function PrizeManagementCard({ tournamentId, context }: {
       try {
         await savePrize({
           tournamentId,
+          // A draft edit targets the draft; a correction supersede-chains from
+          // the frozen approved row to a NEW draft.
           ...(editingPrizeId ? { prizeId: editingPrizeId } : {}),
+          ...(correctingPrizeId ? { prizeId: correctingPrizeId, supersede: true } : {}),
           categoryName: trimmedCategory,
           placement: placement.trim() ? placement.trim() : null,
           amount: amountTrimmed === "" ? null : amountWithoutSeparator,
@@ -231,8 +262,13 @@ export function PrizeManagementCard({ tournamentId, context }: {
           currency: amountTrimmed === "" ? null : currency,
           sponsor: sponsor.trim() ? sponsor.trim() : null,
         })
-        toast.success(editingPrizeId ? PRIZE_MANAGER_LABELS.successDraftEdit : PRIZE_MANAGER_LABELS.successDraft)
+        toast.success(
+          correctingPrizeId ? PRIZE_MANAGER_LABELS.successCorrected
+          : editingPrizeId ? PRIZE_MANAGER_LABELS.successDraftEdit
+          : PRIZE_MANAGER_LABELS.successDraft,
+        )
         setEditingPrizeId(null)
+        setCorrectingPrizeId(null)
         setCategoryName("")
         setPlacement("")
         setAmount("")
@@ -284,6 +320,9 @@ export function PrizeManagementCard({ tournamentId, context }: {
             <Input id="prize-sponsor" value={sponsor} onChange={(event) => setSponsor(event.target.value)} placeholder={PRIZE_MANAGER_LABELS.sponsorPlaceholder} className="mt-1.5" />
           </div>
         </div>
+        {correctingPrizeId && (
+          <p role="alert" className="text-sm text-amber-600">{PRIZE_MANAGER_LABELS.correctingNotice}</p>
+        )}
         {!amountLooksNumeric && (
           <p role="alert" className="text-sm text-amber-600">{PRIZE_MANAGER_LABELS.incompleteAmount}</p>
         )}
@@ -295,7 +334,7 @@ export function PrizeManagementCard({ tournamentId, context }: {
             </Button>
           )}
           <Button onClick={save} disabled={!canSubmit}>
-            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : editingPrizeId ? PRIZE_MANAGER_LABELS.saveEdit : PRIZE_MANAGER_LABELS.save}
+            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : correctingPrizeId ? PRIZE_MANAGER_LABELS.saveCorrection : editingPrizeId ? PRIZE_MANAGER_LABELS.saveEdit : PRIZE_MANAGER_LABELS.save}
           </Button>
         </div>
 
@@ -305,7 +344,7 @@ export function PrizeManagementCard({ tournamentId, context }: {
           ) : (
             <>
               {context.prizes.map((prize) => (
-                <PrizeRow key={prize.id} tournamentId={tournamentId} prize={prize} onEditDraft={loadDraftForEdit} />
+                <PrizeRow key={prize.id} tournamentId={tournamentId} prize={prize} onEditDraft={loadDraftForEdit} onCorrectApproved={correctApproved} />
               ))}
               {!context.complete && (
                 <p role="note" className="text-xs text-muted-foreground">

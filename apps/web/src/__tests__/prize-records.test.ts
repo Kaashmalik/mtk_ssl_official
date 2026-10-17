@@ -26,8 +26,9 @@ const DRAFT = {
   currency: "PKR",
   sponsor: null,
 }
-const APPROVED = { ...DRAFT, status: "approved", approvedAt: new Date("2026-10-17T00:00:00Z") }
+const APPROVED = { ...DRAFT, status: "approved", approvedAt: new Date("2026-10-17T00:00:00Z"), supersededAt: null }
 const PAYOUT_DONE = { ...APPROVED, recordedPayoutAt: new Date("2026-10-17T01:00:00Z"), payoutReference: "ref-1", payoutNote: null }
+const SUPERSEDED = { ...APPROVED, supersededAt: new Date("2026-10-17T02:00:00Z"), supersededByPrizeId: "00000000-0000-4000-8000-0000000000c9" }
 
 /** Builds a fixed select order: (1) tournament row, (2+) thenable rows per spec. */
 function txMock(selectSpecs: unknown[][]) {
@@ -157,6 +158,44 @@ describe("Tournament prize writer (PUB-05 first slice)", () => {
     txMock([[{ id: "tid" }], [DRAFT]])
     await expect(recordPrizePayout({ tournamentId: TOURNAMENT, prizeId: PRIZE, reference: "ref-1" })).rejects.toThrow(
       "Only approved prizes can have a payout recorded",
+    )
+  })
+
+  it("supersedes an approved prize: new draft + frozen history + PRIZE_CORRECTED audit", async () => {
+    const { calls } = txMock([[{ id: "tid" }], [APPROVED]])
+    const result = await saveTournamentPrize({
+      tournamentId: TOURNAMENT, prizeId: PRIZE, supersede: true,
+      categoryName: "Champion purse (revised)", placement: "Winner", amount: "7000",
+    })
+    expect(result.changed).toBe(true)
+    // Exactly the supersede update (the new draft is an INSERT, not an UPDATE).
+    expect(calls.updatesCount).toBe(1)
+    const supersedeUpdate = calls.updates[0] as any
+    expect(supersedeUpdate.set.supersededAt).toBeInstanceOf(Date)
+    expect(supersedeUpdate.set.supersededByPrizeId).toBe(PRIZE)
+    const audit = calls.audits[0] as any
+    expect(audit.method).toBe("PRIZE_CORRECTED")
+    expect(audit.payload.supersededPrizeId).toBe(PRIZE)
+    expect(audit.payload.newPrizeId).toBe(PRIZE)
+    expect(audit.payload.after.amount).toBe("7000.00")
+    expect(audit.payload.before.amount).toBe("5000.00")
+  })
+
+  it("refuses the supersede flag on drafts, identical corrections and already-superseded rows", async () => {
+    txMock([[{ id: "tid" }], [DRAFT]])
+    await expect(saveTournamentPrize({ tournamentId: TOURNAMENT, prizeId: PRIZE, supersede: true, categoryName: "X" })).rejects.toThrow(
+      "Only an approved prize can be superseded — edit the draft directly",
+    )
+
+    txMock([[{ id: "tid" }], [APPROVED]])
+    await expect(saveTournamentPrize({
+      tournamentId: TOURNAMENT, prizeId: PRIZE, supersede: true,
+      categoryName: "Champion purse", placement: "Winner", amount: "5000.00",
+    })).rejects.toThrow("A correction must change at least one prize field")
+
+    txMock([[{ id: "tid" }], [SUPERSEDED]])
+    await expect(saveTournamentPrize({ tournamentId: TOURNAMENT, prizeId: PRIZE, supersede: true, categoryName: "X" })).rejects.toThrow(
+      "already been superseded",
     )
   })
 })

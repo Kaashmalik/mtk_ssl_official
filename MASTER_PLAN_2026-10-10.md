@@ -4982,6 +4982,67 @@ PUB-05 stays UNCHECKED pending real-DB/staging acceptance; roadmap remains
 | `git diff --check` | Clean |
 | Migrations | None needed (code-only bounds) |
 
+## Batch 94 - PUB-05 approved-prize corrections (supersede provenance)
+
+Third slice of PUB-05: the last boundary of Batch 93 falls. Approved prizes
+are STILL never rewritten — a correction now supersedes the frozen row with
+a corrected replacement draft, keeping the frozen history as auditable truth.
+
+**Schema + migration.** `tournament_prizes` gains `superseded_at` +
+`superseded_by_prize_id` (self-FK, ON DELETE SET NULL), the
+`tournament_prizes_supersede_cohesion_check` DB CHECK (all-or-nothing
+provenance: both null = active, both present = superseded) and
+`tournament_prizes_superseded_idx` (tournament_id, superseded_at). Migration
+`20261017170000_prize_supersede.sql` **APPLIED remotely via the
+`DATABASE_URL` fallback** (history row `20261017170000`, A's window, right
+after Batch 92's `17160000`); idempotent, no new grants — the Batch 92
+table-level RLS/revoke already covers the new columns, still no DELETE
+anywhere. Remote verification: both columns, all 5 CHECKs, index, RLS
+forced, 0 client grants.
+
+**Pure policy.** `prizeCanBeSuperseded` (approved + `supersededAt === null`
+exactly — UNKNOWN state fails closed, so a caller that forgets the column
+can never double-supersede history) and a tightened
+`isPrizePubliclyVisible` (a superseded prize is corrected history and is
+NEVER public; unknown supersede state also fails closed — the reader must
+select the column). Fail-closed on unknown is the house bias, tested.
+
+**Writer.** `saveTournamentPrize` input gains `supersede: true` + `prizeId`
+of an approved row → transaction (tournament pinned, prize row `FOR UPDATE`)
+inserts a NEW draft with the corrected values, marks the frozen row
+superseded (provenance chains the two), audits `PRIZE_CORRECTED` with
+before/after and both ids, returns the new draft's id. Guards: the flag on a
+DRAFT is refused ("edit the draft directly"), an already-superseded row is
+refused ("correct its active replacement instead"), and an unchanged
+correction is refused ("must change at least one prize field"). A payout
+record stays with the superseded row untouched — the corrected draft needs
+its own approval and, if ever paid, its own payout record.
+
+**Readers + UI.** `readPrizeManagementContext` and
+`readPublishedTournamentPrizes` both filter `supersededAt IS NULL` in the
+WHERE (and the public reader additionally re-checks the fail-closed policy
+in memory). The management card gains a Correct action: loads the frozen
+row's values, shows the amber notice ("Corrections never edit the frozen
+record — your changes become a new draft and the approved prize is marked
+superseded"), and submits the supersede save; copy tested verbatim.
+
+**Boundary.** `recordPrizePayout` is intentionally unchanged: a payout can be
+recorded against an approved-prize row even after a replacement is pending —
+the ledger row is frozen history, and the corrected draft records any future
+payout itself. PUB-05 stays UNCHECKED pending real-DB/staging acceptance;
+roadmap remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **125** files, **2,815 tests** (+3 writer + 1 copy) |
+| `npx vitest run` (database) | PASS - **305 tests** (26 files), +2 policy +2 schema |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply | `20261017170000_prize_supersede` applied via `DATABASE_URL` fallback; columns + cohesion CHECK + index verified, RLS forced, 0 client grants, history row verified |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

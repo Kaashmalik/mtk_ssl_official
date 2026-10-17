@@ -44,9 +44,11 @@ describe("readPublishedTournamentPrizes (public gallery)", () => {
   it("returns only rows the real visibility policy admits, bounded at the policy limit", async () => {
     captured.limit = undefined
     captured.rows = [
-      { id: "p1", categoryName: "Winner", placement: "1st", amount: "50000.00", currency: "PKR", sponsor: "MalikTech", status: "approved" },
-      // Even if the WHERE clause regressed, the in-memory policy drop saves us.
-      { id: "p2", categoryName: "Runner-up", placement: "2nd", amount: null, currency: "PKR", sponsor: null, status: "draft" },
+      { id: "p1", categoryName: "Winner", placement: "1st", amount: "50000.00", currency: "PKR", sponsor: "MalikTech", status: "approved", supersededAt: null },
+      // Even if the WHERE clause regressed, the in-memory policy drop saves us:
+      // drafts AND superseded history rows can never publicize.
+      { id: "p2", categoryName: "Runner-up", placement: "2nd", amount: null, currency: "PKR", sponsor: null, status: "draft", supersededAt: null },
+      { id: "p3", categoryName: "Winner", placement: "1st", amount: "40000.00", currency: "PKR", sponsor: "OldCo", status: "approved", supersededAt: new Date("2026-10-17T09:00:00Z") },
     ]
     const prizes = await readPublishedTournamentPrizes("t1", "tt1")
     expect(prizes).toHaveLength(1)
@@ -89,6 +91,14 @@ describe("prize management card copy (PUB-05 truthfulness)", () => {
     for (const value of Object.values(PRIZE_MANAGER_LABELS)) {
       expect(value.toLowerCase()).not.toContain("verified payment")
     }
+  })
+
+  it("correction copy never claims to edit the frozen record", () => {
+    expect(PRIZE_MANAGER_LABELS.correct).toBe("Correct")
+    expect(PRIZE_MANAGER_LABELS.correctingNotice).toContain("never edit the frozen record")
+    expect(PRIZE_MANAGER_LABELS.correctingNotice).toContain("superseded")
+    expect(PRIZE_MANAGER_LABELS.successCorrected).toContain("approve it to replace")
+    expect(PRIZE_MANAGER_LABELS.saveCorrection).toContain("correction draft")
   })
 
   it("offers a small fixed currency list with PKR first", () => {
