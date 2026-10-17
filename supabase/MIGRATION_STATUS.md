@@ -3,6 +3,25 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 103) - `tournament_polls` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261018110000_tournament_polls.sql` (FAN-01 moderated
+> polls): `tournament_polls` (owner-authored question + jsonb options array,
+> `tournament_polls_options_shape_check` pins array type + 2-10 arity -
+> element shape CANNOT be a CHECK (no set-returning functions in CHECK), so
+> it is enforced by the pure policy + writer) + `tournament_poll_votes` (one
+> active vote per fan per poll via `tournament_poll_votes_poll_fan_uidx`,
+> switching updates in place, `option_index >= 0` only - the upper bound is
+> per-poll dynamic and writer-enforced). Draft/open/closed lifecycle; closed
+> is terminal. RLS enabled+forced on both; grants to `ssl`/`service_role`
+> ONLY, SELECT/INSERT/UPDATE - no DELETE (owner questions/options are
+> records; votes are retained engagement), no anon/authenticated grants.
+> Engagement only: votes never feed scoring, standings, awards or any
+> official decision. History row `20261018110000` `'{}'::text[]` - A's
+> Oct-18 window, clear of Session B's chain (ends `20261018090000`).
+> Verified remotely: tables, CHECKs, unique + per-poll indexes, RLS
+> enabled+forced, grant rows, history `18100000` + `18110000`.
+
 > **18 October 2026 (Batch 102) - `tournament_champion` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261018100000_tournament_champion.sql` adds

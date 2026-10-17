@@ -32,6 +32,7 @@ export * from "./scorecard-projections";
 export * from "./fan-follows";
 export * from "./notification-preferences";
 export * from "./fan-reactions";
+export * from "./tournament-polls";
 
 // League Management
 export * from "./league-registrations";

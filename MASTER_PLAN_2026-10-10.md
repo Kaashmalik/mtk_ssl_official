@@ -5466,6 +5466,52 @@ approved analytic packages. Roadmap honestly remains
 | `git diff --check` | Clean |
 | Migration | `20261018100000` APPLIED remotely + verified + history row |
 
+## Batch 103 - FAN-01 moderated polls, first slice (schema + policy + locked writers)
+
+Polls let a league's **owners** ask tournament questions, with **votes as the
+only fan contribution** - moderation lives at the source, because fans never
+write text anywhere in a poll. **Migration `20261018110000`
+`tournament_polls` applied remotely** (A's Oct-18 window): owner-authored
+question + jsonb options (DB CHECK pins array type + 2-10 arity; element
+shape cannot be a CHECK, so the pure policy + writer own it),
+`tournament_poll_votes` with one active vote per fan per poll (unique index;
+switching updates in place), RLS enabled+forced, grants to ssl/service_role
+ONLY (SELECT/INSERT/UPDATE - **no DELETE**: owner questions/options are
+records, votes are retained engagement).
+
+**Pure policy** (`packages/database/src/lib/poll-policy.ts`): option
+normalization (2-10, trimmed, non-empty, single-line, length ceilings),
+question normalization (1-200, single-line), vote decision (open poll + real
+option index; switching is allowed - changing one's mind is not abuse), and
+lifecycle decision (draft -> open -> closed; **closed is terminal** -
+reopening would resume votes under different visibility).
+
+**Locked writers** (`apps/web/src/lib/tournament-polls.ts`): create
+(`POLL_RECORDED`, audited, tournament pinned to the active league) and
+lifecycle (`POLL_LIFECYCLE`, FOR UPDATE row lock, honest
+`poll_not_found`/`terminal_closed` refusals) are `tournament:update` through
+`requireActiveLeagueContext`; voting is `fan:follow` through
+`requireFanContext` and additionally requires the **published** tournament;
+engagement writes are deliberately not audited (reactions precedent). Reads:
+`readTournamentPollResults` (aggregate counts only - **never who voted
+how**) and `readMyPollVote` (foreign-league ids fail closed to null).
+
+**Boundary (recorded honestly).** UI surfaces (dashboard management + fan
+poll card) are the NEXT slice; FAN-01 remains open until staged acceptance.
+Votes are engagement-only: no scoring, standings, award, or official
+decision reads them.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - poll writers 13 tests in the full suite |
+| `npx vitest run` (database) | PASS - poll policy 5 tests in the full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | `20261018110000` APPLIED remotely + verified + history row |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
