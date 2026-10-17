@@ -39,6 +39,7 @@ const tournament = {
 function selectChain() {
   const chain: any = {
     from: () => chain, where: () => chain, orderBy: () => chain, limit: () => chain,
+    innerJoin: () => chain, leftJoin: () => chain, groupBy: () => chain, having: () => chain,
     then: (resolve: any, reject: any) => Promise.resolve([]).then(resolve, reject),
   }
   return chain

@@ -19,6 +19,8 @@ import { TournamentSettingsSummary } from "@/components/tournaments/tournament-s
 import { AdvanceTournamentButton } from "@/components/tournaments/advance-tournament-button"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { hasPermission } from "@/lib/rbac"
+import { readAwardDeclarationContext } from "@/lib/award-records"
+import { AwardDeclarationCard } from "@/components/tournaments/award-declaration-card"
 import { computeStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -61,6 +63,12 @@ export default async function TournamentDetailPage({ params }: { params: Promise
   const canDelete = hasPermission(context.role, "tournament:delete")
   const canManageRegistrations = hasPermission(context.role, "tournament:manage_registrations")
   const canRegister = hasPermission(context.role, "registration:create")
+
+  // Award-declaration context (PUB-04): read only for viewers whose role can
+  // actually declare — the read is bounded and the write re-checks authority.
+  const awardContext = canEdit
+    ? await readAwardDeclarationContext(context.tenantId, id)
+    : null
 
   const followingState = await isFollowing("tournament", id)
   const followersCount = await getFollowerCount("tournament", id)
@@ -243,6 +251,9 @@ export default async function TournamentDetailPage({ params }: { params: Promise
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-4">
             <TournamentSettingsSummary tournament={tournament} />
+            {awardContext && (
+              <AwardDeclarationCard tournamentId={id} context={awardContext} />
+            )}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Tournament Information</CardTitle>

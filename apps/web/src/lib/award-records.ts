@@ -1,8 +1,8 @@
 import { randomUUID } from "crypto"
 import { db, tournamentAwards, tournaments, players, teams, leagueRegistrations, auditLogs } from "@mtk/database"
-import { AWARD_CATEGORIES, type AwardCategory } from "@mtk/database/lib/award-policy"
+import { AWARD_CATEGORIES, isAwardVisible, type AwardCategory } from "@mtk/database/lib/award-policy"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
-import { and, eq, isNull } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
 
 /**
@@ -172,4 +172,124 @@ export async function declareTournamentAward(input: unknown): Promise<DeclareAwa
       supersededId: active?.id ?? null,
     }
   }, { isolationLevel: "read committed" })
+}
+
+/** Bounded picker snapshot size (house bound; overflow is disclosed, not hidden). */
+export const AWARD_MANAGER_BOUND = 200
+
+export type AwardCandidateTeam = { id: string; name: string }
+export type AwardCandidatePlayer = { id: string; name: string; teamId: string | null }
+export type ActiveAwardSummary = {
+  id: string
+  category: AwardCategory
+  holderName: string | null
+  citation: string | null
+}
+export type AwardDeclarationContext = {
+  teams: AwardCandidateTeam[]
+  players: AwardCandidatePlayer[]
+  teamsComplete: boolean
+  playersComplete: boolean
+  activeAwards: ActiveAwardSummary[]
+}
+
+/**
+ * Bounded read of everything the organizer's award-declaration UI offers as a
+ * winner: teams actually registered in the tournament (approved registrations
+ * + legacy tournament teams — the same eligibility set the writer enforces),
+ * that tournament's players, and the CURRENT active awards so the form can
+ * disclose that a new declaration supersedes the existing holder. Overflow is
+ * disclosed through `teamsComplete`/`playersComplete`, never silently
+ * truncated. The caller resolves authority (`canEdit`); the write re-checks it.
+ */
+export async function readAwardDeclarationContext(
+  tenantId: string,
+  tournamentId: string,
+): Promise<AwardDeclarationContext> {
+  // (1) Approved registrations of the tournament.
+  const registrationRows = await db
+    .select({ teamId: leagueRegistrations.teamId })
+    .from(leagueRegistrations)
+    .where(and(
+      eq(leagueRegistrations.tournamentId, tournamentId),
+      eq(leagueRegistrations.tenantId, tenantId),
+      eq(leagueRegistrations.status, "approved"),
+    ))
+  const teamIdSet = new Set<string>(registrationRows.map((row) => row.teamId))
+
+  // (2) Legacy tournament teams (already carry names).
+  const legacyRows = await db
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(and(eq(teams.tournamentId, tournamentId), eq(teams.tenantId, tenantId)))
+    .orderBy(asc(teams.name))
+  const legacyNameById = new Map(legacyRows.map((row) => [row.id, row.name]))
+  for (const row of legacyRows) teamIdSet.add(row.id)
+
+  const allTeamIds = Array.from(teamIdSet)
+  const teamsComplete = allTeamIds.length <= AWARD_MANAGER_BOUND
+  const boundedTeamIds = allTeamIds.slice(0, AWARD_MANAGER_BOUND)
+
+  // (3, 4) Names for registered teams + their player rosters (bounded).
+  const nameById = new Map<string, string>()
+  let playerRows: { id: string; name: string; teamId: string | null }[] = []
+  if (boundedTeamIds.length > 0) {
+    const nameRows = await db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(and(eq(teams.tenantId, tenantId), inArray(teams.id, boundedTeamIds)))
+    for (const row of nameRows) nameById.set(row.id, row.name)
+
+    playerRows = await db
+      .select({ id: players.id, name: players.name, teamId: players.teamId })
+      .from(players)
+      .where(and(eq(players.tenantId, tenantId), inArray(players.teamId, boundedTeamIds)))
+      .orderBy(asc(players.name))
+      .limit(AWARD_MANAGER_BOUND + 1)
+  }
+  const playersComplete = playerRows.length <= AWARD_MANAGER_BOUND
+
+  // (5) Current active awards with resolved holder names. The visibility
+  // policy re-runs in memory; `true` is the winner-resolution part only
+  // (publication is irrelevant for this authority-side read).
+  const awardRows = await db
+    .select({
+      id: tournamentAwards.id,
+      category: tournamentAwards.category,
+      playerId: tournamentAwards.playerId,
+      playerName: players.name,
+      teamId: tournamentAwards.teamId,
+      teamName: teams.name,
+      citation: tournamentAwards.citation,
+    })
+    .from(tournamentAwards)
+    .leftJoin(players, eq(players.id, tournamentAwards.playerId))
+    .leftJoin(teams, eq(teams.id, tournamentAwards.teamId))
+    .where(and(
+      eq(tournamentAwards.tenantId, tenantId),
+      eq(tournamentAwards.tournamentId, tournamentId),
+      isNull(tournamentAwards.supersededAt),
+    ))
+    .orderBy(asc(tournamentAwards.category))
+
+  const teamCandidates: AwardCandidateTeam[] = boundedTeamIds
+    .map((id) => ({ id, name: nameById.get(id) ?? legacyNameById.get(id) ?? "Team record unavailable" }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return {
+    teams: teamCandidates,
+    players: playerRows
+      .slice(0, AWARD_MANAGER_BOUND)
+      .map((row) => ({ id: row.id, name: row.name, teamId: row.teamId })),
+    teamsComplete,
+    playersComplete,
+    activeAwards: awardRows
+      .filter((row) => isAwardVisible(row, true))
+      .map((row) => ({
+        id: row.id,
+        category: row.category,
+        holderName: row.playerName ?? row.teamName ?? null,
+        citation: row.citation,
+      })),
+  }
 }
