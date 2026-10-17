@@ -41,12 +41,44 @@ const args = [
   PROJECT_REF,
 ]
 
-const child = spawn("npx", args, {
-  stdio: "inherit",
-  shell: process.platform === "win32",
-})
-child.on("error", (err) => {
-  console.error("supabase-mcp: failed to spawn npx:", err.message)
-  process.exit(1)
-})
-child.on("exit", (code) => process.exit(code ?? 1))
+function spawnServer() {
+  const child = spawn("npx", args, {
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  })
+  child.on("error", (err) => {
+    console.error("supabase-mcp: failed to spawn npx:", err.message)
+    process.exit(1)
+  })
+  child.on("exit", (code) => process.exit(code ?? 1))
+}
+
+// Fail fast with an actionable message when the configured token is no
+// longer valid; otherwise the MCP client only sees an opaque startup
+// timeout. A transient network failure (offline, DNS blip) must NOT block
+// startup — the server itself is still launched in that case.
+async function main() {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  try {
+    const res = await fetch("https://api.supabase.com/v1/projects", {
+      headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+    if (res.status === 401 || res.status === 403) {
+      console.error(
+        "supabase-mcp: SUPABASE_ACCESS_TOKEN in .env is invalid or expired (api.supabase.com returned " +
+          res.status +
+          "). Mint a fresh personal access token at https://supabase.com/dashboard/account/tokens and replace it in .env, then reconnect this MCP server.",
+      )
+      process.exit(1)
+    }
+  } catch {
+    // Offline or timed out: proceed; per-request auth will surface any real
+    // token problem.
+  } finally {
+    clearTimeout(timer)
+  }
+  spawnServer()
+}
+main()
