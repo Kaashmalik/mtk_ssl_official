@@ -4455,6 +4455,59 @@ multi-tab/device tests), PUB-02 public page, COMP-07 remainder, release gates.
 Roadmap: **19 checked / 60 open / 79 IDs**.
 
 
+## Batch 84 - SCORE-11 web session fencing and retained offline work
+
+**Scope built.** Closes the Batch 83 web UI token-wiring gap, not the whole
+SCORE-11/release scope:
+
+- Scoring snapshots project the server-read epoch; clean hydration initializes
+  it independently of socket scoreboard freshness, never lowers it, and never
+  re-stamps pending local work. The scoring store persists it with the innings
+  and clears it on a match switch.
+- Live record/create/undo/complete-innings and the dashboard End Match control
+  echo the observed epoch. Post-undo score reads do not renew authority.
+- `lib/scoring-fence-action.ts` returns recognized expected fence failures as
+  a safe serializable `SCORING_SESSION_FENCED` result. Unexpected failures still
+  throw. `lib/scoring-fence.ts` unwraps on the client before acknowledging work
+  or showing success, so the reload prompt does not depend on error messages
+  redacted by production Server Actions.
+- Fenced deliveries stop their immediate retry loop and leave the offline queue
+  intact. The scoring page disables further write controls/automatic replay
+  and displays an accessible reload prompt. Replay retains the original queued
+  token; reloading does not reauthorize pre-handover commands.
+- Tests exercise snapshots, all five action paths, expected-error serialization,
+  stubbed dashboard completion controls, hydration/persistence/match switching,
+  stale/fresh independent sessions after away-and-back assignment, and ordered
+  offline queue retention. These are automated boundary models, not browser or
+  real database/device acceptance.
+
+**Boundary.** No migration, remote database write or deployment. The Batch
+80/83 migrations remain local-only/unapplied. Durable revisions and authorized
+conflict reconciliation are still SCORE-11 work. Real multi-tab/device,
+PostgreSQL locking/concurrency/RLS, provider, deployment and release evidence
+remain open. `LEAGUE_MEMBERSHIP_CONTROLS_READY` stays default-off.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/database test` | PASS - **18** files, **231 tests** |
+| `corepack pnpm --filter @mtk/web test` | PASS - **112** files, **2,643 tests** (+26) |
+| `corepack pnpm --filter @ssl/scoring-service exec jest --runInBand --silent` | PASS - **12** files, **316 tests** |
+| `corepack pnpm --filter @ssl/ai-commentary-service test` | PASS - **4** files, **39 tests** |
+| `corepack pnpm test:release` | PASS - **87/87** checker tests, not release acceptance |
+| `tsc --noEmit` (scoring service) | **0** errors |
+| `tsc --noEmit` (from `apps/web`) | **0** errors |
+| `git diff --check` | Clean; added-line EOLs repaired without changing existing content |
+| Remote apply/deployment | None |
+
+The first concurrent full-suite run hit the existing member-view test's 5-second
+timeout; the complete isolated web rerun passed without changing that test or
+its timeout. No deployment acceptance is inferred from these automated checks.
+
+Next source work: SCORE-11 durable revisions/reconciliation, PUB-02 public page,
+COMP-07 remainder, release gates. Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { matches, auditLogs } from "@mtk/database"
 import { setTossResult, startMatch, endMatch } from "@/app/actions/matches"
+import { HANDOVER_RESYNC_COPY } from "@/lib/scoring-fence"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), permission: vi.fn(), fallback: vi.fn(),
   transaction: vi.fn(), execute: vi.fn(), match: vi.fn(), user: vi.fn(), league: vi.fn(), member: vi.fn(), team: vi.fn(),
@@ -175,6 +176,17 @@ describe("Lifecycle command validation and retry semantics", () => {
 })
 
 describe("Canonical match completion bridge", () => {
+  it("echoes the dashboard's observed handover epoch", async () => {
+    await endMatch(MATCH, A, "Won", PLAYER, 8)
+    expect(mocks.complete).toHaveBeenCalledWith(MATCH, expect.objectContaining({ handoverEpoch: 8 }), TENANT, ACTOR)
+  })
+  it("returns an expected fencing failure without falsely reporting completion", async () => {
+    mocks.complete.mockRejectedValue(new Error(`Scoring service error (403): ${HANDOVER_RESYNC_COPY}`))
+    await expect(endMatch(MATCH, A, "Won", PLAYER, 7)).resolves.toEqual({
+      success: false, code: "SCORING_SESSION_FENCED", message: HANDOVER_RESYNC_COPY,
+    })
+    noWrites()
+  })
   it("forwards current tenant/actor and the optional award without a local completion write", async () => {
     await expect(endMatch(MATCH, A, "  Won  ", PLAYER)).resolves.toMatchObject({ success: true, matchId: MATCH })
     expect(mocks.access).toHaveBeenCalledWith("clerk", TENANT, MATCH)

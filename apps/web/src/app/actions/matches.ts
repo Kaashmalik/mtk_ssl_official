@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
+import { withScoringFence } from "@/lib/scoring-fence-action"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
@@ -159,7 +160,7 @@ export const startMatch = withAuth("match:score", async (matchId: string) => {
   return { success: true, match }
 })
 
-export const endMatch = withAuth("match:score", async (matchId: string, winnerId: string | null, result: string, manOfMatchId?: string | null, handoverEpoch?: number) => {
+export const endMatch = withAuth("match:score", withScoringFence(async (matchId: string, winnerId: string | null, result: string, manOfMatchId?: string | null, handoverEpoch?: number) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const command = z.object({ matchId: z.string().uuid(), winnerId: z.string().uuid().nullable(),
@@ -179,7 +180,7 @@ export const endMatch = withAuth("match:score", async (matchId: string, winnerId
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/matches/${matchId}/live`)
   return { success: true, matchId, status: "completed" as const }
-})
+}))
 
 export const startStream = withAuth("match:update", async (matchId: string, source: "facebook" | "youtube" | "rtmp" | "webrtc", url: string) => {
   const { userId } = await auth()

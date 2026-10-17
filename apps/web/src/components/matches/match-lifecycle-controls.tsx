@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Loader2, Play, Flag, Trophy } from "lucide-react"
 import { setTossResult, startMatch, endMatch } from "@/app/actions/matches"
+import { unwrapScoringFenceResult } from "@/lib/scoring-fence"
 
 interface MatchLifecycleControlsProps {
   matchId: string
   status: string
+  handoverEpoch?: number
   teamA: { id: string; name: string }
   teamB: { id: string; name: string }
   players?: { id: string; name: string }[]
@@ -22,6 +24,7 @@ interface MatchLifecycleControlsProps {
 export function MatchLifecycleControls({
   matchId,
   status,
+  handoverEpoch,
   teamA,
   teamB,
   players = [],
@@ -36,7 +39,7 @@ export function MatchLifecycleControls({
   const run = (fn: () => Promise<unknown>, ok: string) => {
     startTransition(async () => {
       try {
-        await fn()
+        unwrapScoringFenceResult(await fn())
         toast.success(ok)
         router.refresh()
       } catch (err) {
@@ -157,6 +160,7 @@ export function MatchLifecycleControls({
                         ? "Match ended with no result"
                         : `${winnerId === teamA.id ? teamA.name : teamB.name} won`,
                       manOfMatchId || null,
+                      handoverEpoch,
                     ),
                   "Match completed",
                 )

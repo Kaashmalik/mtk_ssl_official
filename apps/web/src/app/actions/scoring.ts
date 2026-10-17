@@ -7,6 +7,7 @@ import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { canScoreMatch, requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { withAuth } from "./action-guard"
+import { withScoringFence } from "@/lib/scoring-fence-action"
 import {
   proxyRecordBall,
   proxyUndoBall,
@@ -65,7 +66,7 @@ async function requireTenant() {
 // ─── Record Ball ──────────────────────────────────────────────
 // Auth + tenant checks here; persistence is Nest scoring-service (SoT).
 
-export const recordBall = withAuth("match:score", async (input: RecordBallInput) => {
+export const recordBall = withAuth("match:score", withScoringFence(async (input: RecordBallInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
@@ -128,12 +129,12 @@ export const recordBall = withAuth("match:score", async (input: RecordBallInput)
       runRate: result.scorecard.runRate,
     },
   }
-})
+}))
 
 // ─── Undo Ball ────────────────────────────────────────────────
 // Auth here; undo rules enforced by scoring-service SoT.
 
-export const undoBall = withAuth("match:score", async (
+export const undoBall = withAuth("match:score", withScoringFence(async (
   matchId: string,
   ballId: string,
   handoverEpoch?: number,
@@ -153,13 +154,13 @@ export const undoBall = withAuth("match:score", async (
   revalidatePath(`/dashboard/matches/${matchId}`)
 
   return { success: true }
-})
+}))
 
 // ─── Create Innings ───────────────────────────────────────────
 // Authorisation here; innings numbering, team validation and the duplicate
 // check live in scoring-service (SoT), which also performs the insert.
 
-export const createInnings = withAuth("match:score", async (input: CreateInningsInput) => {
+export const createInnings = withAuth("match:score", withScoringFence(async (input: CreateInningsInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
@@ -173,7 +174,7 @@ export const createInnings = withAuth("match:score", async (input: CreateInnings
   revalidatePath(`/matches/${validated.matchId}/scoring`)
 
   return { success: true, innings }
-})
+}))
 
 // ─── Get Match State (for scoring page) ───────────────────────
 // Returns match + both teams + all innings + recent balls. Single query batch.
@@ -204,6 +205,9 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
       tossWinnerId: match.tossWinnerId,
       tossDecision: match.tossDecision,
       updatedAt: match.updatedAt,
+      // SCORE-11 writer fencing: echoed by every scoring write this session
+      // issues; the canonical service fences stale sessions (reload prompt).
+      handoverEpoch: match.scorerHandoverEpoch,
     },
     teamA: teamA[0] ?? { id: match.teamAId, name: "Team A" },
     teamB: teamB[0] ?? { id: match.teamBId, name: "Team B" },
@@ -231,7 +235,7 @@ export const getMatchPlayersForScoring = withAuth("match:read", async (matchId: 
 // `live` -> `innings_break` transition and cache invalidation all happen in
 // scoring-service (SoT), in one transaction.
 
-export const completeInnings = withAuth("match:score", async (
+export const completeInnings = withAuth("match:score", withScoringFence(async (
   matchId: string,
   inningsId: string,
   handoverEpoch?: number,
@@ -260,7 +264,7 @@ export const completeInnings = withAuth("match:score", async (
     matchStatus: result.matchStatus,
     inningsBreakApplied: result.inningsBreakApplied,
   }
-})
+}))
 
 // ─── Get Ball History ─────────────────────────────────────────
 

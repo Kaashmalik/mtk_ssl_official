@@ -1,6 +1,7 @@
 import type { getMatchForScoring } from "@/app/actions/scoring"
 import type { BallInput, InningsState, ScoringState } from "@/stores/scoring-store"
 import { hasUnconfirmedDeliveries } from "./reconcile-live-state"
+import { scoringHandoverEpoch } from "./scoring-fence"
 
 export type ScoringPageSnapshot = Awaited<ReturnType<typeof getMatchForScoring>>
 
@@ -46,7 +47,13 @@ export function hydrateScoringState(state: ScoringState, snapshot: ScoringPageSn
   const superOver = build(3, state.superOver)
   const emptyHistory = () => ({ history: [], historyIndex: -1 })
   const matchIsNewer = !state.matchUpdatedAt || snapshot.match.updatedAt.getTime() >= Date.parse(state.matchUpdatedAt)
+  const observedEpoch = scoringHandoverEpoch(snapshot.match)
   return { innings1, innings2, superOver,
+    // Session metadata is independent of socket score freshness. Never lower
+    // an observed epoch or re-stamp unconfirmed work (guarded above).
+    handoverEpoch: state.handoverEpoch !== undefined &&
+      (observedEpoch === undefined || state.handoverEpoch > observedEpoch)
+      ? state.handoverEpoch : observedEpoch,
     ...(matchIsNewer ? { matchStatus: snapshot.match.status, matchUpdatedAt: snapshot.match.updatedAt.toISOString() } : {}),
     currentInnings: superOver ? "super_over" : innings2 ? 2 : 1,
     innings1History: emptyHistory(), innings2History: emptyHistory(), superOverHistory: emptyHistory() }

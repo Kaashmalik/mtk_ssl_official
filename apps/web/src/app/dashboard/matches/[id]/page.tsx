@@ -346,6 +346,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
         <MatchLifecycleControls
           matchId={match.id}
           status={match.status}
+          handoverEpoch={match.scorerHandoverEpoch}
           teamA={{ id: teamA.id, name: teamA.name }}
           teamB={{ id: teamB.id, name: teamB.name }}
           players={matchPlayers}

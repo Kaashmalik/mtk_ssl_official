@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { recordBall, undoBall, createInnings, completeInnings, getMatchPlayersForScoring, type RecordBallInput } from "@/app/actions/scoring"
 import { PgDialect } from "drizzle-orm/pg-core"
+import { HANDOVER_RESYNC_COPY, unwrapScoringFenceResult } from "@/lib/scoring-fence"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), resolveTenant: vi.fn(), authorize: vi.fn(), findTenant: vi.fn(),
@@ -66,7 +67,7 @@ describe("Scoring action explicit command bridge", () => {
     { values: { runs: 4, isBye: true }, batter: 0, extras: { type: "bye", runs: 4 } },
     { values: { runs: 2, isLegBye: true }, batter: 0, extras: { type: "legbye", runs: 2 } },
   ])("sends disjoint batter and extra runs for $values", async ({ values, batter, extras }) => {
-    const result = await recordBall(input(values))
+    const result = unwrapScoringFenceResult(await recordBall(input(values)))
     expect(mocks.proxy).toHaveBeenCalledWith(expect.objectContaining({
       runs: batter, extras, clientOpId: "stable-operation",
     }), TENANT, ACTOR)
@@ -81,6 +82,34 @@ describe("Scoring action explicit command bridge", () => {
   it("rejects a nonmatching service acknowledgement", async () => {
     mocks.proxy.mockResolvedValue({ ballId: "saved", clientOpId: "wrong" })
     await expect(recordBall(input())).rejects.toThrow("did not acknowledge")
+  })
+
+  it("echoes the observed handover epoch so the fence can verify the session", async () => {
+    await recordBall(input({ handoverEpoch: 3 }))
+    expect(mocks.proxy.mock.calls[0][0]).toMatchObject({ handoverEpoch: 3 })
+    // Absent epoch stays absent (legacy-safe no-token session).
+    await recordBall(input())
+    expect(mocks.proxy.mock.calls[1][0].handoverEpoch).toBeUndefined()
+  })
+
+  it.each(["record", "undo", "create", "complete"])("returns a safe serializable fence failure for %s", async (operation) => {
+    const proxy = { record: mocks.proxy, undo: mocks.undo, create: mocks.create, complete: mocks.complete }[operation]!
+    proxy.mockRejectedValueOnce(new Error(`Scoring service error (403): ${HANDOVER_RESYNC_COPY}`))
+    const result = await (operation === "record" ? recordBall(input({ handoverEpoch: 3 })) : operation === "undo"
+      ? undoBall(MATCH, input().inningsId, 3) : operation === "create"
+        ? createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1, handoverEpoch: 3 })
+        : completeInnings(MATCH, input().inningsId, 3))
+    expect(JSON.parse(JSON.stringify(result))).toEqual({ success: false,
+      code: "SCORING_SESSION_FENCED", message: HANDOVER_RESYNC_COPY })
+  })
+
+  it("forwards epochs for undo, create and complete innings", async () => {
+    await undoBall(MATCH, input().inningsId, 7)
+    await createInnings({ matchId: MATCH, teamId: TENANT, inningsNumber: 1, handoverEpoch: 7 })
+    await completeInnings(MATCH, input().inningsId, 7)
+    expect(mocks.undo).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, 7)
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ handoverEpoch: 7 }), TENANT, ACTOR)
+    expect(mocks.complete).toHaveBeenCalledWith(MATCH, input().inningsId, TENANT, ACTOR, 7)
   })
 
   it("lets the canonical service decide whether a completed match request is a replay", async () => {

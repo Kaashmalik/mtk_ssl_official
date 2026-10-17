@@ -14,7 +14,8 @@ const MATCH = "match-1"
 function fixture() {
   // Only the database projection consumed by hydration is relevant here.
   return { match: { id: MATCH, status: "live", teamAId: "team-a", teamBId: "team-b",
-    tossWinnerId: "team-b", tossDecision: "bat", updatedAt: new Date("2026-10-12T12:00:00.000Z") },
+    tossWinnerId: "team-b", tossDecision: "bat", updatedAt: new Date("2026-10-12T12:00:00.000Z"),
+    handoverEpoch: 4 },
     innings: [row(1), row(2)], recentBalls: [] } as unknown as ScoringPageSnapshot
 }
 function row(number: number) {
@@ -27,7 +28,7 @@ function apply(snapshot = fixture()) {
 }
 describe("Scorer page reload hydration", () => {
   beforeEach(() => useScoringStore.setState({ matchId: MATCH, innings1: null, innings2: null,
-    superOver: null, matchUpdatedAt: undefined, currentInnings: 1 }))
+    superOver: null, matchUpdatedAt: undefined, currentInnings: 1, handoverEpoch: undefined }))
   it("restores the current chase instead of resetting every reload to innings one", () => {
     apply()
     expect(useScoringStore.getState()).toMatchObject({ currentInnings: 2,
@@ -62,6 +63,43 @@ describe("Scorer page reload hydration", () => {
     useScoringStore.setState({ innings2: { ...local, totalRuns: 30, lastSnapshotAt: "2026-10-12T12:00:01.000Z" } })
     apply()
     expect(useScoringStore.getState().innings2?.totalRuns).toBe(30)
+  })
+  it("refreshes the observed handover epoch alongside a fresh match read", () => {
+    apply()
+    expect(useScoringStore.getState().handoverEpoch).toBe(4)
+  })
+  it("never lowers the observed epoch from a stale database response", () => {
+    // A newer local view (post-handover socket read) must not be downgraded by
+    // a response captured before the assignment writer bumped the epoch.
+    useScoringStore.setState({ handoverEpoch: 9, matchUpdatedAt: "2026-10-12T12:00:30.000Z" })
+    apply()
+    expect(useScoringStore.getState().handoverEpoch).toBe(9)
+  })
+  it("initializes session metadata even when the socket scoreboard is newer", () => {
+    useScoringStore.setState({ matchUpdatedAt: "2026-10-12T12:00:30.000Z" })
+    apply()
+    expect(useScoringStore.getState().handoverEpoch).toBe(4)
+  })
+  it("does not reauthorize pending deliveries after a handover or reload", async () => {
+    apply()
+    useScoringStore.getState().addBall({ input: 1, runs: 1, overNumber: 1, ballNumber: 1, isWicket: false,
+      isWide: false, isNoBall: false, isBye: false, isLegBye: false })
+    const next = fixture()
+    next.match.handoverEpoch = 5
+    expect(hydrateScoringState(useScoringStore.getState(), next)).toEqual({})
+    const saved = localStorage.getItem("scoring-storage")!
+    expect(JSON.parse(saved).state.handoverEpoch).toBe(4)
+    useScoringStore.setState({ handoverEpoch: undefined })
+    // Restore the saved session as Zustand would on a reload.
+    localStorage.setItem("scoring-storage", saved)
+    await useScoringStore.persist.rehydrate()
+    apply(next)
+    expect(useScoringStore.getState().handoverEpoch).toBe(4)
+  })
+  it("clears the previous match's epoch when switching matches", () => {
+    apply()
+    useScoringStore.getState().setMatchId("another-match")
+    expect(useScoringStore.getState().handoverEpoch).toBeUndefined()
   })
   it("keeps database operation IDs and orders repeated extras by sequence", () => {
     const snapshot = fixture()

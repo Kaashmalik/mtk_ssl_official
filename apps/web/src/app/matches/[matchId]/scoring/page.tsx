@@ -43,6 +43,7 @@ import { CommentaryFeed } from "@/components/scoring/commentary-feed";
 import { LanguageSelector } from "@/components/scoring/language-selector";
 import { queueBall, removeQueuedBall } from "@/lib/offline-ball-queue";
 import { resolveActionError } from "@/lib/plan-limit-error";
+import { isHandoverFencingError, HANDOVER_RESYNC_COPY, unwrapScoringFenceResult } from "@/lib/scoring-fence";
 import { useOfflineBallSync } from "@/hooks/use-offline-ball-sync";
 import { hydrateScoringState, type ScoringPageSnapshot } from "@/lib/scoring-hydration";
 import { voiceDeliveryFlags } from "@/lib/scoring-voice-input";
@@ -99,24 +100,40 @@ function ScoringInterface() {
   const currentTeamId = currentInningsData?.teamId;
 
   const [dbWriteFailed, setDbWriteFailed] = useState(false);
+  const [sessionFenced, setSessionFenced] = useState(false);
+  const canWrite = !!matchData?.canScore && !sessionFenced;
 
   // Offline ball queue: replays persisted balls once the connection returns.
   const offlineSync = useOfflineBallSync(matchId);
-  const syncSavedBalls = useCallback(() => offlineSync.sync(async (input) => {
-    const acknowledgement = await recordBallAction(input as RecordBallInput);
-    setDbWriteFailed(false);
-    const state = useScoringStore.getState();
-    for (const innings of [state.innings1, state.innings2, state.superOver]) {
-      if (!innings) continue;
-      const localBall = innings.balls.find((ball) =>
-        ball.clientOpId === acknowledgement.clientOpId ||
-        `${state.matchId}:${innings.inningsId}:${ball.id}` === acknowledgement.clientOpId);
-      if (localBall && acknowledgement.clientOpId) {
-        state.acknowledgeBall(localBall.id, acknowledgement.ballId, acknowledgement.clientOpId);
+  const syncSavedBalls = useCallback(() => {
+    if (!canWrite) return;
+    return offlineSync.sync(async (input) => {
+      try {
+        const acknowledgement = unwrapScoringFenceResult(await recordBallAction(input as RecordBallInput));
+        setDbWriteFailed(false);
+        const state = useScoringStore.getState();
+        for (const innings of [state.innings1, state.innings2, state.superOver]) {
+          if (!innings) continue;
+          const localBall = innings.balls.find((ball) =>
+            ball.clientOpId === acknowledgement.clientOpId ||
+            `${state.matchId}:${innings.inningsId}:${ball.id}` === acknowledgement.clientOpId);
+          if (localBall && acknowledgement.clientOpId) {
+            state.acknowledgeBall(localBall.id, acknowledgement.ballId, acknowledgement.clientOpId);
+          }
+        }
+        return acknowledgement;
+      } catch (err) {
+        // A fenced offline replay stays queued (entries only leave the queue on
+        // success). Never replace its original epoch: reconciliation is required
+        // before pre-handover work can become authoritative.
+        if (isHandoverFencingError(err)) {
+          setSessionFenced(true);
+          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+        }
+        throw err;
       }
-    }
-    return acknowledgement;
-  }), [offlineSync.sync]);
+    });
+  }, [offlineSync.sync, canWrite]);
 
   useEffect(() => {
     if (isOnline && offlineSync.pending > 0) void syncSavedBalls();
@@ -168,7 +185,7 @@ function ScoringInterface() {
   const refreshOfflineQueue = offlineSync.refresh;
 
   const persistBallToDB = useCallback(async () => {
-    if (!matchData) return;
+    if (!matchData || !canWrite) return;
 
     const state = useScoringStore.getState();
     const inningsKey = state.currentInnings === 1 ? "innings1" :
@@ -187,11 +204,12 @@ function ScoringInterface() {
       const inningsNumber = state.currentInnings === 1 ? 1 :
         state.currentInnings === 2 ? 2 : 3;
       try {
-        const result = await createInnings({
+        const result = unwrapScoringFenceResult(await createInnings({
           matchId: state.matchId,
           teamId: currentInnings.teamId,
           inningsNumber,
-        });
+          handoverEpoch: state.handoverEpoch,
+        }));
         if (result.innings) {
           inningsId = result.innings.id;
           // Update store with real ID
@@ -201,6 +219,11 @@ function ScoringInterface() {
         }
       } catch (err) {
         console.error("Failed to create innings:", err);
+        if (isHandoverFencingError(err)) {
+          setSessionFenced(true);
+          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+          return;
+        }
         toast.error("Failed to create innings in database. Please try again.");
         return;
       }
@@ -223,6 +246,8 @@ function ScoringInterface() {
       isLegBye: lastBall.isLegBye,
       isFour: lastBall.isFour ?? false,
       isSix: lastBall.isSix ?? false,
+      // SCORE-11 writer fencing: echo the epoch this session observed.
+      handoverEpoch: state.handoverEpoch,
     };
 
     // Save the operation before the first request. A reload or lost response
@@ -239,14 +264,16 @@ function ScoringInterface() {
       return;
     }
 
-    // Retry with exponential backoff (3 attempts)
+    // Retry with exponential backoff (3 attempts). A handover fence rejection
+    // is terminal: the canonical service will keep refusing this session
+    // until the scorer reloads, so retrying would only burn the backoff.
     const MAX_RETRIES = 3;
     let attempt = 0;
     let lastError: unknown = null;
 
     while (attempt < MAX_RETRIES) {
       try {
-        const acknowledgement = await recordBallAction(ballInput);
+        const acknowledgement = unwrapScoringFenceResult(await recordBallAction(ballInput));
         useScoringStore.getState().acknowledgeBall(lastBall.id, acknowledgement.ballId, ballInput.clientOpId);
         await removeQueuedBall(ballInput.clientOpId);
         await refreshOfflineQueue();
@@ -254,6 +281,13 @@ function ScoringInterface() {
         return; // Success
       } catch (err) {
         lastError = err;
+        if (isHandoverFencingError(err)) {
+          setSessionFenced(true);
+          await refreshOfflineQueue();
+          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+          setDbWriteFailed(true);
+          return;
+        }
         attempt++;
         if (attempt < MAX_RETRIES) {
           // Exponential backoff: 500ms, 1500ms
@@ -269,11 +303,11 @@ function ScoringInterface() {
       duration: 6000,
     });
     setDbWriteFailed(true);
-  }, [matchData, refreshOfflineQueue]);
+  }, [matchData, refreshOfflineQueue, canWrite]);
 
   // ─── Handle Undo with DB persistence ───────────────────────
   const handleUndo = useCallback(async () => {
-    if (!matchData?.canScore) return;
+    if (!canWrite) return;
     const state = useScoringStore.getState();
     const currentInningsState = state.currentInnings === 1 ? state.innings1 :
       state.currentInnings === 2 ? state.innings2 :
@@ -290,15 +324,22 @@ function ScoringInterface() {
         startTransition(async () => {
           let confirmed = false;
           try {
-            await undoBallAction(state.matchId, lastBall.id);
+            unwrapScoringFenceResult(await undoBallAction(state.matchId, lastBall.id, state.handoverEpoch));
             confirmed = true;
             if (lastBall.clientOpId) await removeQueuedBall(lastBall.clientOpId);
             const snapshot = await getMatchForScoring(state.matchId);
             const innings = snapshot.innings.find((value) => value.id === currentInningsState.inningsId);
             if (!innings) throw new Error("Updated innings snapshot unavailable");
+            // Keep the session's original epoch even if a handover raced this
+            // read. A score refresh must not silently reauthorize this device.
             useScoringStore.getState().applyConfirmedUndo(lastBall.id, innings);
           } catch (err) {
             console.error("Failed to undo ball in DB:", err);
+            if (!confirmed && isHandoverFencingError(err)) {
+              setSessionFenced(true);
+              toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+              return;
+            }
             toast.error(confirmed
               ? "Undo was accepted, but the updated score could not load. Refresh this match."
               : "Undo was not confirmed. The displayed score has not been changed.");
@@ -306,11 +347,11 @@ function ScoringInterface() {
         });
       }
     }
-  }, [matchData?.canScore]);
+  }, [canWrite]);
 
   // ─── Voice Command ─────────────────────────────────────────
   const handleVoiceCommand = useCallback(async (input: BallInput) => {
-    if (!currentInningsData || !matchData?.canScore || isPending || offlineSync.syncing ||
+    if (!currentInningsData || !canWrite || isPending || offlineSync.syncing ||
         currentInningsData.status === "completed") return;
     if (!selectedBatsman || !selectedBowler) {
       toast.error("Select a batter and bowler before recording a delivery.");
@@ -333,7 +374,7 @@ function ScoringInterface() {
     // Persist to DB directly (with retry)
     await persistBallToDB();
   }, [currentInningsData, addBall, selectedBatsman, selectedBowler, persistBallToDB,
-    matchData?.canScore, isPending, offlineSync.syncing]);
+    canWrite, isPending, offlineSync.syncing]);
 
   const targetRuns = innings1 && currentInningsNum === 2 ? innings1.totalRuns + 1 : undefined;
 
@@ -419,7 +460,7 @@ function ScoringInterface() {
           <div className="flex gap-1.5 shrink-0">
             <Button
               onClick={handleUndo}
-              disabled={!matchData?.canScore || isPending || offlineSync.syncing}
+              disabled={!canWrite || isPending || offlineSync.syncing}
               variant="outline"
               size="sm"
               className="touch-manipulation min-h-11 min-w-11 px-3 sm:px-3"
@@ -450,10 +491,17 @@ function ScoringInterface() {
         </Card>
       )}
 
+      {sessionFenced && (
+        <Card className="p-3 space-y-2 text-sm" role="alert">
+          <p>{HANDOVER_RESYNC_COPY} Saved deliveries have not been discarded or reauthorized.</p>
+          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Reload session</Button>
+        </Card>
+      )}
+
       {offlineSync.pending > 0 && (
         <Card className="p-3 flex flex-wrap items-center justify-between gap-3" role="status">
           <p className="text-sm">{offlineSync.pending} saved deliveries waiting to sync</p>
-          <Button size="sm" variant="outline" disabled={!isOnline || offlineSync.syncing}
+          <Button size="sm" variant="outline" disabled={!canWrite || !isOnline || offlineSync.syncing}
             onClick={() => { void syncSavedBalls(); }}>
             {offlineSync.syncing ? "Syncing..." : "Retry sync"}
           </Button>
@@ -589,12 +637,21 @@ function ScoringInterface() {
                     variant="outline"
                     size="sm"
                     className="touch-manipulation min-h-11"
-                    disabled={!matchData?.canScore || isPending || offlineSync.syncing || offlineSync.pending > 0}
+                    disabled={!canWrite || isPending || offlineSync.syncing || offlineSync.pending > 0}
                     onClick={async () => {
                       try {
-                        await completeInningsAction(matchId, currentInningsData.inningsId);
+                        unwrapScoringFenceResult(await completeInningsAction(
+                          matchId,
+                          currentInningsData.inningsId,
+                          useScoringStore.getState().handoverEpoch,
+                        ));
                         toast.success("Innings completed");
                       } catch (e) {
+                        if (isHandoverFencingError(e)) {
+                          setSessionFenced(true);
+                          toast.error(HANDOVER_RESYNC_COPY, { duration: 10000 });
+                          return;
+                        }
                         // Route through the shared resolver so a plan-limit
                         // error renders as an upgrade prompt and never leaks the
                         // internal wire payload into a toast.
@@ -609,7 +666,7 @@ function ScoringInterface() {
               </div>
             </div>
             <BallInputComponent
-              disabled={!matchData?.canScore || isPending || offlineSync.syncing || currentInningsData?.status === "completed"}
+              disabled={!canWrite || isPending || offlineSync.syncing || currentInningsData?.status === "completed"}
               batsmanId={selectedBatsman}
               bowlerId={selectedBowler}
               onBallAdded={persistBallToDB}

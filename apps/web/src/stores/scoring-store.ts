@@ -59,6 +59,8 @@ export interface ScoringState {
   matchId: string;
   matchStatus: LiveMatchState["status"];
   matchUpdatedAt?: string;
+  /** SCORE-11: the handover epoch this scoring session last observed. */
+  handoverEpoch?: number;
   currentInnings: 1 | 2 | "super_over";
   innings1: InningsState | null;
   innings2: InningsState | null;
@@ -140,7 +142,7 @@ export const useScoringStore = create<ScoringState>()(
       isOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
 
       setMatchId: (matchId: string) => set((state) => state.matchId === matchId ? {} : ({
-        matchId, matchStatus: "scheduled", matchUpdatedAt: undefined,
+        matchId, matchStatus: "scheduled", matchUpdatedAt: undefined, handoverEpoch: undefined,
         currentInnings: 1, innings1: null, innings2: null, superOver: null,
         innings1History: createEmptyHistory(), innings2History: createEmptyHistory(),
         superOverHistory: createEmptyHistory(),
@@ -341,6 +343,7 @@ export const useScoringStore = create<ScoringState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         matchId: state.matchId,
+        handoverEpoch: state.handoverEpoch,
         currentInnings: state.currentInnings,
         innings1: state.innings1,
         innings2: state.innings2,

@@ -3,6 +3,14 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 84) - no schema change or remote apply.** Web
+> session-token wiring consumes the Batch 83 handover epoch on all five write
+> paths; serializable expected errors and retained original queue epochs do
+> not change database enforcement. Both `scorer_handover_epoch` and
+> `playing_xi_declaration` remain LOCAL ONLY/unapplied. Deterministic session
+> tests are not PostgreSQL/concurrency/RLS or deployment acceptance. The
+> `LEAGUE_MEMBERSHIP_CONTROLS_READY` release gate remains default-off.
+
 > **18 October 2026 (Batch 83) - `scorer_handover_epoch` LOCAL ONLY, unapplied.**
 > File: `supabase/migrations/20261018090000_scorer_handover_epoch.sql` (adds
 > `matches.scorer_handover_epoch integer NOT NULL DEFAULT 0`; the SCORE-11

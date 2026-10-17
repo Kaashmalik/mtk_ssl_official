@@ -30,4 +30,8 @@ describe("Scoring snapshot league context for public subscriptions", () => {
     await expect(getMatchForScoring(MATCH)).rejects.toThrow("Resolution unavailable")
     expect(mocks.match).not.toHaveBeenCalled()
   })
+  it("projects the server-read handover epoch without substituting a client token", async () => {
+    mocks.match.mockResolvedValue({ id: MATCH, teamAId: "a", teamBId: "b", status: "live", scorerHandoverEpoch: 6 })
+    expect((await getMatchForScoring(MATCH)).match.handoverEpoch).toBe(6)
+  })
 })
