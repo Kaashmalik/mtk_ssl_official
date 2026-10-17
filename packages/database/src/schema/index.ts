@@ -7,6 +7,7 @@ export * from "./users";
 export * from "./user-tenant-roles";
 export * from "./user-invites";
 export * from "./ownership-transfers";
+export * from "./league-applications";
 export * from "./profiles";
 
 // Cricket entities
