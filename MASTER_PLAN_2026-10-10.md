@@ -4679,6 +4679,74 @@ certification, PUB-03 completion. `PUB-03` stays unchecked; roadmap remains
 | `git diff --check` | Clean (added-line EOL repair applied to 5 files) |
 | Schema/migration/deploy | None this batch; nothing applied remotely |
 
+## Batch 88 - PUB-04 official awards with supersede-on-correct provenance (first slice)
+
+**Scope.** The official/awards slice of Session A's PUB lane: real
+organizer-declared tournament awards with correction provenance, a fail-closed
+eligibility basis, and a public gallery that keeps official awards strictly
+separated from fan engagement. Fan votes, disputes and prizes remain out of
+this slice.
+
+**Implementation.**
+
+- Migration `20261017140000_tournament_awards.sql` (LOCAL-ONLY, unapplied):
+  `award_category` enum + `tournament_awards` — tenant + tournament FKs,
+  exactly-one-winner DB CHECK (`player_id` XOR `team_id`), `citation`,
+  `declared_by`/`declared_at` provenance, `superseded_at` correction history,
+  partial unique index enforces at most one ACTIVE award per
+  (tournament, category). RLS enabled + forced, all access revoked from
+  PUBLIC/anon/authenticated, grants only for internal `ssl`/`service_role`
+  roles, and NO DELETE grant anywhere — history rows are never removed. No
+  fan-vote column exists in the table by design.
+- Shared pure policy `@mtk/database/lib/award-policy`: the fixed category set
+  with display labels, `isAwardVisible` (fails closed on superseded rows,
+  ambiguous winner references and unpublished tournaments), and
+  `PUBLIC_AWARD_LIMIT = 20` bounding the gallery.
+- Locked audited writer `apps/web/src/lib/award-records.ts`: authority is
+  `requireActiveLeagueContext("tournament:update")` (identity, membership and
+  permission re-derived server-side, never a client argument). Fixed in-transaction
+  lock order — tournament in the SAME league → registered-winner set (approved
+  registrations + legacy tournament teams) → winner row (tenant-pinned) → active
+  award row `FOR UPDATE` (the DB partial unique index remains the real guarantee).
+  Replay-identical declarations are honest no-ops (`changed: false`, nothing
+  written); a genuinely different decision supersedes the active row, inserts
+  the new one and audits `AWARD_CORRECTED` (first declaration audits
+  `AWARD_DECLARED`) with `supersededId`/`awardId` provenance. Officialness is
+  enforced at write time: the winner's team must be registered in the
+  tournament, and a player without a resolvable team fails closed.
+- Action `apps/web/src/app/actions/awards.ts` is a pure delegate plus
+  `revalidatePath` of the public tournament page, so a corrected award never
+  leaves a stale gallery up.
+- Public reader `readPublishedTournamentAwards` (same-league, active-only,
+  winner-name provenance joins, in-memory re-application of the shared
+  visibility policy) renders an "Official Awards" card on the published
+  tournament page; the copy states awards are organizer-declared and that fan
+  favorites, if ever introduced, appear separately and are never mixed in.
+  The gallery cannot 404 the page; no awards simply renders no card.
+
+**Boundary.** Source + automated verification only. NOT claimed: migration
+apply (local-only, nothing applied remotely), the organizer declaration UI
+(next slice), revocation/dispute workflow, prize records (PUB-05), real-data
+acceptance, browser certification, PUB-04 completion. `PUB-04` stays
+unchecked; roadmap remains 19 checked / 60 open / 79 IDs. B's branch
+`reg01-league-application` is untouched; migration timestamps stay disjoint
+(B range 20261017200000+, A used 20261017140000).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `tsc --noEmit` (from `apps/web`) | **0** errors |
+| `tsc --noEmit` (from `services/scoring-service`) | **0** errors |
+| Focused awards/visibility suites (writer, reader, gallery page, policy) | **71/71** + 4 database policy tests |
+| `corepack pnpm --filter @mtk/web test` | **119** files, **2,736 tests** |
+| `corepack pnpm --filter @mtk/database test` | **21** files, **262 tests** |
+| scoring-service jest (`--runInBand`) | **13** suites, **331 tests** |
+| `corepack pnpm test:release` | **87/87** (checker only, not release acceptance) |
+| `corepack pnpm test:roadmap` | **6/6** inventory tests |
+| Added-line non-ASCII scan + EOL repair | Clean (36 added-line EOLs repaired across 9 files) |
+| Migration/deploy | Local file added; **nothing applied remotely**; gate default-off |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

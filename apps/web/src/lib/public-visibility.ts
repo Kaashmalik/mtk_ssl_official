@@ -1,7 +1,8 @@
-import { and, asc, count, desc, eq, gte, inArray, sql, sum } from "drizzle-orm"
-import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards } from "@mtk/database"
+import { and, asc, count, desc, eq, gte, inArray, isNull, sql, sum } from "drizzle-orm"
+import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
+import { isAwardVisible, AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT, type AwardCategory } from "@mtk/database/lib/award-policy"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
@@ -339,4 +340,66 @@ export async function readPublicFieldingLeaderboard(
     .orderBy(desc(FIELDING_DISMISSALS_SEASON), asc(playerSeasonStats.playerId))
     .limit(PUBLIC_LEADERBOARD_LIMIT)
   return toPublicLeaderboardRows(rows)
+}
+
+/** A single award gallery row with resolvable winner names (or nulls). */
+export type PublicTournamentAward = {
+  id: string
+  category: string
+  categoryLabel: string
+  playerId: string | null
+  playerName: string | null
+  teamId: string | null
+  teamName: string | null
+  citation: string | null
+  declaredAt: Date
+}
+
+/**
+ * Official award gallery for a PUBLISHED tournament (PUB-04). The caller must
+ * have obtained the tournament through `readPublishedTournament` — this reader
+ * re-checks nothing about the tournament itself, only that the awards are
+ * same-league and active. Superseded (corrected-away) rows are never shown;
+ * the shared `isAwardVisible` policy is re-applied in memory so a future
+ * regression in the WHERE clause still cannot publicize an ambiguous row.
+ * Fan favorites do not exist in this data and therefore cannot appear here.
+ */
+export async function readPublishedTournamentAwards(
+  tenantId: string,
+  tournamentId: string,
+): Promise<PublicTournamentAward[]> {
+  const rows = await db
+    .select({
+      id: tournamentAwards.id,
+      category: tournamentAwards.category,
+      playerId: tournamentAwards.playerId,
+      playerName: players.name,
+      teamId: tournamentAwards.teamId,
+      teamName: teams.name,
+      citation: tournamentAwards.citation,
+      declaredAt: tournamentAwards.declaredAt,
+    })
+    .from(tournamentAwards)
+    .leftJoin(players, and(eq(players.id, tournamentAwards.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(teams, and(eq(teams.id, tournamentAwards.teamId), eq(teams.tenantId, tenantId)))
+    .where(and(
+      eq(tournamentAwards.tenantId, tenantId),
+      eq(tournamentAwards.tournamentId, tournamentId),
+      isNull(tournamentAwards.supersededAt),
+    ))
+    .orderBy(asc(tournamentAwards.declaredAt), asc(tournamentAwards.id))
+    .limit(PUBLIC_AWARD_LIMIT)
+  return rows
+    .filter((row) => isAwardVisible(row, true))
+    .map((row) => ({
+      id: row.id,
+      category: row.category,
+      categoryLabel: AWARD_CATEGORY_LABELS[row.category as AwardCategory] ?? row.category,
+      playerId: row.playerId,
+      playerName: row.playerName,
+      teamId: row.teamId,
+      teamName: row.teamName,
+      citation: row.citation,
+      declaredAt: row.declaredAt,
+    }))
 }

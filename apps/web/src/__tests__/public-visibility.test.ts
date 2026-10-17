@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards, fieldingScorecards } from "@mtk/database"
+import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards } from "@mtk/database"
+import { AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT } from "@mtk/database/lib/award-policy"
 import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 import {
   isTournamentPublished, isMatchPublished, readPublishedTournament, readPublishedMatch,
   readPublishedMatchTeams, matchHasInnings, readPublicBattingLeaderboard,
-  readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, PUBLIC_LEADERBOARD_LIMIT,
+  readPublicBowlingLeaderboard, readPublicFieldingLeaderboard,
+  readPublishedTournamentAwards, PUBLIC_LEADERBOARD_LIMIT,
 } from "@/lib/public-visibility"
 
 const mocks = vi.hoisted(() => ({ select: vi.fn(), queries: [] as any[], state: {} as any }))
@@ -46,6 +48,7 @@ function selectChain() {
       } else if (record.table === matchInnings) rows = mocks.state.innings ?? []
       else if (record.table === playerSeasonStats) rows = mocks.state.leaderboard ?? []
       else if (record.table === fieldingScorecards || record.table === battingScorecards || record.table === bowlingScorecards) rows = mocks.state.scorecards ?? []
+      else if (record.table === tournamentAwards) rows = mocks.state.awards ?? []
       return Promise.resolve(rows).then(resolve, reject)
     },
   }
@@ -297,5 +300,54 @@ describe("Public fielding leaderboard (PUB-03 remainder: matches-based qualifica
   it("does not hide a fielding query failure as an empty ranking", async () => {
     mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
     await expect(readPublicFieldingLeaderboard(TENANT)).rejects.toThrow("Database unavailable")
+  })
+})
+
+describe("Published tournament award gallery (PUB-04)", () => {
+  it("pins the gallery query to the tenant and tournament and only ACTIVE awards", async () => {
+    mocks.state.awards = []
+    await readPublishedTournamentAwards(TENANT, TOURNAMENT)
+
+    expect(mocks.queries).toHaveLength(1)
+    const query = mocks.queries[0]
+    expect(query.table).toBe(tournamentAwards)
+    // Winner-name provenance joins: players and teams, same-league only.
+    expect(query.joins).toEqual([players, teams])
+    // Joins pin by tenant first (players, teams), then the WHERE tenant+tournament.
+    expect(query.params).toEqual([TENANT, TENANT, TENANT, TOURNAMENT])
+    expect(query.order.map((o: any) => o.sql)).toEqual([
+      expect.stringContaining("declared_at"),
+      expect.stringContaining("id"),
+    ])
+    expect(query.limit).toBe(PUBLIC_AWARD_LIMIT)
+  })
+
+  it("labels categories and drops award rows that fail the shared visibility policy", async () => {
+    mocks.state.awards = [
+      { id: "aw1", category: "player_of_the_tournament", playerId: "p1", playerName: "Star Player", teamId: null, teamName: null, citation: "Outstanding", declaredAt: new Date("2026-10-01T00:00:00Z") },
+      { id: "aw2", category: "best_bowler", playerId: null, teamId: "t9", teamName: "Champions XI", citation: null, declaredAt: new Date("2026-10-02T00:00:00Z") },
+      // Ambiguous: both winner references removed by later deletes -> fails closed.
+      { id: "aw3", category: "best_fielder", playerId: null, teamId: null, citation: null, declaredAt: new Date("2026-10-03T00:00:00Z") },
+      // Both names unresolved (joined row gone) -> still structured, name null.
+      { id: "aw4", category: "best_batsman", playerId: "p2", playerName: null, teamId: null, teamName: null, citation: null, declaredAt: new Date("2026-10-04T00:00:00Z") },
+    ]
+
+    const gallery = await readPublishedTournamentAwards(TENANT, TOURNAMENT)
+
+    expect(gallery.map((a) => a.categoryLabel)).toEqual([
+      AWARD_CATEGORY_LABELS.player_of_the_tournament,
+      AWARD_CATEGORY_LABELS.best_bowler,
+      AWARD_CATEGORY_LABELS.best_batsman,
+    ])
+    expect(gallery[0]).toEqual(expect.objectContaining({
+      id: "aw1", playerName: "Star Player", teamName: null, citation: "Outstanding",
+    }))
+    expect(gallery.some((a) => a.id === "aw3")).toBe(false)
+    expect(gallery[2]).toEqual(expect.objectContaining({ id: "aw4", playerName: null, teamName: null }))
+  })
+
+  it("does not hide a gallery query failure as an empty ceremony", async () => {
+    mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
+    await expect(readPublishedTournamentAwards(TENANT, TOURNAMENT)).rejects.toThrow("Database unavailable")
   })
 })

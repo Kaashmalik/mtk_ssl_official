@@ -53,6 +53,7 @@ export * from "./schema/subscriptions";
 export * from "./schema/subscription-requests";
 export * from "./schema/invoices";
 export * from "./schema/announcements";
+export * from "./schema/tournament-awards";
 export * from "./schema/audit-logs";
 export * from "./schema/commentary-events";
 export * from "./schema/notifications";

@@ -1,3 +1,4 @@
+import React from "react"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
@@ -8,7 +9,7 @@ import { unstable_noStore as noStore } from "next/cache"
 import { Calendar } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublishedTournament } from "@/lib/public-visibility"
+import { readPublishedTournament, readPublishedTournamentAwards } from "@/lib/public-visibility"
 import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -89,6 +90,12 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     teams: registeredTeams.map((team) => ({ id: team.id, name: team.name, shortName: team.shortName })),
     matches: standingsInputs,
   })
+
+  // Official award gallery (PUB-04): only ACTIVE, organizer-declared awards of
+  // this already-published tournament. Fan favorites do not exist in this data.
+  const awards = await readPublishedTournamentAwards(tenantId, id)
+  const awardWinnerName = (award: (typeof awards)[number]) =>
+    award.playerName ?? award.teamName ?? "Winner record unavailable"
 
   // Knockout bracket: map match types to rounds. quarter_final -> 1, semi_final -> 2, final -> 3.
   const roundOf: Record<string, number> = {
@@ -178,6 +185,29 @@ export default async function PublicTournamentPage({ params }: { params: Promise
                       </table>
                     </div>
                   </CardContent>
+        </Card>
+      )}
+
+      {awards.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Official Awards</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Declared by this league&apos;s organizers. These are official awards only —
+              fan favorites, if ever introduced, will be shown separately and never mixed in.
+            </p>
+            {awards.map((award) => (
+              <div key={award.id} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{award.categoryLabel}</span>
+                  <Badge variant="outline" className="text-[10px]">Official</Badge>
+                </div>
+                <p className="text-sm mt-1">{awardWinnerName(award)}</p>
+                {award.citation && <p className="text-xs text-muted-foreground mt-1">{award.citation}</p>}
+                <p className="text-xs text-muted-foreground mt-1">Declared {award.declaredAt.toISOString().slice(0, 10)}</p>
+              </div>
+            ))}
+          </CardContent>
         </Card>
       )}
 

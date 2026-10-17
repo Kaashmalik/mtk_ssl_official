@@ -3,6 +3,22 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 88) - `tournament_awards` LOCAL ONLY, unapplied.**
+> File: `supabase/migrations/20261017140000_tournament_awards.sql` creates the
+> `award_category` enum and `public.tournament_awards` (PUB-04 official awards,
+> first slice). Additive and idempotent: exactly-one-winner DB CHECK,
+> `superseded_at` correction history, partial unique at-most-one-active per
+> (tournament, category), RLS enabled + forced with all access revoked from
+> PUBLIC/anon/authenticated, grants only for internal `ssl`/`service_role`
+> roles, and NO DELETE grant anywhere (correction provenance never deletes
+> history). Enforcement is application-side (shared `award-policy` + the
+> `tournament:update`-gated audited writer); no fan-vote data exists in the
+> table. No remote apply, no `DATABASE_URL` execution, no history row —
+> acceptance requires real PostgreSQL application/RLS review. Timestamp sits in
+> A's allocated range (101000-195959) and is order-independent of B's
+> `league_applications` (all-new table, additive chain). Apply the complete
+> reviewed chain before any coordinated release.
+
 > **17 October 2026 (Batch 86) - `hub_listing` LOCAL ONLY, unapplied.**
 > File: `supabase/migrations/20261017103000_hub_listing.sql` adds the guarded
 > `hub_listing_status` enum ('unlisted'/'listed') plus
