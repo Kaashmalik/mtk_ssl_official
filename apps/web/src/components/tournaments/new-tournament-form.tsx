@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@mtk/ui/components/ui/button"
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2, Trophy } from "lucide-react"
 import { createTournament } from "@/app/actions/tournaments"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 
 interface NewTournamentFormProps {
   /**
@@ -36,7 +38,29 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
     maxTeams: "8",
   })
 
-  const updateField = (key: string, value: string) => setFormData((prev) => ({ ...prev, [key]: value }))
+  // UX-03: the competition setup survives an accidental refresh/close as a
+  // per-browser draft - banner-visible, version-checked, week-limited.
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>("new-tournament", 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
+
+  const updateField = (key: string, value: string) => {
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData({ name: "", description: "", format: "league", startDate: "", endDate: "", registrationDeadline: "", maxTeams: "8" })
+    setDraftRestored(false)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,6 +77,7 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
           registrationDeadline: formData.registrationDeadline || null,
           maxTeams: formData.maxTeams ? Number(formData.maxTeams) : null,
         })
+        clearDraft()
         router.push("/dashboard/tournaments")
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create tournament"
@@ -76,6 +101,9 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

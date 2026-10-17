@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -12,6 +12,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2 } from "lucide-react"
 import { createVenue, updateVenue } from "@/app/actions/venues"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
+
+const EMPTY_VENUE_FORM = { name: "", address: "", city: "", state: "", country: "", capacity: "", groundType: "" }
 
 export type VenueFormValues = {
   id: string
@@ -41,8 +45,30 @@ export function VenueForm({ venue }: { venue?: VenueFormValues }) {
     groundType: venue?.groundType ?? "",
   })
 
-  const updateField = (key: keyof typeof formData, value: string) =>
-    setFormData((prev) => ({ ...prev, [key]: value }))
+  const updateField = (key: keyof typeof formData, value: string) => {
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    if (!isEdit) saveDraft(next)
+  }
+
+  // UX-03: drafts for the CREATE flow only - an edit form loads server truth
+  // for an existing venue and must never be silently overwritten.
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>("venue-new", 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (isEdit) return
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [isEdit, restoredDraft])
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData({ ...EMPTY_VENUE_FORM })
+    setDraftRestored(false)
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -63,6 +89,7 @@ export function VenueForm({ venue }: { venue?: VenueFormValues }) {
         if (isEdit && venue) await updateVenue(venue.id, payload)
         else await createVenue(payload)
         toast.success(isEdit ? "Venue updated" : "Venue created")
+        if (!isEdit) clearDraft()
         router.push("/dashboard/venues")
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to save venue"
@@ -83,6 +110,9 @@ export function VenueForm({ venue }: { venue?: VenueFormValues }) {
           </div>
         </div>
       </MotionWrapper>
+      {!isEdit && draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

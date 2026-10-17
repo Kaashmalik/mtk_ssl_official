@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2, Users } from "lucide-react"
 import { createMatch } from "@/app/actions/matches"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 
 interface NewMatchFormProps {
   teams: { id: string; name: string }[]
@@ -27,7 +29,33 @@ export function NewMatchForm({ teams, tournaments }: NewMatchFormProps) {
     totalOvers: "20", scheduledDate: "", venueNote: "", umpire1: "", umpire2: "",
   })
 
-  const updateField = (key: string, value: string) => setFormData(prev => ({ ...prev, [key]: value }))
+  // UX-03: the in-progress fixture survives an accidental refresh/close as a
+  // per-browser draft. Restoration is explicit and banner-visible; server
+  // truth always wins on submit.
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>("new-match", 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
+
+  const updateField = (key: string, value: string) => {
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData({
+      teamAId: "", teamBId: "", tournamentId: "", matchFormat: "t20", matchType: "group",
+      totalOvers: "20", scheduledDate: "", venueNote: "", umpire1: "", umpire2: "",
+    })
+    setDraftRestored(false)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,6 +87,7 @@ export function NewMatchForm({ teams, tournaments }: NewMatchFormProps) {
             .join(" · ") || null,
         })
         toast.success("Match scheduled successfully!")
+        clearDraft()
         router.push("/dashboard/matches")
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to schedule match"
@@ -102,6 +131,9 @@ export function NewMatchForm({ teams, tournaments }: NewMatchFormProps) {
           <div><h1 className="text-3xl font-bold tracking-tight">Schedule Match</h1><p className="text-muted-foreground mt-1">Create a new cricket fixture.</p></div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

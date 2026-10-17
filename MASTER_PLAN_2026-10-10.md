@@ -5375,6 +5375,52 @@ stays UNCHECKED; roadmap remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Migration | None (no schema change this batch) |
 
+## Batch 101 - UX-03 durable forms (first slice)
+
+The first UX-03 slice: the three longest **create** forms - new tournament,
+new match, new venue - now survive an accidental refresh or close with their
+in-progress entries intact. **No migration**; drafts are per-browser
+localStorage conveniences that hold no authority.
+
+**Pure policy** (`apps/web/src/lib/form-drafts.ts`): drafts are versioned
+(the form's shape changing invalidates the old draft instead of corrupting
+fields), age-limited to a week (an older draft is a trap, not a help),
+shape-validated (only flat JSON-safe values persist - `File` objects,
+NaN/Infinity, nested objects are named and dropped, never silently lost), and
+refuse-to-persist-empty (storing `{}` helps nobody). A future `savedAt` is
+treated as corruption and refused. Every parse failure has its own honest
+reason: `missing / unparseable / version_mismatch / expired / invalid_shape`.
+
+**Storage controller** (`durable-draft-store.ts`, React-free and
+node-testable): restore-once semantics, discarded-entry cleanup (so a stale
+draft cannot recur), and storage-failure tolerance - private mode or quota
+reads as `unusable`, never an error page. `use-durable-form-draft.ts` is a
+thin shell over it; the repo has no DOM test environment, so the logic lives
+where it can actually be tested and the hook stays untestably small.
+
+**Visible restoration.** A restored draft is NEVER silent: each form shows a
+`DraftRestoreBanner` naming exactly when the draft was saved (deterministic
+UTC), with **Keep** (continue editing) and **Discard** (wipe and reset)
+controls. Success clears the draft so it cannot resurrect after submit; the
+venue draft is CREATE-flow only - the edit form loads server truth for an
+existing row and must never be silently overwritten.
+
+**Boundary (recorded honestly).** UX-03 stays OPEN: edit-form drafts (a
+design decision about server truth is needed first), role journeys, and
+localized/RTL/timezone preferences remain. Roadmap honestly remains
+**19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **133** files, **2,873 tests** (+11, draft policy/store) |
+| `npx vitest run` (database) | PASS - **29** files, **329 tests** |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | None (client-only slice) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
