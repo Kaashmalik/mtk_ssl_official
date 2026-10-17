@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { matches, auditLogs } from "@mtk/database"
+import { matches, auditLogs, COMPETITION_LOCKED_MESSAGE } from "@mtk/database"
 import { createMatch, updateMatch, deleteMatch, rescheduleMatch, startStream, endStream, getMatch, getMatches, getMatchFormOptions } from "@/app/actions/matches"
 import { getFullScorecard } from "@/app/actions/scorecards"
 
@@ -63,7 +63,7 @@ beforeEach(() => {
   mocks.league.mockResolvedValue({ id: TENANT, isActive: true, plan: "pro" })
   mocks.execute.mockResolvedValue([])
   mocks.team.mockImplementation(async ({ where }) => ({ id: dialect.sqlToQuery(where).params[0], tenantId: TENANT, isActive: true }))
-  mocks.tournament.mockResolvedValue({ id: TOURNAMENT, tenantId: TENANT, status: "live" })
+  mocks.tournament.mockResolvedValue({ id: TOURNAMENT, tenantId: TENANT, status: "live", competitionLockedAt: null })
   mocks.venue.mockResolvedValue({ id: VENUE, tenantId: TENANT, isActive: true })
   mocks.history.mockResolvedValue(undefined)
   mocks.update.mockReturnValue({ set: mocks.set })
@@ -194,7 +194,10 @@ describe("Fixture invariants, resource validation and history preservation", () 
     expect(locks[3].sql).toContain("ORDER BY")
     expect(locks.slice(3).every(lock => lock.sql.includes("FOR SHARE"))).toBe(true)
     expect(mocks.team.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[3])
-    expect(mocks.tournament.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[4])
+    // The lock gate legitimately pre-reads the competition row (query,
+    // no lock) before the FOR SHARE chain; requireReferences' own read
+    // must still follow its FOR SHARE.
+    expect(mocks.tournament.mock.invocationCallOrder[1]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[4])
     expect(mocks.venue.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.execute.mock.invocationCallOrder[5])
   })
   it.each([() => createMatch({ ...metadata, teamBId: A }), () => updateMatch(MATCH, { teamAId: B }),
@@ -212,8 +215,8 @@ describe("Fixture invariants, resource validation and history preservation", () 
     await expect(createMatch(metadata)).rejects.toThrow("team is unavailable")
     noWrites()
   })
-  it.each([null, { id: OTHER, tenantId: TENANT, status: "live" }, { id: TOURNAMENT, tenantId: OTHER, status: "live" },
-    { id: TOURNAMENT, tenantId: TENANT, status: "cancelled" }, { id: TOURNAMENT, tenantId: TENANT, status: "completed" }])(
+  it.each([null, { id: OTHER, tenantId: TENANT, status: "live", competitionLockedAt: null }, { id: TOURNAMENT, tenantId: OTHER, status: "live", competitionLockedAt: null },
+    { id: TOURNAMENT, tenantId: TENANT, status: "cancelled", competitionLockedAt: null }, { id: TOURNAMENT, tenantId: TENANT, status: "completed", competitionLockedAt: null }])(
     "rejects missing/foreign/ended tournament %s", async tournament => {
       mocks.tournament.mockResolvedValue(tournament)
       await expect(updateMatch(MATCH, { tournamentId: TOURNAMENT })).rejects.toThrow("Tournament is unavailable")
@@ -237,7 +240,11 @@ describe("Fixture invariants, resource validation and history preservation", () 
     await updateMatch(MATCH, { venueId: null, tournamentId: null, scheduledDate: null })
     expect(mocks.set).toHaveBeenCalledWith({ venueId: null, tournamentId: null, scheduledDate: null, updatedAt: expect.any(Date) })
     expect(mocks.venue).not.toHaveBeenCalled()
-    expect(mocks.tournament).not.toHaveBeenCalled()
+    // The lock gate still consults the competition the fixture LEAVES
+    // (escaping a lock is blocked); requireReferences' FOR SHARE re-check,
+    // however, must not run for the explicitly cleared id.
+    expect(mocks.tournament).toHaveBeenCalledTimes(1)
+    expect(mocks.execute.mock.calls.some(([query]) => dialect.sqlToQuery(query).params.includes(TOURNAMENT))).toBe(false)
   })
   it.each(["toss", "live", "innings_break", "completed", "abandoned", "no_result", "cancelled"])("does not edit %s matches", async status => {
     mocks.match.mockResolvedValue({ ...fixture, status })
@@ -458,6 +465,52 @@ describe("Reschedule command (COMP-07 conflict/rest checks)", () => {
     mocks.match.mockResolvedValue({ ...fixture, status: "completed" })
     await expect(rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" }))
       .rejects.toThrow("Only an unstarted scheduled fixture")
+    noWrites()
+  })
+})
+
+describe("Competition lock enforcement (COMP-07)", () => {
+  const lockedTournament = { id: TOURNAMENT, tenantId: TENANT, status: "live", competitionLockedAt: new Date("2026-10-17T00:00:00Z") }
+
+  it("blocks creation into and edits within a locked competition", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    mocks.tournament.mockResolvedValue(lockedTournament)
+    await expect(createMatch({ ...metadata, tournamentId: TOURNAMENT })).rejects.toThrow(COMPETITION_LOCKED_MESSAGE)
+    await expect(updateMatch(MATCH, { umpire1: "Umpire" })).rejects.toThrow(COMPETITION_LOCKED_MESSAGE)
+    await expect(rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" })).rejects.toThrow(COMPETITION_LOCKED_MESSAGE)
+    noWrites()
+  })
+
+  it("blocks cancellation and both directions of a competition move while locked", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    mocks.tournament.mockResolvedValue(lockedTournament)
+    await expect(deleteMatch(MATCH)).rejects.toThrow(COMPETITION_LOCKED_MESSAGE)
+    // Detaching the fixture from the locked competition escapes no gate.
+    await expect(updateMatch(MATCH, { tournamentId: null })).rejects.toThrow(COMPETITION_LOCKED_MESSAGE)
+    noWrites()
+  })
+
+  it("leaves broadcast controls available on a locked competition", async () => {
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    mocks.tournament.mockResolvedValue(lockedTournament)
+    await expect(startStream(MATCH, "youtube", "https://youtu.be/example")).resolves.toMatchObject({ success: true })
+    await expect(endStream(MATCH)).resolves.toMatchObject({ success: true })
+    expect(mocks.update).toHaveBeenCalled()
+  })
+
+  it("does not consult a competition for a fixture outside any competition", async () => {
+    await expect(updateMatch(MATCH, { umpire1: "Umpire" })).resolves.toMatchObject({ success: true })
+    // fixture.tournamentId is null: with no competition in scope there is
+    // no lock scope and no tournament read at all.
+    expect(mocks.tournament).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when a locked read is partial rather than opening the gate", async () => {
+    // An undefined locked_at (missing column in a partial read) reads as
+    // LOCKED — mirroring membershipGrantsAccess's unknown-fails-closed rule.
+    mocks.match.mockResolvedValue({ ...fixture, tournamentId: TOURNAMENT })
+    mocks.tournament.mockResolvedValue({ id: TOURNAMENT, tenantId: TENANT, status: "live" })
+    await expect(rescheduleMatch(MATCH, { scheduledDate: "2026-11-01T15:00:00Z" })).rejects.toThrow(COMPETITION_LOCKED_MESSAGE)
     noWrites()
   })
 })

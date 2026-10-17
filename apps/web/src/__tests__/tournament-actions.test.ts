@@ -11,6 +11,7 @@ import {
   getTournamentCopyOptions,
   getTournaments,
   openRegistration,
+  setCompetitionLock,
   updateTournament,
 } from "@/app/actions/tournaments"
 
@@ -40,10 +41,12 @@ const mocks = vi.hoisted(() => ({
   txValues: vi.fn(),
   generate: vi.fn(),
   advance: vi.fn(),
+  lockWriter: vi.fn(),
 }))
 
 vi.mock("@/lib/fixture-generation", () => ({ generateTournamentFixtures: mocks.generate }))
 vi.mock("@/lib/tournament-advancement", () => ({ advanceKnockoutTournament: mocks.advance }))
+vi.mock("@/lib/competition-locks", () => ({ setCompetitionLock: mocks.lockWriter }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
@@ -556,5 +559,33 @@ describe("Fixture generation action delegation", () => {
     expect(result).toMatchObject({ success: true, stage: "Semi-finals" })
     expect(mocks.revalidate).toHaveBeenCalledWith(`/dashboard/tournaments/${TOURNAMENT_ID}`)
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/matches")
+  })
+})
+
+describe("Competition lock action delegation (COMP-07)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.auth.mockResolvedValue({ userId: CLERK_ID })
+    mocks.resolveTenant.mockResolvedValue(ACTIVE_TENANT)
+    mocks.authorize.mockResolvedValue(undefined)
+    mocks.lockWriter.mockResolvedValue({ tournamentId: TOURNAMENT_ID, locked: true, lockedAt: "2026-10-17T00:00:00.000Z" })
+  })
+
+  it("requires settings-level authority and delegates to the lock writer", async () => {
+    const result = await setCompetitionLock(TOURNAMENT_ID, true)
+
+    expect(mocks.authorize).toHaveBeenCalledWith("settings:manage", ACTIVE_TENANT)
+    expect(mocks.lockWriter).toHaveBeenCalledWith(TOURNAMENT_ID, true)
+    expect(mocks.transaction).not.toHaveBeenCalled() // delegation, not a second transaction
+    expect(result).toMatchObject({ success: true, tournamentId: TOURNAMENT_ID, locked: true })
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/dashboard/tournaments/${TOURNAMENT_ID}`)
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/matches")
+  })
+
+  it("validates the id shape and boolean before any lookup", async () => {
+    await expect(setCompetitionLock("not-a-uuid", true)).rejects.toThrow()
+    await expect(setCompetitionLock(TOURNAMENT_ID, "yes" as unknown as boolean)).rejects.toThrow()
+    expect(mocks.lockWriter).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
   })
 })

@@ -37,6 +37,11 @@ export const tournaments = pgTable("tournaments", {
   liveStreamUrl: text("live_stream_url"),
   isFeatured: boolean("is_featured").default(false).notNull(),
   status: tournamentStatusEnum("status").notNull().default("draft"),
+  // COMP-07 competition lock: engagement is EXPLICIT ONLY (audited
+  // setCompetitionLock by a league owner) — status transitions never set
+  // or clear these. See packages/database/src/lib/competition-locks.ts
+  competitionLockedAt: timestamp("competition_locked_at", { withTimezone: true }),
+  competitionLockedBy: uuid("competition_locked_by").references(() => users.id),
   createdBy: uuid("created_by").notNull().references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

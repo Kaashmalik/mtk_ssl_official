@@ -12,6 +12,7 @@ import { archiveTournament, setTournamentRegistration } from "@/lib/tournament-l
 import { generateTournamentFixtures } from "@/lib/fixture-generation"
 import { advanceKnockoutTournament } from "@/lib/tournament-advancement"
 import { createTournamentRecord, updateTournamentRecord } from "@/lib/tournament-writes"
+import { setCompetitionLock as setCompetitionLockWriter } from "@/lib/competition-locks"
 
 const createTournamentSchema = z.object({
   name: z.string().min(2).max(200),
@@ -255,6 +256,25 @@ export async function advanceTournament(tournamentId: string) {
   z.string().uuid().parse(tournamentId)
 
   const result = await advanceKnockoutTournament(userId, tenantId, tournamentId)
+
+  revalidatePath(`/dashboard/tournaments/${tournamentId}`)
+  revalidatePath("/dashboard/matches")
+  return { success: true, ...result }
+}
+
+/**
+ * COMP-07: place or lift the competition lock that freezes the
+ * competition's fixture edits. `settings:manage` authorizes at this
+ * boundary; the writer re-verifies the acting league owner under its own
+ * locks (tenant is re-derived from the tournament row, never trusted from
+ * the caller) and audits COMPETITION_LOCK / COMPETITION_UNLOCK.
+ */
+export async function setCompetitionLock(tournamentId: string, lock: boolean) {
+  await requireTournamentContext("settings:manage")
+  z.string().uuid().parse(tournamentId)
+  z.boolean().parse(lock)
+
+  const result = await setCompetitionLockWriter(tournamentId, lock)
 
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
   revalidatePath("/dashboard/matches")

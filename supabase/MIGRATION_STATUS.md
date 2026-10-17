@@ -3,6 +3,26 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 90) - `competition_locks` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261017150000_competition_locks.sql` adds
+> `tournaments.competition_locked_at` + `competition_locked_by` (COMP-07
+> explicit fixture freeze; nullable, additive, idempotent `ADD COLUMN IF NOT
+> EXISTS`). **No backfill by design:** engagement is explicit-only, so every
+> pre-existing competition stays unlocked — the recorded truth about what
+> leagues actually decided. Apply path deviates from `supabase db push` (the
+> parallel-session chain 20261017090000-20261018090000 below is intentionally
+> still unapplied); the exact local SQL was executed via the repo `postgres`
+> driver and the history row was inserted as version `20261017150000`,
+> name `competition_locks`, `'{}'::text[]`. The timestamp was first applied as
+> `20261017200000` and then MOVED to `20261017150000`: `20261017200000+` is
+> Session B's reserved range (`PARALLEL_SESSION_DIVISION.md`), while
+> `101000-195959` is A's window and `150000` was unused. Verified remotely in
+> one fold: both columns present, history row at the new version and absent at
+> the old, `tournaments` empty (0 rows) so the lock column reports 0 locked.
+> Enforcement is application-side (shared pure `competition-locks` module +
+> `manageMatch` transaction gate + audited `setCompetitionLock` writer).
+
 > **17 October 2026 (Batch 88) - `tournament_awards` LOCAL ONLY, unapplied.**
 > File: `supabase/migrations/20261017140000_tournament_awards.sql` creates the
 > `award_category` enum and `public.tournament_awards` (PUB-04 official awards,

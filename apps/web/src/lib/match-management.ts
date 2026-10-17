@@ -2,6 +2,7 @@ import { randomUUID } from "crypto"
 import { db, matches, users, tenants, userTenantRoles, teams, tournaments, venues, auditLogs,
   matchInnings, matchBalls, scoringEvents, scorecardProjections,
   battingScorecards, bowlingScorecards, fieldingScorecards, checkPlanFeature, membershipGrantsAccess,
+  competitionLocked, competitionLockBlocks, COMPETITION_LOCKED_MESSAGE, lockScopedTournamentIds,
   type PlanKey } from "@mtk/database"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
@@ -64,6 +65,28 @@ async function requireOwner(tx: Tx, clerkId: string, tenantId: string) {
     throw new Error("Forbidden: your match management access changed")
   }
   return { actor, league, member }
+}
+
+/**
+ * COMP-07: an explicitly locked competition freezes its fixture edits.
+ * Checked under the writer's existing transaction — no new lock ordering,
+ * we only read the tournament row after the shared-resource locks are in
+ * place. Broadcast controls are never blocked (not competition edits).
+ * Every tournament id the effective fixture state would touch is checked,
+ * so a locked competition cannot be entered OR escaped (detach) silently.
+ */
+async function requireCompetitionUnlocked(
+  tx: Tx, tenantId: string, tournamentIds: (string | null | undefined)[], kind: Command["kind"],
+) {
+  if (!competitionLockBlocks(kind)) return
+  for (const id of lockScopedTournamentIds(tournamentIds)) {
+    const tournament = await tx.query.tournaments.findFirst({
+      where: and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId)),
+    })
+    if (tournament && tournament.tenantId === tenantId && competitionLocked(tournament)) {
+      throw new Error(COMPETITION_LOCKED_MESSAGE)
+    }
+  }
 }
 
 async function requireUnstarted(tx: Tx, match: Match) {
@@ -138,6 +161,7 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
     const { actor, league, member } = await requireOwner(tx, clerkId, tenantId)
     let updated: Match | undefined
     if (command.kind === "create") {
+      await requireCompetitionUnlocked(tx, tenantId, [command.data.tournamentId], command.kind)
       await requireReferences(tx, tenantId, { ...command.data,
         tournamentId: command.data.tournamentId ?? null, venueId: command.data.venueId ?? null })
       const { scheduledDate, ...data } = command.data
@@ -148,6 +172,7 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
       const current = existing!
       let patch: Partial<Match>
       if (command.kind === "update") {
+        await requireCompetitionUnlocked(tx, tenantId, [command.data.tournamentId, current.tournamentId], command.kind)
         await requireUnstarted(tx, current)
         const { scheduledDate, ...fields } = command.data
         const data = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Omit<Partial<Metadata>, "scheduledDate">
@@ -156,6 +181,7 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
           ? { scheduledDate: scheduledDate ? new Date(scheduledDate) : null } : {}) }
         if (Object.keys(data).length === 0 && scheduledDate === undefined) return current
       } else if (command.kind === "reschedule") {
+        await requireCompetitionUnlocked(tx, tenantId, [current.tournamentId], command.kind)
         await requireUnstarted(tx, current)
         const proposed = scheduledDate.parse(command.data.scheduledDate)
         // COMP-07 conflict/rest checks against the league's other fixtures.
@@ -181,6 +207,7 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
         patch = { scheduledDate: new Date(proposed) }
       } else if (command.kind === "cancel") {
         if (current.status === "cancelled") return current
+        await requireCompetitionUnlocked(tx, tenantId, [current.tournamentId], command.kind)
         await requireUnstarted(tx, current)
         patch = { status: "cancelled", streamStatus: current.streamStatus === "live" ? "ended" : current.streamStatus }
       } else if (command.kind === "stream-start") {

@@ -29,6 +29,8 @@ export * from "./lib/resource-grants";
 export * from "./lib/career-records";
 // Platform league application lifecycle policy (REG-01)
 export * from "./lib/league-application-policy";
+// Competition locks: explicit fixture freeze (COMP-07)
+export * from "./lib/competition-locks";
 
 // DB Errors
 export * from "./lib/db-errors";

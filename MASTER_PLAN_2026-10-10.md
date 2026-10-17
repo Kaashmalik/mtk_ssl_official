@@ -4747,6 +4747,64 @@ unchecked; roadmap remains 19 checked / 60 open / 79 IDs. B's branch
 | Added-line non-ASCII scan + EOL repair | Clean (36 added-line EOLs repaired across 9 files) |
 | Migration/deploy | Local file added; **nothing applied remotely**; gate default-off |
 
+## Batch 90 - COMP-07 competition locks (explicit fixture freeze)
+
+Landed on the post-sync base (remote main carries Batches 80-89 from the
+parallel Session B merge and A's batches); COMP-07's remaining tracks
+(forfeits/disputes, scoped notices) stay open - this slice ships the lock.
+
+**Shared pure module** `packages/database/src/lib/competition-locks.ts`
+(root-exported): `competitionLocked` is explicit-engagement-only and
+fail-closed on an unknown (partial) read - unknown never opens a gate, the
+same rule as `membershipGrantsAccess`; `competitionLockBlocks` blocks fixture
+create/update/cancel/reschedule while broadcast controls (stream start/end)
+stay available because they are not competition edits;
+`lockScopedTournamentIds` normalizes every tournament id the effective
+fixture state would touch, so a fixture can neither enter NOR escape
+(detach from) a locked competition silently.
+
+**Schema and migration.** `tournaments.competition_locked_at` +
+`competition_locked_by` (nullable, additive, no backfill by design - status
+transitions never set or clear them, so existing competitions stay unlocked
+as the recorded truth). The migration was APPLIED remotely through the
+`DATABASE_URL` driver fallback, with the history row first written at
+`20261017200000` and then MOVED to `20261017150000`: `20261017200000+` is
+Session B's reserved range while `101000-195959` is A's window and `150000`
+was unused. Everything is recorded in `supabase/MIGRATION_STATUS.md`.
+
+**Enforcement.** `manageMatch` gains one gate inside its existing
+transaction (`requireCompetitionUnlocked`) - no new lock ordering, evaluated
+after the shared-resource locks are held; all four fixture commands route
+through it, including both directions of a competition move on update.
+Message: "Competition is locked: its fixtures are frozen by the league".
+
+**Writer and action.** `apps/web/src/lib/competition-locks.ts`
+`setCompetitionLock(tournamentId, lock)`: actor -> tournament row -> league
+-> membership locks in project order; the tenant is re-derived from the
+tournament row (never the caller); `league_owner` +
+`membershipGrantsAccess` under the row lock; verbatim set/clear including
+`lockedBy` provenance; an already-satisfied state replays as a pure read
+(no duplicate audit), matching the cancelled-fixture precedent; audited
+`COMPETITION_LOCK` / `COMPETITION_UNLOCK` with before/after. The thin
+`setCompetitionLock` action (actions/tournaments.ts) gates on
+`settings:manage` and revalidates the tournament page and matches list.
+
+**Boundary.** No organizer UI in this slice (action + writer only);
+forfeits/disputes and scoped notices remain open COMP-07 scope; the lock
+flow's real-DB/staging acceptance is still pending. `COMP-07` stays
+unchecked; roadmap remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **122** files, **2,785 tests** |
+| `npx vitest run` (database) | PASS - 24 files, **292 tests** |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Remote apply | `20261017150000_competition_locks` applied via `DATABASE_URL` fallback; columns verified, history row moved and verified |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
