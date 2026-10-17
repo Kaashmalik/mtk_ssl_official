@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
 import { db, matches, users, tenants, userTenantRoles, teams, auditLogs, membershipGrantsAccess } from "@mtk/database"
 import { scorerSlotGrant } from "@mtk/database/lib/resource-grants"
+import { buildLifecycleSnapshot, queueMatchLifecycleFanout } from "./match-fanout"
 import { and, eq, inArray, sql } from "drizzle-orm"
 
 type Match = typeof matches.$inferSelect
@@ -11,7 +12,10 @@ type LifecyclePatch = Partial<Pick<Match, "status" | "tossWinnerId" | "tossDecis
  */
 export async function mutateMatchLifecycle(clerkId: string, tenantId: string, matchId: string,
   method: "MATCH_TOSS_SET" | "MATCH_START", patchFor: (match: Match) => LifecyclePatch | null) {
-  return db.transaction(async tx => {
+  // FAN-02: captured pre-patch state; the fan-out fires only after commit, and
+  // the shared pure policy filters toss-only writes and replays to nothing.
+  let before: Match | undefined
+  const updated = await db.transaction(async tx => {
     const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
     await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
     const match = await tx.query.matches.findFirst({ where: key })
@@ -34,6 +38,7 @@ export async function mutateMatchLifecycle(clerkId: string, tenantId: string, ma
         && scorerSlotGrant(match, actor.id) !== null))) {
       throw new Error("Forbidden: your match lifecycle access changed")
     }
+    before = match
     if (match.teamAId === match.teamBId) throw new Error("Match requires two distinct teams")
     const ids = [match.teamAId, match.teamBId].sort()
     await tx.execute(sql`SELECT ${teams.id} FROM ${teams}
@@ -55,4 +60,12 @@ export async function mutateMatchLifecycle(clerkId: string, tenantId: string, ma
       payload: { matchId, before: snapshot(match), after: snapshot(updated) } })
     return updated
   }, { isolationLevel: "read committed" })
+  if (!updated || !before) throw new Error("Match changed. Reload before saving.")
+  queueMatchLifecycleFanout({
+    tenantId,
+    kind: "start",
+    before: buildLifecycleSnapshot(before),
+    after: buildLifecycleSnapshot(updated),
+  })
+  return updated
 }

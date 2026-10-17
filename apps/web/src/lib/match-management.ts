@@ -7,6 +7,7 @@ import { db, matches, users, tenants, userTenantRoles, teams, tournaments, venue
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { findSchedulingConflicts } from "@/lib/rescheduling"
+import { buildLifecycleSnapshot, queueMatchLifecycleFanout } from "@/lib/match-fanout"
 
 // Accept the existing datetime-local form and ISO timestamps, but never JS's
 // permissive rollover (e.g. February 30), unbounded text or Invalid Date.
@@ -150,13 +151,18 @@ function snapshot(match: Match) {
  * match to lock; it never acquires an existing match lock after the actor lock.
  */
 export async function manageMatch(clerkId: string, tenantId: string, command: Command) {
-  return db.transaction(async tx => {
+  // FAN-02: captured pre-command state; reschedule/cancel fan out only AFTER
+  // the transaction commits (fire-and-forget), and the shared pure policy
+  // filters replays (its early `return current` paths change nothing).
+  let before: Match | undefined
+  const updated = await db.transaction(async tx => {
     let existing: Match | undefined
     if (command.kind !== "create") {
       const key = and(eq(matches.id, command.id), eq(matches.tenantId, tenantId))
       await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
       existing = await tx.query.matches.findFirst({ where: key })
       if (!existing || existing.id !== command.id || existing.tenantId !== tenantId) throw new Error("Match not found")
+      before = existing
     }
     const { actor, league, member } = await requireOwner(tx, clerkId, tenantId)
     let updated: Match | undefined
@@ -230,4 +236,14 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
       statusCode: "200", payload: { matchId: updated.id, before: existing ? snapshot(existing) : null, after: snapshot(updated) } })
     return updated
   }, { isolationLevel: "read committed" })
+  if (command.kind === "reschedule" || command.kind === "cancel") {
+    if (!updated || !before) throw new Error("Match changed. Reload before saving.")
+    queueMatchLifecycleFanout({
+      tenantId,
+      kind: command.kind === "reschedule" ? "reschedule" : "cancel",
+      before: buildLifecycleSnapshot(before),
+      after: buildLifecycleSnapshot(updated),
+    })
+  }
+  return updated
 }

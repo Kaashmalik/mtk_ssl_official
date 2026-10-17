@@ -5276,6 +5276,56 @@ remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Migration | `20261017190000` APPLIED remotely + verified + history row |
 
+## Batch 99 - FAN-02 match lifecycle notifications (start / reschedule / cancel fan-out)
+
+The second FAN-02 trigger slice: tournament followers now hear about the match
+events a follower plausibly cares about - **started, rescheduled, cancelled** -
+through the same shared delivery pipeline as Batch 97's award fan-out
+(consent -> quiet hours -> wiring; only in-app rows are ever written; 24h dedup
+on type + dedupKey; bounded 200 newest-first followers; fire-and-forget so
+delivery can never fail the official record). **No migration** - fans and
+preferences already exist; this is wiring plus pure policy only.
+
+**Pure policy** (`packages/database/src/lib/match-event-notification.ts`):
+`matchEventDecision` reuses the house publication gate (`isTournamentPublished`
+from publication-policy) and filters honestly - replays and toss-only writes
+are `no_state_change`, friendlies are `no_competition` (no follower surface
+exists without a tournament), unpublished competitions refuse, stream commands
+are not fan-out commands at all. `matchEventCopy` carries verbatim tested copy
+("Lions vs Falcons is now live" / "...has been rescheduled to 21 Oct 2026,
+14:00 UTC" / "...has been cancelled"). `matchEventDedupKey` scopes reschedules
+by target date (`match:<id>:rescheduled:<dateISO>`) so a SECOND move to a
+different date is a different key and is delivered, while a literal replay
+suppresses; start/cancel keys are one-per-match.
+
+**Wiring** (`apps/web/src/lib/match-fanout.ts` + two hooks): both `mutateMatch-
+Lifecycle` (start) and `manageMatch` (reschedule/cancel) capture the pre-command
+row, then enqueue `queueMatchLifecycleFanout` only AFTER the transaction
+commits. The helper resolves the competition row for the publication decision,
+reads both team names for the copy (a missing side fails the fan-out closed),
+formats the new date in explicit UTC (honest about the zone rather than
+guessing the fan's), and delegates to `dispatchNotificationToTournament-
+Followers`. All writers' early `return current` replay paths change nothing, so
+the pure decision filters them to no-op automatically.
+
+**Recorded boundaries (FAN-02 stays UNCHECKED).** Deliberately NOT triggers:
+fixture creation (whole lists generate at once - a flood, not a signal), toss
+results alone, stream start/end, ball-level events, and match completion
+(canonical completion belongs to scoring-service, outside the web writer's
+transaction - a service-side trigger bridge remains open). Roadmap honestly
+remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **130** files, **2,856 tests** (+5 wiring/policy) |
+| `npx vitest run` (database) | PASS - **29** files, **329 tests** (+4 policy) |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | None (no schema change this batch) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
