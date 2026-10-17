@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
+import Link from "next/link"
 import React from "react"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { LeagueSetupForm } from "@/components/league-setup-form"
@@ -29,6 +30,15 @@ export default async function LeagueSetupPage() {
       </MotionWrapper>
       <MotionWrapper variant="fadeInUp" delay={0.1}>
         <LeagueSetupForm />
+      </MotionWrapper>
+      <MotionWrapper variant="fadeInUp" delay={0.15}>
+        <p className="text-center text-sm text-muted-foreground">
+          Need a reviewed onboarding for a larger organization?{" "}
+          <Link href="/dashboard/league/apply" className="underline underline-offset-4">
+            Submit a league application
+          </Link>{" "}
+          instead.
+        </p>
       </MotionWrapper>
     </div>
   )

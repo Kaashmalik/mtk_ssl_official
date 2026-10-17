@@ -27,6 +27,8 @@ export * from "./lib/scorer-fencing";
 export * from "./lib/resource-grants";
 // Verified player records + consented career linkage (PUB-03)
 export * from "./lib/career-records";
+// Platform league application lifecycle policy (REG-01)
+export * from "./lib/league-application-policy";
 
 // DB Errors
 export * from "./lib/db-errors";
@@ -38,6 +40,7 @@ export * from "./schema/users";
 export * from "./schema/user-tenant-roles";
 export * from "./schema/user-invites";
 export * from "./schema/ownership-transfers";
+export * from "./schema/league-applications";
 export * from "./schema/profiles";
 export * from "./schema/tournaments";
 export * from "./schema/teams";

@@ -34,6 +34,11 @@ const ALLOWLIST = new Set([
   // before any TenantScopedRepository context can exist. It pre-dates
   // resolution of an active league and is audited accordingly.
   "tenants.ts",
+  // Bootstrap only (REG-01): league-applications.ts is the reviewed-onboarding
+  // sibling of tenants.ts. An applicant has no league yet, so there is nothing
+  // a tenant-scoped repository could scope to; writes are user-scoped under
+  // the applicant's row lock, version-checked and audited (LEAGUE_APPLICATION_*).
+  "league-applications.ts",
   // Every other action file delegates to tenant-scoped readers/writers in
   // lib/ (or scoring-service via its client): notifications.ts (Batch 33),
   // follows.ts/registrations.ts (Batch 36), player-ids.ts (Batch 37),
