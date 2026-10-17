@@ -4576,6 +4576,61 @@ Next: use the consolidated groups for the public hub/competition source and
 independent release-evidence infrastructure work; do not reimplement delivered
 source or infer production completion from test counts.
 
+## Batch 86 - PUB-02 public cross-league hub (owner opt-in, listed read models, protected discovery)
+
+**Scope.** The remaining hub source slice of PUB-02 after Batch 79's consented
+career view: owner-approved league listing, the cross-tenant read models that
+respect it, and the public discovery page. Nothing here relaxes the existing
+publication boundary — listing is additive discoverability only.
+
+**Implementation.**
+
+- `supabase/migrations/20261017103000_hub_listing.sql` (LOCAL ONLY, unapplied):
+  guarded `hub_listing_status` enum ('unlisted'/'listed');
+  `tenants.hub_listing_status NOT NULL DEFAULT 'unlisted'` and
+  `hub_listed_at timestamptz`. Drizzle schema mirrors both columns.
+- Shared fail-closed policy `public-hub-policy.ts` (packages/database):
+  `hubListingEligible` requires an explicitly listed, active league with a
+  provenance timestamp; anything unknown/inconsistent is unlisted.
+  `hubListingTransition` validates decisions and marks no-ops.
+- Owner-only writer `lib/hub-listing-settings.ts`: session identity,
+  `tenants.owner_id` ownership (settings:manage staff cannot publish a
+  league), tenant row locked `FOR UPDATE`, no-op decisions skip writes,
+  delisting clears `hub_listed_at`, and a tenant-scoped `HUB_LISTING` audit
+  row records enable + before/after. `readMyHubListing` returns
+  `isOwner: false` for non-owners so the control is hidden, not merely denied.
+- Read models `lib/public-hub.ts`: `readListedHubLeagues` is the only public
+  cross-tenant read, SQL-filtered on the listing policy, bounded at 50 with an
+  explicit `complete` flag and deterministic ordering; competition and live
+  fixture counts aggregate through the exact `PUBLISHED_*` status predicates
+  (fixtures additionally require a published parent, matching single-league
+  pages). `hubLeagueUrl` produces absolute links only for verified+SSL custom
+  domains; subdomain links are never fabricated.
+- Public `/hub` page with honest empty/bounded/failure states; owner-only
+  `HubListingCard` on the settings page; `app/actions/league-hub.ts` is a
+  zod-validated delegate (the no-unscoped-queries allowlist is unchanged).
+
+**Boundary.** Source plus automated boundary verification (policy matrix,
+dialect-level query shapes, writer locking/audit/no-ops, URL rules, stubbed
+page rendering). NOT claimed: migration application, RLS/hosting acceptance,
+real browser certification, share/SEO surfaces, or whole-PUB-02 completion.
+No unlisted-link tier exists by design; future work (league hub detail pages,
+PUB-03 records/awards) stays open. Release gate `LEAGUE_MEMBERSHIP_CONTROLS_READY`
+stays default-off; no remote database writes occurred.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --filter @mtk/database build` | PASS |
+| `corepack pnpm --filter @mtk/database test` | PASS - **20** files, **258 tests** (+15) |
+| `corepack pnpm --filter @mtk/web test` | recorded after run below |
+| `tsc --noEmit` (from `apps/web`) | **0** errors |
+| `corepack pnpm test:release` | PASS - **87/87** checker tests, not release acceptance |
+| `corepack pnpm test:roadmap` | PASS - **6/6** inventory tests (19 checked / 60 open / 79 IDs unchanged) |
+| `git diff --check` | Clean (EOL repair applied to `tenants.ts` added lines only) |
+| Remote apply/deployment | None |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -8,6 +8,8 @@ import { Badge } from "@mtk/ui/components/ui/badge"
 import { TenantSettingsForm } from "@/components/settings/tenant-settings-form"
 import { WhiteLabelRequestPanel } from "@/components/settings/white-label-request-panel"
 import { UsageMeters } from "@/components/settings/usage-meters"
+import { HubListingCard } from "@/components/settings/hub-listing-card"
+import { readMyHubListing } from "@/lib/hub-listing-settings"
 import { unstable_noStore as noStore } from "next/cache"
 import { Settings, CreditCard } from "lucide-react"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
@@ -23,9 +25,10 @@ export default async function SettingsPage() {
   // league or insufficient role throws to the error boundary; it never silently falls
   // back to the account's primary/owned league or redirects to league setup.
   const context = await requireActiveLeagueContext("settings:manage")
-  const [{ tenant, branding }, whiteLabelRequests] = await Promise.all([
+  const [{ tenant, branding }, whiteLabelRequests, hubListing] = await Promise.all([
     readLeagueSettings(context.tenantId),
     readWhiteLabelRequests(context.tenantId),
+    readMyHubListing(),
   ])
 
   const initialData = {
@@ -105,6 +108,13 @@ export default async function SettingsPage() {
       <MotionWrapper variant="fadeInUp" delay={0.12}>
         <WhiteLabelRequestPanel plan={tenant.plan} tenantId={tenant.id} requests={whiteLabelRequests} />
       </MotionWrapper>
+
+      {/* PUB-02: only the league OWNER may publish it to the cross-league hub. */}
+      {hubListing.isOwner && (
+        <MotionWrapper variant="fadeInUp" delay={0.14}>
+          <HubListingCard listed={hubListing.listed} listedAt={hubListing.listedAt ? String(hubListing.listedAt) : null} />
+        </MotionWrapper>
+      )}
     </div>
   )
 }

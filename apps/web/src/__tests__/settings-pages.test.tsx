@@ -1,13 +1,14 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import SettingsPage from "@/app/dashboard/settings/page"
+import { HubListingCard } from "@/components/settings/hub-listing-card"
 import BillingPage from "@/app/dashboard/settings/billing/page"
 import InvoicesPage from "@/app/dashboard/settings/billing/invoices/page"
 import InvoiceDetailPage from "@/app/dashboard/settings/billing/[id]/page"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), context: vi.fn(), settings: vi.fn(), identity: vi.fn(),
-  invoices: vi.fn(), invoice: vi.fn(), whiteLabel: vi.fn(),
+  invoices: vi.fn(), invoice: vi.fn(), whiteLabel: vi.fn(), hubListing: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
@@ -27,6 +28,12 @@ vi.mock("@/lib/league-settings-reads", () => ({
 vi.mock("@/components/settings/tenant-settings-form", () => ({ TenantSettingsForm: () => null }))
 vi.mock("@/components/settings/white-label-request-panel", () => ({ WhiteLabelRequestPanel: () => null }))
 vi.mock("@/components/settings/usage-meters", () => ({ UsageMeters: () => null }))
+vi.mock("@/lib/hub-listing-settings", () => ({ readMyHubListing: mocks.hubListing }))
+// Named function so presence tests can match the element by identity (the
+// props-walker cannot see text a mocked component renders internally).
+vi.mock("@/components/settings/hub-listing-card", () => ({
+  HubListingCard: function MockHubListingCard() { return null },
+}))
 vi.mock("@/app/dashboard/settings/billing/billing-client", () => ({ BillingPageClient: () => null }))
 vi.mock("@/components/billing/subscription-countdown", () => ({ SubscriptionCountdown: () => null }))
 vi.mock("@/components/share/print-button", () => ({ PrintButton: () => null }))
@@ -48,6 +55,16 @@ function text(node: any): string {
   return typeof node === "string" || typeof node === "number" ? String(node) : ""
 }
 
+/** Matches the mocked control by element identity, not by internal render text. */
+function collectHubCards(node: unknown, found: unknown[]): unknown[] {
+  if (Array.isArray(node)) { node.forEach((child) => collectHubCards(child, found)); return found }
+  if (React.isValidElement(node)) {
+    if (node.type === HubListingCard) found.push(node)
+    collectHubCards((node.props as { children?: React.ReactNode }).children, found)
+  }
+  return found
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.auth.mockResolvedValue({ userId: "clerk" })
@@ -58,6 +75,8 @@ beforeEach(() => {
     status: "paid", total: "1000.00", currency: "PKR", paidAt: null, createdAt: new Date("2026-01-01") }])
   mocks.invoice.mockResolvedValue(invoiceRow)
   mocks.whiteLabel.mockResolvedValue([])
+  // Non-owner default: the PUB-02 listing control stays hidden from staff.
+  mocks.hubListing.mockResolvedValue({ isOwner: false, listed: "unlisted", listedAt: null, eligible: false })
 })
 
 describe("Settings page requires exact-league authority", () => {
@@ -67,6 +86,12 @@ describe("Settings page requires exact-league authority", () => {
     expect(mocks.settings).toHaveBeenCalledWith(TENANT)
     expect(mocks.whiteLabel).toHaveBeenCalledWith(TENANT)
     expect(text(tree)).toContain("Settings")
+  })
+  it("shows the PUB-02 hub listing control only to the league owner", async () => {
+    mocks.hubListing.mockResolvedValue({ isOwner: true, listed: "listed", listedAt: new Date("2026-10-17T00:00:00Z"), eligible: true })
+    expect(collectHubCards(await SettingsPage(), [])).toHaveLength(1)
+    mocks.hubListing.mockResolvedValue({ isOwner: false, listed: "unlisted", listedAt: null, eligible: false })
+    expect(collectHubCards(await SettingsPage(), [])).toHaveLength(0)
   })
   it.each(["Forbidden", "Tenant not found", "Database unavailable"])(
     "propagates %s without a league-setup redirect or fake empty settings", async (message) => {

@@ -3,6 +3,20 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 86) - `hub_listing` LOCAL ONLY, unapplied.**
+> File: `supabase/migrations/20261017103000_hub_listing.sql` adds the guarded
+> `hub_listing_status` enum ('unlisted'/'listed') plus
+> `tenants.hub_listing_status NOT NULL DEFAULT 'unlisted'` and
+> `hub_listed_at timestamptz` (PUB-02 owner opt-in for cross-league hub
+> discoverability). Additive and idempotent: every existing league stays
+> unlisted and unchanged. Enforcement is application-side (shared
+> `public-hub-policy` + the audited owner-only listing writer); no remote
+> apply, no `DATABASE_URL` execution, no history row — acceptance requires
+> real PostgreSQL application/RLS review. This file's timestamp precedes the
+> Batch 85 revision file; both, together with the XI and handover migrations
+> below, remain pending. Apply the complete reviewed chain before any
+> coordinated release.
+
 > **17 October 2026 (Batch 85) - `scoring_revisions` LOCAL ONLY, unapplied.**
 > CLI-created file `supabase/migrations/20261017093925_scoring_revisions.sql`
 > adds `matches.scoring_revision integer NOT NULL DEFAULT 0` plus a nonnegative
