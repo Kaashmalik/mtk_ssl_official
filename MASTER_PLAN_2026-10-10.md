@@ -5551,6 +5551,51 @@ checkboxes stay unchecked. Votes still feed nothing official.
 | `git diff --check` | Clean |
 | Migration | none this batch (Batch 103 migration serves the UI) |
 
+## Batch 105 - FAN-03 milestone + share cards on the public tournament page
+
+Two celebration surfaces, both **derived-fact honest**:
+
+**Milestones** - a new bounded card on the public tournament page lists
+**centuries** (100+ run innings) and **five-wicket hauls** (5+ wicket
+innings) derived from OFFICIAL scorecard rows through the same
+published-tournament gate as the leaderboards. Nothing is stored: a
+milestone can never exist without its official scorecard row, unknown
+shapes are dropped (not guessed), entries sort best-first with a stable id
+tiebreak (pure `compareMilestoneEntries`), each section is bounded at 10,
+and every entry carries the verified-player flag. The card says what it is:
+"Milestones are celebration surfaces - they feed no official decision."
+
+**Share** - a `TournamentShareCard` dropdown next to the status badge
+shares the **public route only** (`/tournaments/<id>`, never a dashboard
+path), with copy-link and WhatsApp/X/Facebook targets; the share text
+mentions the persisted champion when one exists ("Champions: ..."). Pure
+builders (`buildTournamentShareText`, `buildShareUrl`,
+`whatsappShareUrl`, `twitterShareUrl`, `facebookShareUrl`) are exported and
+encoded-input tested; the existing dashboard `ShareButton` is untouched.
+
+Pure policy `@mtk/database/lib/milestone-policy.ts` (century/five-for
+per-innings predicates, `MILESTONE_LIMIT`, deterministic ordering) +
+`readPublishedTournamentMilestones` in the house public-read module
+(single join chain per metric: scorecard -> matches -> published
+tournament, tenant-pinned at every hop).
+
+**Boundary (recorded honestly).** FAN-03 stays open: recap/highlight tools,
+approved analytic packages, and a league-scoped hall-of-fame index (needs a
+public tournaments index page) remain unchecked; milestones do NOT feed
+standings, awards, or any official decision, and staged acceptance still
+waits on the user's SUPABASE_ACCESS_TOKEN.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - milestone/share/reader tests in the full suite |
+| `npx vitest run` (database) | PASS - milestone policy 4 tests in the full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (derived reads only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

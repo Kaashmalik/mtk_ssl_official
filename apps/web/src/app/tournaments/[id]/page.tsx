@@ -9,9 +9,11 @@ import { unstable_noStore as noStore } from "next/cache"
 import { Calendar, Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion } from "@/lib/public-visibility"
+import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones } from "@/lib/public-visibility"
 import { readFanTournamentPolls, readMyPollVoteSafe } from "@/lib/tournament-polls"
 import { TournamentPollCard } from "@/components/shared/tournament-poll-card"
+import { TournamentShareCard } from "@/components/shared/tournament-share-card"
+import { MilestoneCards } from "@/components/tournaments/milestone-cards"
 import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -35,6 +37,8 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   // they see read-only aggregate counts and a sign-in hint).
   const fanPolls = await readFanTournamentPolls(tenantId, id)
   const fanVotes = await Promise.all(fanPolls.map(poll => readMyPollVoteSafe(tenantId, poll.pollId)))
+  // FAN-03: milestones derived from official scorecard rows (publication-gated).
+  const milestones = await readPublishedTournamentMilestones(tenantId, id)
 
   const approvedRegs = await db.select().from(leagueRegistrations)
     .where(and(
@@ -152,7 +156,14 @@ export default async function PublicTournamentPage({ params }: { params: Promise
           <h1 className="text-2xl font-bold">{tournament.name}</h1>
           <p className="text-sm text-muted-foreground">{tournament.description}</p>
         </div>
-        <Badge variant="outline">{STATUS_LABELS[tournament.status] ?? tournament.status}</Badge>
+        <div className="flex items-center gap-2">
+          <TournamentShareCard
+            tournamentId={id}
+            tournamentName={tournament.name}
+            championName={champion?.championTeamName ?? null}
+          />
+          <Badge variant="outline">{STATUS_LABELS[tournament.status] ?? tournament.status}</Badge>
+        </div>
       </div>
 
       {/* FAN-03 hall of fame: persisted champion, shown exactly as recorded. */}
@@ -184,6 +195,9 @@ export default async function PublicTournamentPage({ params }: { params: Promise
           ))}
         </section>
       )}
+
+      {/* FAN-03: milestone cards - derived facts from official scorecards. */}
+      <MilestoneCards milestones={milestones} />
 
       {bracketMatches.length > 0 && (
         <div className="space-y-2">

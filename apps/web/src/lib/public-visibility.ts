@@ -3,6 +3,10 @@ import { db, matches, tournaments, teams, matchInnings, players, users, playerSe
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
 import { isAwardVisible, AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT, type AwardCategory } from "@mtk/database/lib/award-policy"
+import {
+  isMilestoneCentury, isMilestoneFiveFor, compareMilestoneEntries,
+  MILESTONE_LIMIT, type MilestoneEntry,
+} from "@mtk/database/lib/milestone-policy"
 import { isPrizePubliclyVisible, PUBLIC_PRIZE_LIMIT } from "@mtk/database/lib/prize-policy"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
@@ -564,4 +568,89 @@ export async function readPublishedTournamentChampion(
   if (!row || !isTournamentPublished(row.status)) return null
   if (row.championTeamId === null || row.championTeamName === null) return null
   return { championTeamName: row.championTeamName, championTeamId: row.championTeamId }
+}
+
+/**
+ * FAN-03 tournament milestones: centuries (100+ run innings) and five-wicket
+ * hauls (5+ wicket innings) derived from OFFICIAL scorecard rows of ONE
+ * published tournament. Nothing is stored - each entry replays a verifiable
+ * scorecard row through the same published-tournament gate as the
+ * leaderboards, so a milestone can never exist without its official row.
+ * Bounded, sorted best-first, verified-player flagged; celebration only.
+ */
+export type PublicMilestones = {
+  centuries: MilestoneEntry[]
+  fiveFors: MilestoneEntry[]
+}
+
+export async function readPublishedTournamentMilestones(
+  tenantId: string,
+  tournamentId: string,
+): Promise<PublicMilestones> {
+  const published = inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES])
+  const battingRows = await db
+    .select({
+      playerId: battingScorecards.playerId,
+      playerName: players.name,
+      runs: battingScorecards.runs,
+      playerUserId: players.userId,
+      linkedUserActive: users.isActive,
+      recordedAt: battingScorecards.createdAt,
+    })
+    .from(battingScorecards)
+    .innerJoin(players, and(eq(players.id, battingScorecards.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(users, eq(users.id, players.userId))
+    .innerJoin(matches, and(eq(matches.id, battingScorecards.matchId), eq(matches.tenantId, tenantId)))
+    .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
+    .where(and(
+      eq(battingScorecards.tenantId, tenantId),
+      eq(matches.tournamentId, tournamentId),
+      published,
+    ))
+  const centuries = battingRows
+    .filter(row => isMilestoneCentury({ runs: row.runs }))
+    .map(row => ({
+      playerId: row.playerId,
+      playerName: row.playerName,
+      playerVerified: isVerifiedPlayerRecord({ userId: row.playerUserId },
+        row.linkedUserActive === null || row.linkedUserActive === undefined ? null : { isActive: row.linkedUserActive }),
+      value: row.runs,
+      recordedAt: row.recordedAt.toISOString(),
+    }))
+    .sort(compareMilestoneEntries)
+    .slice(0, MILESTONE_LIMIT)
+
+  const bowlingRows = await db
+    .select({
+      playerId: bowlingScorecards.playerId,
+      playerName: players.name,
+      wickets: bowlingScorecards.wickets,
+      playerUserId: players.userId,
+      linkedUserActive: users.isActive,
+      recordedAt: bowlingScorecards.createdAt,
+    })
+    .from(bowlingScorecards)
+    .innerJoin(players, and(eq(players.id, bowlingScorecards.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(users, eq(users.id, players.userId))
+    .innerJoin(matches, and(eq(matches.id, bowlingScorecards.matchId), eq(matches.tenantId, tenantId)))
+    .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
+    .where(and(
+      eq(bowlingScorecards.tenantId, tenantId),
+      eq(matches.tournamentId, tournamentId),
+      published,
+    ))
+  const fiveFors = bowlingRows
+    .filter(row => isMilestoneFiveFor({ wickets: row.wickets }))
+    .map(row => ({
+      playerId: row.playerId,
+      playerName: row.playerName,
+      playerVerified: isVerifiedPlayerRecord({ userId: row.playerUserId },
+        row.linkedUserActive === null || row.linkedUserActive === undefined ? null : { isActive: row.linkedUserActive }),
+      value: row.wickets,
+      recordedAt: row.recordedAt.toISOString(),
+    }))
+    .sort(compareMilestoneEntries)
+    .slice(0, MILESTONE_LIMIT)
+
+  return { centuries, fiveFors }
 }

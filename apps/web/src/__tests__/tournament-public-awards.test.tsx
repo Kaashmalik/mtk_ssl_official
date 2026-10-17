@@ -13,11 +13,12 @@ vi.mock("@/lib/public-visibility", () => ({
   readPublishedTournament: mocks.publishedTournament,
   readPublishedTournamentAwards: mocks.awards,
   readPublishedTournamentPrizes: mocks.prizes,
-  // FAN-03: the champion banner read - champion-less in these scenarios.
+  // FAN-03: the champion banner + milestone reads - none in these scenarios.
   readPublishedTournamentChampion: (...args: unknown[]) => {
     mocks.championCalls.push(args)
     return Promise.resolve(null)
   },
+  readPublishedTournamentMilestones: () => Promise.resolve({ centuries: [], fiveFors: [] }),
 }))
 vi.mock("@/components/tournaments/knockout-bracket", () => ({ KnockoutBracket: () => null }))
 vi.mock("@mtk/database", async (original) => ({
