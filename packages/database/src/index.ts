@@ -18,6 +18,9 @@ export * from "./lib/plan-guard";
 
 // Shared membership-effectiveness policy (expiry/suspension, SCORE-09)
 export * from "./lib/membership-effectiveness";
+
+// Shared playing-XI policy (declaration/approval/enforcement, SCORE-09/COMP-06)
+export * from "./lib/playing-xi-policy";
 // Shared resource-scoped grant design (ISO-05): scorer slots + team grants
 export * from "./lib/resource-grants";
 // Verified player records + consented career linkage (PUB-03)
@@ -41,6 +44,7 @@ export * from "./schema/venues";
 export * from "./schema/matches";
 export * from "./schema/match-innings";
 export * from "./schema/match-balls";
+export * from "./schema/match-playing-xis";
 export * from "./schema/documents";
 export * from "./schema/media";
 export * from "./schema/subscriptions";

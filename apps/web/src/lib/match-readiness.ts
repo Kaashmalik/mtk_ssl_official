@@ -15,6 +15,10 @@
  *    is known; legacy competitions (unknown/absent) never fail on this.
  *  - A known non-approved team registration blocks tournament play, matching
  *    the canonical writer. Missing registrations retain the legacy policy.
+ *  - Declared XIs (COMP-06 slice): while `xiRequired` is armed, official
+ *    approval (`xiApprovedAt`) is blocking — the canonical boundary refuses
+ *    deliveries. For legacy/unarmed tournament fixtures the XI stays a
+ *    non-blocking recommendation, matching the legacy-safe migration default.
  *  - An umpire listing is advisory only, and is satisfied by EITHER a free
  *    text listing (external officials) OR a member-bound assignment
  *    (umpire1Id/umpire2Id, COMP-06). When the member-umpire consent
@@ -47,6 +51,13 @@ export type MatchReadinessInput = {
   teamBSquadDeclared?: boolean
   teamARegistrationApproved?: boolean
   teamBRegistrationApproved?: boolean
+  /**
+   * Declared-XI gate (COMP-06 slice): armed only by an XI declaration write.
+   * While armed, both sides must be officially approved before play; absent/
+   * undefined or false = legacy match, which keeps XI purely recommended.
+   */
+  xiRequired?: boolean
+  xiApprovedAt?: Date | string | null
 }
 
 export type ReadinessCheck = {
@@ -117,6 +128,23 @@ export function computeMatchReadiness(input: MatchReadinessInput): {
       pass: (input.teamARegistrationApproved ?? true) && (input.teamBRegistrationApproved ?? true),
       blocking: true,
     })
+    if (input.xiRequired) {
+      checks.push({
+        id: "playing-xi",
+        label: "Playing XIs declared and approved",
+        // Blocked while approval is pending - the canonical boundary refuses
+        // deliveries for an armed match until an official approves both XIs.
+        pass: input.xiApprovedAt !== null && input.xiApprovedAt !== undefined,
+        blocking: true,
+      })
+    } else {
+      checks.push({
+        id: "playing-xi",
+        label: "Playing XIs declared (recommended)",
+        pass: false,
+        blocking: false,
+      })
+    }
   }
 
   return { ready: checks.every(check => check.pass || !check.blocking), checks }

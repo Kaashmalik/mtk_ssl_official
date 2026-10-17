@@ -1,13 +1,14 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations, membershipGrantsAccess } from '@mtk/database';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { db, users, userTenantRoles, tenants, teams, players, leagueRegistrations, matchPlayingXis, membershipGrantsAccess } from '@mtk/database';
 import { scorerSlotGrant } from '@mtk/database';
 import { matchRegistrationMap, registrationAllowsPlayer, type SquadRegistration } from '@mtk/database/lib/registered-squad-eligibility';
+import { xiEnforcementLevel, xiCoversParticipants } from '@mtk/database/lib/playing-xi-policy';
 import { z } from 'zod';
 import type { DeliveryCommand } from './delivery-command';
 
 export type ScoringTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type ScoringMatch = { tenantId: string; tournamentId: string | null; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string };
+export type ScoringMatch = { id: string; tenantId: string; tournamentId: string | null; scorerId: string | null; backupScorerId?: string | null; teamAId: string; teamBId: string; xiRequired?: boolean | null; xiApprovedAt?: Date | string | null };
 
 /** Call AFTER the tenant-filtered match lock, BEFORE replay or any write. */
 export async function requireScoringWriteAccess(tx: ScoringTransaction, tenantId: string,
@@ -66,7 +67,13 @@ export async function requireMatchTeams(tx: ScoringTransaction, tenantId: string
   }
 }
 
-/** Current roster + registered squad eligibility; immutable XI/substitutions remain separate. */
+/**
+ * Current roster + registered squad eligibility, plus the declared-XI gate
+ * (COMP-06 slice). While a match's XI requirement is armed, deliveries are
+ * refused until an official approves both sides' XIs, and afterwards every
+ * participant must be on their side's active declared XI. Matches that never
+ * armed the requirement keep registered-squad-only eligibility.
+ */
 export async function requireDeliveryParticipants(tx: ScoringTransaction, tenantId: string,
   match: ScoringMatch, battingTeamId: string, command: DeliveryCommand) {
   // An explicitly null parent is a friendly. A missing selected column is not.
@@ -113,6 +120,28 @@ export async function requireDeliveryParticipants(tx: ScoringTransaction, tenant
       if (!registrationAllowsPlayer(registrations.get(teamId), id)) {
         throw new BadRequestException('Player is outside the approved tournament squad');
       }
+    }
+  }
+  // Declared-XI gate (COMP-06). The match row is already FOR UPDATE locked, so
+  // a concurrent re-declaration (which also locks the match first) is
+  // serialized against this read; the active XI rows themselves need no extra
+  // lock. Fail closed: an armed-but-unapproved match blocks play, and an
+  // approved match only admits participants present on the ACTIVE declared XI.
+  const xiLevel = xiEnforcementLevel(match);
+  if (xiLevel === 'pendingApproval') {
+    throw new BadRequestException('Playing XIs are declared but not yet approved by an official');
+  }
+  if (xiLevel === 'enforced') {
+    const xiRows = await tx.query.matchPlayingXis.findMany({
+      where: and(
+        eq(matchPlayingXis.tenantId, tenantId),
+        eq(matchPlayingXis.matchId, match.id),
+        isNull(matchPlayingXis.supersededAt),
+      ),
+      columns: { teamId: true, playerId: true, battingOrder: true },
+    });
+    if (!xiCoversParticipants(xiRows, participants)) {
+      throw new BadRequestException('Delivery participant is outside the declared playing XI');
     }
   }
   const ids = [...participants.keys()].sort();

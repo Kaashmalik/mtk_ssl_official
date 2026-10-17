@@ -9,7 +9,7 @@ import { mutateMatchLifecycle } from "@/lib/match-lifecycle"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { proxyCompleteMatch } from "@/lib/scoring-service-client"
 import { manageMatch, matchMetadataSchema, streamCommandSchema } from "@/lib/match-management"
-import { assignScorerInMatch, approveScorerAssignmentInMatch, approveUmpireAssignmentInMatch, assignUmpireInMatch, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
+import { assignScorerInMatch, approveScorerAssignmentInMatch, approveUmpireAssignmentInMatch, assignUmpireInMatch, setPlayingXis, approvePlayingXis, findTenantMatch, listTenantMatches, listTenantScorers, listTenantUmpires,
   readMatchFormOptions } from "@/lib/match-records"
 
 const createMatchSchema = matchMetadataSchema.extend({ tenantId: z.string().uuid().optional() }).strict()
@@ -245,6 +245,54 @@ export const approveUmpireAssignment = withAuth("match:read", async (matchId: st
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   const result = await approveUmpireAssignmentInMatch({ userId, tenantId, matchId })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/dashboard/matches/${matchId}`)
+  return { success: true as const, ...result }
+})
+
+const declaredXiEntrySchema = z.object({
+  playerId: z.string().uuid(),
+  battingOrder: z.number().int().min(1).max(11),
+}).strict()
+
+/**
+ * Declared playing XIs (COMP-06 slice): an owner or the assigned scorer
+ * stores both sides' squads for a competition match. Shape validation is
+ * repeated by the locked writer through the shared XI policy; the writer is
+ * the real authority and an active effective membership is re-verified there.
+ */
+export const declarePlayingXis = withAuth("match:update", async (
+  matchId: string,
+  teamAXi: { playerId: string; battingOrder: number }[],
+  teamBXi: { playerId: string; battingOrder: number }[],
+) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(matchId)
+  const aXi = z.array(declaredXiEntrySchema).parse(teamAXi)
+  const bXi = z.array(declaredXiEntrySchema).parse(teamBXi)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  await requirePermissionServer("match:update", tenantId)
+  const result = await setPlayingXis({ userId, tenantId, matchId, teamAXi: aXi, teamBXi: bXi })
+  revalidatePath("/dashboard", "layout")
+  revalidatePath(`/dashboard/matches/${matchId}`)
+  return { success: true as const, ...result }
+})
+
+/**
+ * Official approval of the declared playing XIs (COMP-06 slice): a league
+ * owner or an ASSIGNED member umpire approves. Gated `match:read` because
+ * member umpires may hold any role; the locked writer's authority check is
+ * the real gate. A later re-declaration clears the approval and re-arms it.
+ */
+export const approveXis = withAuth("match:read", async (matchId: string) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(matchId)
+  const tenantId = await resolveActiveTenantId()
+  if (!tenantId) throw new Error("Tenant not found")
+  const result = await approvePlayingXis({ userId, tenantId, matchId })
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/dashboard/matches/${matchId}`)
   return { success: true as const, ...result }

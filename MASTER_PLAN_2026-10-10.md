@@ -4209,6 +4209,64 @@ real-DB acceptance), COMP-07 remainder (scoped notices / competition
 locks), release gates (Batch 62 evidence + services deployment remain
 unmet). Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-17 - Batch 80: COMP-06 declared playing XIs (immutable declarations + official approval)
+
+- Migration `20261017090000_playing_xi_declaration.sql` (additive, idempotent,
+  local-only/unapplied): `matches.xi_required` (legacy-safe default false) +
+  `matches.xi_approved_at`; `match_playing_xis` = one immutable row per
+  (match, side, player) with batting order CHECK 1..11, composite
+  same-league FKs to matches (reusing the Batch 63 `matches_id_tenant_key`)
+  and teams (adds `teams_id_tenant_key`), partial active-row uniques and
+  lookup index, ENABLE+FORCE RLS with grants only for the internal roles,
+  no anon/authenticated policy and no delete grant. Re-declaration
+  supersedes; nothing is ever mutated or removed.
+- Shared policy `@mtk/database/lib/playing-xi-policy`: declaration shape
+  validation (exactly 11 distinct players, orders 1..11), legacy-safe
+  enforcement levels off/pendingApproval/enforced (an armed row blocks play
+  until an official approves; malformed/future approval instants fail
+  closed), and per-side active-XI participant coverage.
+- Canonical boundary (`scoring-write-access.ts`): armed-but-unapproved
+  matches refuse deliveries ("declared but not yet approved"); approved
+  matches require every delivery participant (batter, bowler, dismissed,
+  fielder) to be on their OWN side's active declared XI. Serialized through
+  the existing match FOR UPDATE lock - no new lock acquisitions.
+- Web (`match-records.ts`, locked + audited + conditional-update guarded):
+  `setPlayingXis` (owner or assigned scorer/backup): canonical lock order
+  match→actor→league→membership→ordered teams→mirrored registration read→
+  ordered players; validates shape, registered-squad eligibility and roster
+  side membership, then supersedes previous active rows, inserts 22 and arms
+  `xi_required` clearing any prior approval (XI_DECLARE).
+  `approvePlayingXis` (owner or assigned member umpire): requires armed,
+  2×11 active rows, pending; conditional update (XI_APPROVE). Server actions
+  `declarePlayingXis` (`match:update`), `approveXis` (`match:read`).
+  Readiness gains a blocking armed-XI check and a non-blocking
+  recommendation for legacy fixtures.
+- Limits: no XI/approval UI surfaces yet; substitutions (SCORE-10) open;
+  friendly matches can never arm the gate (competition-only).
+
+**Testing:** `playing-xi-policy.test.ts` (+5), `playing-xi-schema.test.ts`
+(+5 Drizzle↔SQL contracts incl. RLS/grants and composite bindings),
+`scoring-write-access.spec.ts` (+8 delivery-gate matrix),
+`playing-xis.test.ts` (+11 writer authority/eligibility/fail-closed),
+`match-readiness.test.ts` (+2).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **108** files, **2,606 tests** (+17) |
+| `npx vitest run` (database) | PASS - 17 files, **225 tests** (+10) |
+| `jest --runInBand` (scoring) | PASS - 12 suites, **312 tests** (+8) |
+| vitest (ai-commentary) | PASS - 4 suites, **39 tests** |
+| `node scripts/release-evidence.mjs` | PASS - **87** checks (unchanged) |
+| `tsc --noEmit` (web) | **0** errors |
+| `git diff --check` | Clean |
+| Remote apply | none - migration is local-only by design |
+
+Next source work: XI/approval UI surfaces, toss decisions, substitutions
+(SCORE-10), scorer handover safeguards (SCORE-11), PUB-02 public page,
+COMP-07 remainder, release gates. Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -126,6 +126,15 @@ export const matches = pgTable("matches", {
   scorerApprovalRequired: boolean("scorer_approval_required").notNull().default(false),
   /** When the assigned scorer approved; only the assigned member may set it, any assignment change clears it. */
   scorerApprovedAt: timestamp("scorer_approved_at", { withTimezone: true }),
+  /**
+   * Playing-XI gate (COMP-06 slice): armed by XI declaration writes; legacy
+   * matches stay false and keep registered-squad-only eligibility. While
+   * armed, deliveries are blocked until an official (league owner or assigned
+   * member umpire) sets xiApprovedAt; every re-declaration clears it.
+   */
+  xiRequired: boolean("xi_required").notNull().default(false),
+  /** Official approval of both declared playing XIs; cleared by every re-declaration. */
+  xiApprovedAt: timestamp("xi_approved_at", { withTimezone: true }),
 
   // Metadata
   createdBy: text("created_by"),

@@ -13,8 +13,9 @@ const BOWLER = '00000000-0000-4000-8000-000000000010';
 const FIELDER = '00000000-0000-4000-8000-000000000011';
 const NONSTRIKER = '00000000-0000-4000-8000-000000000012';
 const TOURNAMENT = '00000000-0000-4000-8000-000000000013';
+const MATCH = '00000000-0000-4000-8000-000000000014';
 const dialect = new PgDialect();
-const match = { tenantId: TENANT, tournamentId: null, scorerId: ACTOR, teamAId: TEAM_A, teamBId: TEAM_B };
+const match = { id: MATCH, tenantId: TENANT, tournamentId: null, scorerId: ACTOR, teamAId: TEAM_A, teamBId: TEAM_B };
 const command = { matchId: TENANT, inningsId: TEAM_A, clientOpId: 'op', over: 0, ball: 1, runs: 0, batsmanId: BATTER, bowlerId: BOWLER };
 function adapter() {
   const roster = new Map([
@@ -30,6 +31,7 @@ function adapter() {
     teams: { findFirst: jest.fn(async ({ where }) => ({ id: dialect.sqlToQuery(where).params[0], tenantId: TENANT, isActive: true })) },
     players: { findFirst: jest.fn(async ({ where }) => roster.get(String(dialect.sqlToQuery(where).params[0]))) },
     leagueRegistrations: { findMany: jest.fn().mockResolvedValue([]) },
+    matchPlayingXis: { findMany: jest.fn().mockResolvedValue([]) },
   } };
   return { mock, tx: mock as unknown as ScoringTransaction, roster };
 }
@@ -263,4 +265,83 @@ describe('Tenant-scoped delivery participants', () => {
     await expect(requireDeliveryParticipants(tx, TENANT, match, TEAM_A, command)).rejects.toThrow();
     expect(mock.query.players.findFirst).not.toHaveBeenCalled();
   });
+});
+
+describe('Declared playing-XI delivery gate (COMP-06)', () => {
+  // Deterministic fillers keep every declared side at exactly 11 rows, with the
+  // delivery participants spliced in ahead of them so orders stay 1..11.
+  const filler = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const xiSquad = (teamId: string, start: number, extra: string[]) => {
+    const ids = [...extra, ...Array.from({ length: 11 - extra.length }, (_, i) => filler(start + i))];
+    return ids.map((playerId, i) => ({ teamId, playerId, battingOrder: i + 1 }));
+  };
+  const approvedXis = () => [
+    ...xiSquad(TEAM_A, 100, [BATTER, NONSTRIKER]),
+    ...xiSquad(TEAM_B, 200, [BOWLER, FIELDER]),
+  ];
+
+  it.each([
+    ['a tournament match', { ...match, tournamentId: TOURNAMENT, xiRequired: true, xiApprovedAt: null }],
+    ['a friendly', { ...match, xiRequired: true, xiApprovedAt: null }],
+  ])('blocks deliveries while declared XIs await official approval on %s', async (_label, armed) => {
+    const { mock, tx } = adapter();
+    await expect(requireDeliveryParticipants(tx, TENANT, armed, TEAM_A, command))
+      .rejects.toThrow('declared but not yet approved');
+    expect(mock.query.matchPlayingXis.findMany).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a malformed or future approval instant', async () => {
+    const { tx } = adapter();
+    await expect(requireDeliveryParticipants(tx, TENANT, { ...match, xiRequired: true, xiApprovedAt: 'not-a-date' }, TEAM_A, command))
+      .rejects.toThrow('declared but not yet approved');
+    await expect(requireDeliveryParticipants(tx, TENANT,
+      { ...match, xiRequired: true, xiApprovedAt: new Date(Date.now() + 60_000) }, TEAM_A, command))
+      .rejects.toThrow('declared but not yet approved');
+  });
+
+  it('admits participants present on their side\'s approved active XI', async () => {
+    const { mock, tx } = adapter();
+    mock.query.matchPlayingXis.findMany.mockResolvedValue(approvedXis());
+    await expect(requireDeliveryParticipants(tx, TENANT,
+      { ...match, xiRequired: true, xiApprovedAt: new Date(Date.now() - 1_000) }, TEAM_A, command))
+      .resolves.toBeUndefined();
+    const options = mock.query.matchPlayingXis.findMany.mock.calls[0][0];
+    const params = dialect.sqlToQuery(options.where).params;
+    expect(params).toContain(TENANT);
+    expect(params).toContain(MATCH);
+    expect(options.columns).toEqual({ teamId: true, playerId: true, battingOrder: true });
+  });
+
+  it('admits the full wicket set against approved XIs', async () => {
+    const { tx } = adapter();
+    mockAdapterXis(tx, approvedXis());
+    await expect(requireDeliveryParticipants(tx, TENANT,
+      { ...match, xiRequired: true, xiApprovedAt: new Date(Date.now() - 1_000) }, TEAM_A, {
+        ...command, wicket: { type: 'run_out', playerId: NONSTRIKER, fielderId: FIELDER },
+      })).resolves.toBeUndefined();
+  });
+
+  it.each([
+    ['missing from the XI', (rows: ReturnType<typeof approvedXis>) => rows.filter(row => row.playerId !== BOWLER)],
+    ['an incomplete declared side', (rows: ReturnType<typeof approvedXis>) => rows.slice(0, 5)],
+  ])('refuses a participant %s even with an approved gate', async (_label, mutate) => {
+    const { tx } = adapter();
+    mockAdapterXis(tx, mutate(approvedXis()));
+    await expect(requireDeliveryParticipants(tx, TENANT,
+      { ...match, xiRequired: true, xiApprovedAt: new Date(Date.now() - 1_000) }, TEAM_A, command))
+      .rejects.toThrow('outside the declared playing XI');
+  });
+
+  it('keeps legacy matches on registered-squad rules without touching XI rows', async () => {
+    const { mock, tx } = adapter();
+    await expect(requireDeliveryParticipants(tx, TENANT, { ...match, xiRequired: false, xiApprovedAt: null }, TEAM_A, command))
+      .resolves.toBeUndefined();
+    await expect(requireDeliveryParticipants(tx, TENANT, match, TEAM_A, command)).resolves.toBeUndefined();
+    expect(mock.query.matchPlayingXis.findMany).not.toHaveBeenCalled();
+  });
+
+  function mockAdapterXis(tx: ScoringTransaction, rows: ReturnType<typeof approvedXis>) {
+    (tx as unknown as { query: { matchPlayingXis: { findMany: jest.Mock } } }).query.matchPlayingXis.findMany
+      .mockResolvedValue(rows);
+  }
 });

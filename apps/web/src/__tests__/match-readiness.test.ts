@@ -142,3 +142,20 @@ describe("match readiness - official approval (COMP-06 consent)", () => {
     expect(check(withConsent, "officials").blocking).toBe(false)
   })
 })
+describe("match readiness - declared playing XIs (COMP-06 slice)", () => {
+  const tournament = { ...readyFixture, tournamentId: T(2) }
+  it("an armed match blocks on official approval until both XIs are approved", () => {
+    const pending = { ...tournament, xiRequired: true }
+    expect(check(pending, "playing-xi")).toMatchObject({ label: "Playing XIs declared and approved", pass: false, blocking: true })
+    expect(computeMatchReadiness(pending).ready).toBe(false)
+
+    const approved = { ...pending, xiApprovedAt: new Date("2026-10-17T09:00:00Z") }
+    expect(check(approved, "playing-xi").pass).toBe(true)
+    expect(computeMatchReadiness(approved).ready).toBe(true)
+  })
+  it("a legacy tournament match keeps XI as a non-blocking recommendation", () => {
+    expect(check({ ...tournament }, "playing-xi")).toMatchObject({ label: "Playing XIs declared (recommended)", pass: false, blocking: false })
+    expect(computeMatchReadiness(tournament).ready).toBe(true)
+    expect(check({ ...tournament, xiRequired: false }, "playing-xi").blocking).toBe(false)
+  })
+})

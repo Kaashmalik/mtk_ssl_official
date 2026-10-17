@@ -1,10 +1,13 @@
 import { randomUUID } from "crypto"
 import {
   db, withTenantContext, matches, teams, tournaments, tenants, users, userTenantRoles, auditLogs,
-  membershipGrantsAccess,
+  membershipGrantsAccess, matchPlayingXis, players, leagueRegistrations,
 } from "@mtk/database"
 import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { scorerMembership } from "@/lib/scorer-membership"
+import { matchRegistrationMap, registrationAllowsPlayer,
+  type SquadRegistration } from "@mtk/database/lib/registered-squad-eligibility"
+import { validateDeclaredXi, PLAYING_XI_SIZE, type XiDeclarationEntry } from "@mtk/database/lib/playing-xi-policy"
 
 /**
  * Match record reads and the scorer-assignment writer. Every function is
@@ -372,5 +375,201 @@ export async function approveUmpireAssignmentInMatch(input: {
       payload: { matchId, slot, umpireId: slot === "primary" ? match.umpire1Id : match.umpire2Id, approvedAt: approvedAt.toISOString() },
     })
     return { matchId, slot, approvedAt }
+  }, { isolationLevel: "read committed" }))
+}
+
+/**
+ * Declared playing XIs (COMP-06 slice): an owner or the assigned scorer /
+ * backup stores BOTH sides' squads for a competition match. Canonical lock
+ * order: match -> actor user -> league -> membership -> ordered teams ->
+ * tournament registrations (the canonical boundary's mirrored read) ->
+ * ordered players. The shared policy validates each side's shape (exactly 11
+ * distinct players, orders 1..11) before any write; every declared player
+ * must sit on his side's ACTIVE roster and registered tournament squad, and
+ * friendlies never arm the gate. Storing a declaration supersedes the
+ * previously active XI rows (history is kept, never mutated), arms
+ * `xi_required` and clears any prior approval. Audited as XI_DECLARE.
+ */
+export async function setPlayingXis(input: {
+  userId: string
+  tenantId: string
+  matchId: string
+  teamAXi: XiDeclarationEntry[]
+  teamBXi: XiDeclarationEntry[]
+}): Promise<{ matchId: string; declaredAt: Date }> {
+  const { userId, tenantId, matchId, teamAXi, teamBXi } = input
+  return withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const match = await tx.query.matches.findFirst({ where: key })
+    if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
+    if (match.tournamentId === null) throw new Error("Playing XIs apply to competition matches only")
+    if (match.status !== "scheduled") throw new Error("XIs can only be declared while the match is scheduled")
+    if (!match.teamAId || !match.teamBId || match.teamAId === match.teamBId) {
+      throw new Error("Match requires two distinct teams")
+    }
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.clerkId} = ${userId} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!actor || actor.clerkId !== userId || actor.isActive !== true) {
+      throw new Error("Forbidden: declaration account unavailable")
+    }
+    await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR SHARE`)
+    const league = await tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) })
+    await tx.execute(sql`SELECT ${userTenantRoles.id} FROM ${userTenantRoles}
+      WHERE ${and(eq(userTenantRoles.tenantId, tenantId), eq(userTenantRoles.userId, actor.id))} FOR UPDATE`)
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!league || league.id !== tenantId || league.isActive !== true
+      || !actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || !membershipGrantsAccess(actorMember)) throw new Error("Forbidden: your membership changed")
+    const assignedScorer = match.scorerId === actor.id || match.backupScorerId === actor.id
+    if (actorMember.role !== "league_owner" && !assignedScorer) {
+      throw new Error("Forbidden: only the owner or the assigned scorer declares the XIs")
+    }
+    // Shared policy: an invalid declaration fails closed before any write.
+    validateDeclaredXi(teamAXi, match.teamAId)
+    validateDeclaredXi(teamBXi, match.teamBId)
+    // Ordered team locks before any roster reads.
+    const teamIds = [match.teamAId, match.teamBId].sort()
+    await tx.execute(sql`SELECT ${teams.id} FROM ${teams}
+      WHERE ${and(eq(teams.tenantId, tenantId), inArray(teams.id, teamIds))} ORDER BY ${teams.id} FOR SHARE`)
+    for (const id of teamIds) {
+      const team = await tx.query.teams.findFirst({ where: and(eq(teams.id, id), eq(teams.tenantId, tenantId)) })
+      if (!team || team.id !== id || team.tenantId !== tenantId || team.isActive !== true) {
+        throw new Error("Match team is unavailable")
+      }
+    }
+    // Mirrors the canonical boundary's registered-squad eligibility read.
+    const regWhere = and(eq(leagueRegistrations.tenantId, tenantId),
+      eq(leagueRegistrations.tournamentId, match.tournamentId),
+      inArray(leagueRegistrations.teamId, teamIds))
+    await tx.execute(sql`SELECT ${leagueRegistrations.id} FROM ${leagueRegistrations}
+      WHERE ${regWhere} ORDER BY ${leagueRegistrations.id} LIMIT 3 FOR SHARE`)
+    const regRows = await tx.query.leagueRegistrations.findMany({ where: regWhere,
+      columns: { tenantId: true, tournamentId: true, teamId: true, status: true, squadPlayerIds: true },
+      orderBy: [asc(leagueRegistrations.id)], limit: 3 })
+    let registrations: Map<string, SquadRegistration>
+    try {
+      registrations = matchRegistrationMap(regRows, tenantId, match.tournamentId, teamIds)
+    } catch {
+      throw new Error("Tournament registrations require review")
+    }
+    const entries: ReadonlyArray<readonly [teamId: string, entry: XiDeclarationEntry]> = [
+      ...teamAXi.map(entry => [match.teamAId, entry] as const),
+      ...teamBXi.map(entry => [match.teamBId, entry] as const),
+    ]
+    for (const [teamId, entry] of entries) {
+      if (!registrationAllowsPlayer(registrations.get(teamId), entry.playerId)) {
+        throw new Error("A declared player is outside the approved tournament squad")
+      }
+    }
+    const playerIds = [...new Set(entries.map(([, entry]) => entry.playerId))].sort()
+    await tx.execute(sql`SELECT ${players.id} FROM ${players}
+      WHERE ${and(eq(players.tenantId, tenantId), inArray(players.id, playerIds))} ORDER BY ${players.id} FOR SHARE`)
+    const rosterSide = new Map<string, string>()
+    for (const id of playerIds) {
+      const player = await tx.query.players.findFirst({ where: and(eq(players.id, id), eq(players.tenantId, tenantId)) })
+      if (!player || player.id !== id || player.tenantId !== tenantId
+        || player.isActive !== true || player.status !== "active") {
+        throw new Error("A declared player is not an active roster member")
+      }
+      const side = player.teamId
+      if (side === null || ![match.teamAId, match.teamBId].includes(side)) {
+        throw new Error("A declared player belongs to neither side")
+      }
+      rosterSide.set(id, side)
+    }
+    for (const [teamId, entry] of entries) {
+      if (rosterSide.get(entry.playerId) !== teamId) {
+        throw new Error("A declared player does not belong to that side")
+      }
+    }
+    const declaredAt = new Date()
+    // Supersede, never mutate: previous active rows stay as declaration history.
+    await tx.update(matchPlayingXis)
+      .set({ supersededAt: declaredAt })
+      .where(and(eq(matchPlayingXis.matchId, matchId), eq(matchPlayingXis.tenantId, tenantId),
+        isNull(matchPlayingXis.supersededAt)))
+    await tx.insert(matchPlayingXis).values(entries.map(([teamId, entry]) => ({
+      matchId, tenantId, teamId, playerId: entry.playerId, battingOrder: entry.battingOrder,
+      declaredBy: actor.id, declaredAt,
+    })))
+    const [updated] = await tx.update(matches)
+      .set({ xiRequired: true, xiApprovedAt: null, updatedAt: declaredAt })
+      .where(key)
+      .returning()
+    if (!updated) throw new Error("Match changed. Reload before declaring.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id, actorRole: actorMember.role,
+      method: "XI_DECLARE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId,
+        before: { xiRequired: match.xiRequired, xiApprovedAt: match.xiApprovedAt },
+        after: { xiRequired: updated.xiRequired, xiApprovedAt: updated.xiApprovedAt,
+          teamASquadSize: teamAXi.length, teamBSquadSize: teamBXi.length } },
+    })
+    return { matchId, declaredAt }
+  }, { isolationLevel: "read committed" }))
+}
+
+/**
+ * Official approval of declared playing XIs (COMP-06 slice, mirroring scorer /
+ * umpire consent): a league owner or an ASSIGNED member umpire approves both
+ * sides' squads. Fail-closed under the match row lock: the requirement must be
+ * armed, approval still pending, and both sides carry exactly 11 active
+ * declared players. Only a concurrent declaration re-arming the gate can void
+ * this approval through the conditional update. Audited as XI_APPROVE.
+ */
+export async function approvePlayingXis(input: {
+  userId: string
+  tenantId: string
+  matchId: string
+}): Promise<{ matchId: string; approvedAt: Date }> {
+  const { userId, tenantId, matchId } = input
+  return withTenantContext({ userId, tenantId }, () => db.transaction(async tx => {
+    const key = and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${matches.id} FROM ${matches} WHERE ${key} FOR UPDATE`)
+    const match = await tx.query.matches.findFirst({ where: key })
+    if (!match || match.id !== matchId || match.tenantId !== tenantId) throw new Error("Match not found")
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.clerkId} = ${userId} FOR UPDATE`)
+    const actor = await tx.query.users.findFirst({ where: eq(users.clerkId, userId) })
+    if (!actor || actor.clerkId !== userId || actor.isActive !== true) {
+      throw new Error("Forbidden: approval account unavailable")
+    }
+    // SCORE-09: a membership whose bound has passed denies this league surface.
+    const actorMember = await tx.query.userTenantRoles.findFirst({ where: and(
+      eq(userTenantRoles.userId, actor.id), eq(userTenantRoles.tenantId, tenantId),
+    ) })
+    if (!actorMember || actorMember.userId !== actor.id || actorMember.tenantId !== tenantId
+      || !membershipGrantsAccess(actorMember)) throw new Error("Forbidden: your membership changed")
+    if (actorMember.role !== "league_owner"
+      && match.umpire1Id !== actor.id && match.umpire2Id !== actor.id) {
+      throw new Error("Only the owner or an assigned member umpire approves the XIs")
+    }
+    if (match.tournamentId === null) throw new Error("Playing XIs apply to competition matches only")
+    if (!match.xiRequired) throw new Error("This match has no declared XIs to approve")
+    if (match.xiApprovedAt) throw new Error("The XIs are already approved")
+    const counts = await tx.select({ teamId: matchPlayingXis.teamId, declared: count() })
+      .from(matchPlayingXis)
+      .where(and(eq(matchPlayingXis.matchId, matchId), eq(matchPlayingXis.tenantId, tenantId),
+        isNull(matchPlayingXis.supersededAt)))
+      .groupBy(matchPlayingXis.teamId)
+    const complete = counts.length === 2
+      && match.teamAId !== match.teamBId
+      && counts.every(side => Number(side.declared) === PLAYING_XI_SIZE)
+    if (!complete) throw new Error("Both sides must each declare exactly 11 players before approval")
+    const approvedAt = new Date()
+    const [updated] = await tx.update(matches)
+      .set({ xiApprovedAt: approvedAt, updatedAt: approvedAt })
+      .where(and(key, eq(matches.xiRequired, true), isNull(matches.xiApprovedAt)))
+      .returning({ id: matches.id })
+    if (!updated) throw new Error("Match changed. Reload before approving.")
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(), tenantId, actorId: actor.id,
+      method: "XI_APPROVE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
+      payload: { matchId, approvedAt: approvedAt.toISOString(),
+        approvedAs: actorMember.role === "league_owner" ? "owner" : "umpire" },
+    })
+    return { matchId, approvedAt }
   }, { isolationLevel: "read committed" }))
 }

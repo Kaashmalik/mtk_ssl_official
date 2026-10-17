@@ -3,6 +3,22 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **17 October 2026 (Batch 80) - `playing_xi_declaration` LOCAL ONLY, unapplied.**
+> File: `supabase/migrations/20261017090000_playing_xi_declaration.sql`
+> (arms the COMP-06 declared-XI gate: `matches.xi_required boolean NOT NULL
+> DEFAULT false`, `matches.xi_approved_at timestamptz`, new
+> `match_playing_xis` immutable per-side XI rows with composite same-league
+> FKs — adds `teams_id_tenant_key` and reuses the Batch 63
+> `matches_id_tenant_key` — partial active-row uniques, ENABLE+FORCE RLS,
+> grants only to `ssl`/`service_role`, no delete grant; additive/idempotent,
+> legacy rows stay false so existing eligibility/readiness semantics survive
+> without backfill). NOT applied to the remote project — no MCP apply, no
+> `DATABASE_URL` execution, no history row; acceptance still requires real
+> PostgreSQL application plus lock/concurrency/RLS verification. Enforcement
+> is application-side (shared playing-XI policy at the canonical delivery
+> boundary; locked/audited declaration + approval writers; blocking readiness
+> check).
+
 > **17 October 2026 (Batch 77) - `consented_career_linkage` APPLIED to the
 > remote Supabase project (`anxstufkbqnjkxgksfkn`).** Adds
 > `users.public_career_consent_at timestamptz` (null = never granted) + a

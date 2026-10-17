@@ -24,6 +24,7 @@ export * from "./player-season-stats";
 export * from "./player-ids";
 export * from "./scoring-events";
 export * from "./scoring-outbox";
+export * from "./match-playing-xis";
 export * from "./scorecard-projections";
 
 // Fan Engagement
