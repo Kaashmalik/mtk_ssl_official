@@ -16,6 +16,8 @@ import { UmpireAssign } from "@/components/matches/umpire-assign"
 import { UmpireApprovalButton } from "@/components/matches/umpire-approval-button"
 import { PlayingXiCard } from "@/components/matches/playing-xi-card"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
+import { ReactionModerationCard } from "@/components/matches/reaction-moderation-card"
+import { readMatchReactionsForModeration } from "@/lib/fan-reaction-moderation"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
 import { auth } from "@clerk/nextjs/server"
@@ -43,6 +45,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   let viewerCanDeclareXis = false
   let viewerCanApproveXis = false
   let viewerCanSubstituteXi = false
+let viewerIsLeagueOwner = false
   const xiSurfacesRelevant = Boolean(match.tournamentId)
     && (match.status === "scheduled" || Boolean(match.xiRequired && !match.xiApprovedAt))
     || Boolean(match.tournamentId && match.xiRequired
@@ -67,6 +70,7 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
           viewerCanSubstituteXi = Boolean(match.xiRequired)
             && ["scheduled", "toss", "live", "innings_break"].includes(match.status ?? "")
             && (membership?.role === "league_owner" || viewerOccupiesUmpireSlot)
+          viewerIsLeagueOwner = membership?.role === "league_owner"
         }
       }
     }
@@ -76,6 +80,18 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
   const [teamA] = await db.select().from(teams).where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, match.tenantId))).limit(1)
   // Fetch Team B details
   const [teamB] = await db.select().from(teams).where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, match.tenantId))).limit(1)
+
+  // FAN-01 owner moderation: individual reaction rows are only ever surfaced
+  // here, to the league owner, bounded newest-first. Fail closed to empty -
+  // a moderation read failure is never a page failure.
+  let moderatableReactions: Awaited<ReturnType<typeof readMatchReactionsForModeration>> = []
+  if (viewerIsLeagueOwner) {
+    try {
+      moderatableReactions = await readMatchReactionsForModeration(id)
+    } catch {
+      moderatableReactions = []
+    }
+  }
 
   if (!teamA || !teamB) {
     notFound()
@@ -418,6 +434,13 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
           }}
         />
       </MotionWrapper>
+
+      {/* FAN-01: owner-only fan reaction moderation (engagement-only surface) */}
+      {viewerIsLeagueOwner && (
+        <MotionWrapper variant="fadeInUp" delay={0.18}>
+          <ReactionModerationCard matchId={id} initialReactions={moderatableReactions} />
+        </MotionWrapper>
+      )}
 
       {/* Scorecards */}
       <MotionWrapper variant="fadeInUp" delay={0.2}>

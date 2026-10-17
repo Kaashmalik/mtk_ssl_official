@@ -5326,6 +5326,55 @@ remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Migration | None (no schema change this batch) |
 
+## Batch 100 - FAN-01 owner reaction moderation
+
+The second FAN-01 slice - the **owner moderation surface** for the Batch 98
+reactions. A scope decision was made honestly here: Batch 98's open list
+mentioned "report/block", but fans only ever SEE aggregate counts (never
+per-fan rows), so a fan-facing "report this reaction" affordance would
+**fabricate per-reaction visibility that does not exist**. It is deferred
+rather than faked. What is real today is owner moderation: the league owner
+may inspect the individual reaction rows on THEIR match and remove one.
+
+**Locked writer** (`apps/web/src/lib/fan-reaction-moderation.ts`):
+`readMatchReactionsForModeration` is `match:update`-gated through
+`requireActiveLeagueContext` (owner authority; tenant never taken from the
+caller), bounded 100 newest-first, joins only ACTIVE users for the display
+name, and drops unknown reaction types. `removeFanReaction` runs a single
+transaction: the reaction row is read FOR UPDATE pinned on id+tenant+match
+(a foreign-league id reads as `not_found` - removal authority can never be
+widened across leagues), then deleted with an audited `REACTION_REMOVE`
+(reaction type + fan USER ID recorded for provenance - the fan's name is not
+copied into the audit), whose replay honestly reports `not_found`. Deletion is
+the moderator case the Batch 98 migration already granted: the public
+aggregate counts simply fall when the row goes.
+
+**Thin action + UI.** `getMatchReactionsForModeration` /
+`removeModeratedReaction` are zod-only delegates. The dashboard match detail
+page surfaces `ReactionModerationCard` to the league owner only (page-resolved
+membership, sized read - writers re-verify); the card carries an explicit
+"engagement only - removal never affects scores, standings or awards"
+disclosure, names the anonymous-by-default fan as "A league member" when their
+display name is unset, and drops a removed row locally while the server answer
+stays the truth (`removed` vs "already gone").
+
+**No migration** - `fan_reactions` and the audit table already exist.
+
+**Boundary (recorded honestly).** Fan-facing report/block user tooling,
+moderated polls/votes and blocking semantics remain FAN-01 open scope; FAN-01
+stays UNCHECKED; roadmap remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **131** files, **2,862 tests** (+6, moderation suite) |
+| `npx vitest run` (database) | PASS - **29** files, **329 tests** |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | None (no schema change this batch) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
