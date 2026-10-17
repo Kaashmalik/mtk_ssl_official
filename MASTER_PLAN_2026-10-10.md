@@ -4267,6 +4267,45 @@ Next source work: XI/approval UI surfaces, toss decisions, substitutions
 (SCORE-10), scorer handover safeguards (SCORE-11), PUB-02 public page,
 COMP-07 remainder, release gates. Roadmap: **19 checked / 60 open / 79 IDs**.
 
+### 2026-10-17 - Batch 81: COMP-06 XI UI surfaces (declaration card + approval)
+
+- `lib/xi-card.ts` pure derivations: `xiGateStatus` reuses the shared
+  playing-XI policy's approval logic (notDeclared/pendingApproval/approved,
+  malformed/future instants fail closed), `xiDeclarationFromSlots` mirrors
+  the exactly-11-distinct check client-side, `xiCanDeclare` restricts
+  declaration to scheduled competition matches, `xiInitialSlots` prefills
+  from the active XI sorted by batting order, `xiStatusLabel` exact copy.
+- `PlayingXiCard` client component: per-side 11-slot selectors over both
+  teams' rosters, immutable declared-roster display, disabled/clean button
+  states, fail-visible validation copy, approve control only when the viewer
+  could be an authority (the locked writer re-verifies; the card cannot
+  approve on anyone else's behalf).
+- Match detail page: viewer authority resolved read-only (membership role +
+  scorer/umpire slot occupation, only when XI surfaces are relevant); active
+  XI rows fetched superseded-NULL with names resolved from the rosters;
+  readiness now carries `xiRequired`/`xiApprovedAt`. Component wiring is
+  tsc-exercised only, consistent with all client components here.
+- No schema change, no remote apply; Batch 80's migration remains local-only.
+
+**Testing:** `playing-xi-card.test.ts` (+5): gate mirror incl. malformed
+approval instants, exact label copy with/without dates, exactly-11 distinct
+slot validation matrix, competition/scheduled-only declaration, prefill
+ordering. Full web gate re-run.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **109** files, **2,611 tests** (+5) |
+| `tsc --noEmit` (web) | **0** errors |
+| `node scripts/release-evidence.mjs` | PASS - **87** checks (unchanged) |
+| `git diff --check` | Clean |
+| Remote apply | none - no schema change |
+
+Next source work: toss decisions, substitutions (SCORE-10), scorer handover
+safeguards (SCORE-11), PUB-02 public page, COMP-07 remainder, release gates.
+Roadmap: **19 checked / 60 open / 79 IDs**.
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

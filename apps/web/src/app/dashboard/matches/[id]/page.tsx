@@ -14,12 +14,13 @@ import { ScorerAssign } from "@/components/matches/scorer-assign"
 import { ScorerApprovalButton } from "@/components/matches/scorer-approval-button"
 import { UmpireAssign } from "@/components/matches/umpire-assign"
 import { UmpireApprovalButton } from "@/components/matches/umpire-approval-button"
+import { PlayingXiCard } from "@/components/matches/playing-xi-card"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
 import { auth } from "@clerk/nextjs/server"
-import { db, teams, matchInnings, players, venues, leagueRegistrations, users } from "@mtk/database"
-import { and, eq, asc, inArray } from "drizzle-orm"
+import { db, teams, matchInnings, players, venues, leagueRegistrations, users, userTenantRoles, matchPlayingXis } from "@mtk/database"
+import { and, eq, asc, inArray, isNull } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { matchRegistrationMap } from "@mtk/database/lib/registered-squad-eligibility"
@@ -33,13 +34,19 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
     notFound()
   }
 
-  // Official consent (COMP-06): resolve whether the viewer occupies a pending
-  // scorer or member-umpire slot so only they see the consent controls. The
-  // writers re-verify the slot under a lock; this read only sizes the buttons.
+  // Official consent (COMP-06) + declared-XI surfaces (Batch 81): resolve
+  // whether the viewer occupies a pending scorer/umpire slot or may declare /
+  // approve XIs, so only they see the controls. The writers re-verify
+  // authority under a lock; these reads only size the buttons.
   let viewerOccupiesScorerSlot = false
   let viewerOccupiesUmpireSlot = false
+  let viewerCanDeclareXis = false
+  let viewerCanApproveXis = false
+  const xiSurfacesRelevant = Boolean(match.tournamentId)
+    && (match.status === "scheduled" || Boolean(match.xiRequired && !match.xiApprovedAt))
   if ((match.scorerApprovalRequired && !match.scorerApprovedAt)
-    || (match.umpireApprovalRequired && !match.umpireApprovedAt)) {
+    || (match.umpireApprovalRequired && !match.umpireApprovedAt)
+    || xiSurfacesRelevant) {
     const { userId: viewerClerkId } = await auth()
     if (viewerClerkId) {
       const [viewer] = await db.select({ id: users.id }).from(users)
@@ -47,6 +54,14 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
       if (viewer) {
         if (match.scorerId === viewer.id || match.backupScorerId === viewer.id) viewerOccupiesScorerSlot = true
         if (match.umpire1Id === viewer.id || match.umpire2Id === viewer.id) viewerOccupiesUmpireSlot = true
+        if (xiSurfacesRelevant) {
+          const [membership] = await db.select({ role: userTenantRoles.role }).from(userTenantRoles)
+            .where(and(eq(userTenantRoles.userId, viewer.id), eq(userTenantRoles.tenantId, match.tenantId))).limit(1)
+          viewerCanDeclareXis = match.status === "scheduled"
+            && (membership?.role === "league_owner" || viewerOccupiesScorerSlot)
+          viewerCanApproveXis = Boolean(match.xiRequired && !match.xiApprovedAt)
+            && (membership?.role === "league_owner" || viewerOccupiesUmpireSlot)
+        }
       }
     }
   }
@@ -78,9 +93,28 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
     }
   }
 
-  // Players from both teams for Player of the Match selection
-  const matchPlayers = await db.select({ id: players.id, name: players.name }).from(players)
+  // Players from both teams for Player of the Match selection (teamId also
+  // drives the XI declaration picker sides).
+  const matchPlayers = await db.select({ id: players.id, name: players.name, teamId: players.teamId }).from(players)
     .where(and(eq(players.tenantId, match.tenantId), inArray(players.teamId, [teamA.id, teamB.id])))
+
+  // Active declared XIs (COMP-06 slice): names resolved from both sides'
+  // rosters; a declared player is always a roster member of his side.
+  const activeXiRows = await db.select({
+    teamId: matchPlayingXis.teamId,
+    playerId: matchPlayingXis.playerId,
+    battingOrder: matchPlayingXis.battingOrder,
+  }).from(matchPlayingXis)
+    .where(and(eq(matchPlayingXis.matchId, match.id), eq(matchPlayingXis.tenantId, match.tenantId),
+      isNull(matchPlayingXis.supersededAt)))
+    .orderBy(asc(matchPlayingXis.battingOrder))
+  const playerNameById = new Map(matchPlayers.map(player => [player.id, player.name]))
+  const teamAXi = activeXiRows
+    .filter(row => row.teamId === teamA.id)
+    .map(row => ({ playerId: row.playerId, battingOrder: row.battingOrder, name: playerNameById.get(row.playerId) ?? "Unknown Player" }))
+  const teamBXi = activeXiRows
+    .filter(row => row.teamId === teamB.id)
+    .map(row => ({ playerId: row.playerId, battingOrder: row.battingOrder, name: playerNameById.get(row.playerId) ?? "Unknown Player" }))
 
   // Fetch Innings details
   const inningsRaw = await db.select().from(matchInnings)
@@ -326,6 +360,22 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
               <p className="text-xs text-muted-foreground">The owner's umpire assignment needs your consent before approval is recorded for you.</p>
             </div>
           )}
+          <PlayingXiCard
+            matchId={match.id}
+            matchStatus={match.status}
+            tournamentId={match.tournamentId}
+            xiRequired={match.xiRequired}
+            xiApprovedAt={match.xiApprovedAt}
+            teamAName={teamA.name}
+            teamBName={teamB.name}
+            canDeclare={viewerCanDeclareXis}
+            canApprove={viewerCanApproveXis}
+            activeXi={{ teamA: teamAXi, teamB: teamBXi }}
+            eligible={{
+              teamA: matchPlayers.filter(player => player.teamId === teamA.id),
+              teamB: matchPlayers.filter(player => player.teamId === teamB.id),
+            }}
+          />
         </div>
       </MotionWrapper>
 
@@ -348,6 +398,8 @@ export default async function MatchDetailPage({ params }: { params: Promise<{ id
             umpireApprovalRequired: match.umpireApprovalRequired,
             umpireApprovedAt: match.umpireApprovedAt,
             tournamentId: match.tournamentId,
+            xiRequired: match.xiRequired,
+            xiApprovedAt: match.xiApprovedAt,
             teamASquadDeclared,
             teamARegistrationApproved,
             teamBRegistrationApproved,

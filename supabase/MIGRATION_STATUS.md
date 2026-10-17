@@ -3,7 +3,7 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-> **17 October 2026 (Batch 80) - `playing_xi_declaration` LOCAL ONLY, unapplied.**
+> **17 October 2026 (Batch 80 + 81) - `playing_xi_declaration` LOCAL ONLY, unapplied.**
 > File: `supabase/migrations/20261017090000_playing_xi_declaration.sql`
 > (arms the COMP-06 declared-XI gate: `matches.xi_required boolean NOT NULL
 > DEFAULT false`, `matches.xi_approved_at timestamptz`, new
@@ -17,7 +17,9 @@
 > PostgreSQL application plus lock/concurrency/RLS verification. Enforcement
 > is application-side (shared playing-XI policy at the canonical delivery
 > boundary; locked/audited declaration + approval writers; blocking readiness
-> check).
+> check). Batch 81 adds no schema: only the match-page UI surfaces (playing-XI
+> card, viewer-authority sizing reads, readiness passthrough); the migration
+> remains the only pending apply for this ID.
 
 > **17 October 2026 (Batch 77) - `consented_career_linkage` APPLIED to the
 > remote Supabase project (`anxstufkbqnjkxgksfkn`).** Adds
