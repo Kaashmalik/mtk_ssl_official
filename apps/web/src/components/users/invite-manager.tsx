@@ -267,9 +267,11 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
                             onClick={() =>
                               startTransition(async () => {
                                 try {
-                                  await revokeInvite({ tenantId, inviteId: r.id })
+                                  const result = await revokeInvite({ tenantId, inviteId: r.id })
                                   setLastLink(null)
-                                  toast.success("Invitation revoked")
+                                  // Classified replay: an ALREADY-revoked invite replays as a
+                                  // pure read (changed: false) — say so instead of claiming a write.
+                                  toast.success(result.changed ? "Invitation revoked" : "This invitation was already revoked")
                                   await refresh()
                                 } catch (e) {
                                   toast.error(e instanceof Error ? e.message : "Failed to revoke")

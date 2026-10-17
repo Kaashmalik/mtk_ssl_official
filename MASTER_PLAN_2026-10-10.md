@@ -5043,6 +5043,57 @@ roadmap remains **19 checked / 60 open / 79 IDs**.
 | `git diff --check` | Clean |
 | Remote apply | `20261017170000_prize_supersede` applied via `DATABASE_URL` fallback; columns + cohesion CHECK + index verified, RLS forced, 0 client grants, history row verified |
 
+## Batch 95 - IAM-05 invite-revoke command idempotency (classified replay)
+
+The recon gap for IAM-05 was command idempotency on the invitation half: the
+member CRUD commands already replayed unchanged saves as pure reads (role/
+status/expiry in Batch 7/9), but `revokePendingInvite` threw a blanket
+"Invitation not found or already resolved" that conflated three different
+situations — the exact retry storm the idempotency rule exists to prevent
+(a network retry after a successful revoke surfaced an error instead of the
+truth). **No migration this batch** (pure writer/action/UI logic).
+
+**Classified replay.** The writer now looks BEFORE it writes (after the
+unchanged authority lock: users → league FOR SHARE → memberships) and
+classifies: pending → revoke (guarded UPDATE re-checks pending under lock;
+audit `INVITE_REVOKE`), **already-revoked → pure read returning
+`changed: false`** (no write, no duplicate audit — the league's intent is
+already recorded truth, matching the awards/prizes replay precedent),
+**already-accepted → honest refusal** (a membership now exists; the copy
+points at member removal instead of faking a revoke), **unknown → distinct
+"Invitation not found in this league"** (a retry can never mask a
+wrong-league attempt), and a lost race (classified pending, guarded update
+misses) → "Invitation changed. Reload before revoking." Expired-but-pending
+rows still revoke — housekeeping clears the list; only the SAME revoke is a
+silent no-op.
+
+**Surface.** The `revokeInvite` action returns `changed`, and the members UI
+toast says "This invitation was already revoked" on a replay instead of
+claiming a write happened. `rotateInviteToken` (resend) is deliberately
+NOT deduplicated — every resend rotates to a fresh token and is a distinct
+dispatch with its own idempotency key (Batch 9's documented design); the
+60-second cooldown remains the replay guard. `removeLeagueMember` replay
+classification is left as the standing boundary: a hard-deleted membership's
+replay is indistinguishable from never-existed without a tombstone (soft
+delete would touch every member read and is deferred — the safe-fail error
+corrupts nothing).
+
+**Boundary.** Full lifecycle/staging acceptance for IAM-05 (real provider
+delivery, Clerk journeys) remains gated on the still-revoked
+`SUPABASE_ACCESS_TOKEN`. IAM-05 stays UNCHECKED — the roadmap honestly
+remains **19 checked / 60 open / 79 IDs**.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - **126** files (125 + 1 new), **2,821 tests** (+6 net: 4 in the new writer suite, +2 net in membership-invites where 2 semantic tests were replaced by 4) |
+| `npx vitest run` (database) | PASS - **305 tests** (26 files), unchanged |
+| scoring-service jest | 13 suites, **331 tests** PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migrations | None needed (pure logic) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

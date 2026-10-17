@@ -85,11 +85,13 @@ export async function getInvites(expectedTenantId: string) {
 export async function revokeInvite(input: { tenantId: string; inviteId: string }) {
   const validated = z.object({ tenantId: z.string().uuid(), inviteId: z.string().uuid() }).strict().parse(input)
   const context = await requireManager(validated.tenantId)
-  await revokePendingInvite({
+  // Classified replay: `changed: false` means the invite was ALREADY revoked —
+  // the command replays as a pure read; the UI surfaces it honestly.
+  const result = await revokePendingInvite({
     tenantId: context.tenantId, actorId: context.actorId, clerkId: context.clerkId, inviteId: validated.inviteId,
   })
   revalidatePath("/dashboard", "layout")
-  return { success: true as const }
+  return { success: true as const, changed: result.changed }
 }
 
 /**

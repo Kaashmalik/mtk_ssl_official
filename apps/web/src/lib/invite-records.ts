@@ -164,21 +164,43 @@ export async function issueInviteInLeague(input: {
   })
 }
 
-/** Revoke a live pending invitation; fails when it is missing or already resolved. */
+/**
+ * Revoke a live pending invitation with a CLASSIFIED replay (IAM-05 command
+ * idempotency): revoking an already-REVOKED invitation replays as a pure read
+ * (no write, no duplicate audit — the league's intent is already recorded
+ * truth); an already-ACCEPTED invitation refuses honestly (a membership now
+ * exists; use member removal instead); an unknown invitation is a distinct
+ * error so a retry can never mask a wrong-league attempt. Expired-but-pending
+ * rows still revoke (housekeeping clears the list); replay of the SAME revoke
+ * is the only silent no-op.
+ */
 export async function revokePendingInvite(input: {
   tenantId: string
   actorId: string
   clerkId: string
   inviteId: string
-}): Promise<void> {
+}): Promise<{ inviteId: string; changed: boolean }> {
   const { tenantId, actorId, clerkId, inviteId } = input
-  await db.transaction(async tx => {
+  return db.transaction(async tx => {
     await lockInvitationAuthority(tx, tenantId, actorId, undefined, false, clerkId)
+    const invite = await tx.query.userInvites.findFirst({ where: and(
+      eq(userInvites.id, inviteId), eq(userInvites.tenantId, tenantId),
+    ) })
+    if (!invite || invite.id !== inviteId || invite.tenantId !== tenantId) {
+      throw new Error("Invitation not found in this league")
+    }
+    if (invite.status === "revoked") {
+      return { inviteId: invite.id, changed: false }
+    }
+    if (invite.status !== "pending") {
+      throw new Error("This invitation is already resolved and can no longer be revoked; if it was accepted, remove the member instead")
+    }
     const [updated] = await tx.update(userInvites).set({ status: "revoked" }).where(and(
       eq(userInvites.id, inviteId), eq(userInvites.tenantId, tenantId), eq(userInvites.status, "pending"),
     )).returning({ id: userInvites.id })
-    if (!updated) throw new Error("Invitation not found or already resolved")
+    if (!updated) throw new Error("Invitation changed. Reload before revoking.")
     await auditInvite(tx, tenantId, actorId, "INVITE_REVOKE", { inviteId: updated.id })
+    return { inviteId: updated.id, changed: true }
   })
 }
 

@@ -292,14 +292,31 @@ describe("Owner issuance, revocation and truthful synchronous dispatch", () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
   it("revocation conditionally changes only the active league invite with atomic audit", async () => {
+    // The classification read must see a live pending invite (issuing() earlier
+    // set the locked invite to null); placement here also proves revoke is
+    // order-independent for the suite.
+    mocks.lockedInvite.mockResolvedValue(invite)
     await revokeInvite({ tenantId: A, inviteId: INVITE })
     expect(query(mocks.where.mock.calls[0][0]).params).toEqual([INVITE, A, "pending"])
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith(userInvites)
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ method: "INVITE_REVOKE", tenantId: A }))
   })
-  it("resolved/missing invite cannot be revoked or audited as success", async () => {
-    mocks.returning.mockResolvedValue([])
+  it("an already-revoked invite replays as a classified pure read: no write, no duplicate audit", async () => {
+    mocks.lockedInvite.mockResolvedValue({ ...invite, status: "revoked" })
+    expect(await revokeInvite({ tenantId: A, inviteId: INVITE })).toEqual({ success: true, changed: false })
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+  it("an accepted invite refuses honestly instead of faking a revoke", async () => {
+    mocks.lockedInvite.mockResolvedValue({ ...invite, status: "accepted" })
     await expect(revokeInvite({ tenantId: A, inviteId: INVITE })).rejects.toThrow("already resolved")
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+  it("a lost race (classified pending, update misses) refuses without auditing", async () => {
+    mocks.lockedInvite.mockResolvedValue(invite)
+    mocks.returning.mockResolvedValue([])
+    await expect(revokeInvite({ tenantId: A, inviteId: INVITE })).rejects.toThrow("Invitation changed. Reload before revoking.")
     expect(mocks.insert).not.toHaveBeenCalled()
   })
   it("issuance rechecks role under lock before email or grant creation", async () => {
