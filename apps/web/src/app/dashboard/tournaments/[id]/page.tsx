@@ -23,6 +23,8 @@ import { readAwardDeclarationContext } from "@/lib/award-records"
 import { AwardDeclarationCard } from "@/components/tournaments/award-declaration-card"
 import { readPrizeManagementContext } from "@/lib/prize-records"
 import { PrizeManagementCard } from "@/components/tournaments/prize-management-card"
+import { readTournamentPollManagement } from "@/lib/tournament-polls"
+import { PollManagementCard } from "@/components/tournaments/poll-management-card"
 import { computeStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -77,6 +79,12 @@ export default async function TournamentDetailPage({ params }: { params: Promise
   const prizeContext = canEdit
     ? await readPrizeManagementContext(context.tenantId, id)
     : null
+
+  // FAN-01 poll management: owner-authored polls for this tournament
+  // (all statuses, bounded); every write re-checks tournament:update.
+  const pollManagement = canEdit
+    ? await readTournamentPollManagement(context.tenantId, id)
+    : []
 
   const followingState = await isFollowing("tournament", id)
   const followersCount = await getFollowerCount("tournament", id)
@@ -264,6 +272,9 @@ export default async function TournamentDetailPage({ params }: { params: Promise
             )}
             {prizeContext && (
               <PrizeManagementCard tournamentId={id} context={prizeContext} />
+            )}
+            {canEdit && (
+              <PollManagementCard tournamentId={id} polls={pollManagement} />
             )}
             <Card>
               <CardHeader>

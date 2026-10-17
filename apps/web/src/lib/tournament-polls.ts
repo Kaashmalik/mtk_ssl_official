@@ -8,7 +8,7 @@ import {
 import { isTournamentPublished } from "@mtk/database/lib/publication-policy"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { requireFanContext } from "./fan-follows"
-import { and, count, eq } from "drizzle-orm"
+import { and, count, desc, eq, inArray } from "drizzle-orm"
 import { z } from "zod"
 
 /**
@@ -48,7 +48,7 @@ const voteInputSchema = z.object({
 export type PollCreateResult = { pollId: string }
 
 export type PollLifecycleResult =
-  | { ok: true; status: "open" | "closed" }
+  | { ok: true; status: "open" | "closed"; tournamentId: string }
   | { ok: false; reason: "poll_not_found" | "unknown_transition" | "terminal_closed" | "not_strings" | "too_few" | "too_many" | "empty_option" | "too_long" | "multiline" | "invalid_question" }
 
 export type PollVoteResult = {
@@ -153,7 +153,7 @@ export async function setTournamentPollStatus(input: unknown): Promise<PollLifec
         changedFields: ["status"],
       },
     })
-    return { ok: true, status: decision.next }
+    return { ok: true, status: decision.next, tournamentId: poll.tournamentId }
   })
 }
 
@@ -218,6 +218,125 @@ export async function readMyPollVote(tenantId: string, pollId: string): Promise<
     ))
     .limit(1)
   return vote?.optionIndex ?? null
+}
+
+/** Bound for the fan-facing poll list on the public tournament page. */
+export const FAN_POLL_LIMIT = 5
+/** Bound for the owner dashboard management list. */
+export const POLL_MANAGEMENT_LIMIT = 50
+
+export type TournamentPollSummary = {
+  pollId: string
+  question: string
+  status: "draft" | "open" | "closed"
+  options: string[]
+  counts: number[]
+  total: number
+  createdAt: string
+}
+
+const POLL_STATUS_VALUES = ["draft", "open", "closed"] as const
+
+/**
+ * Shared loader: bounded polls of ONE tournament with a SINGLE grouped vote
+ * query (poll, optionIndex) - aggregate counts only, never per-fan rows.
+ * Unknown statuses from legacy rows are dropped; options are type-filtered.
+ */
+async function loadPollSummaries(
+  tenantId: string,
+  tournamentId: string,
+  openOnly: boolean,
+  limit: number,
+): Promise<TournamentPollSummary[]> {
+  z.string().uuid().parse(tenantId)
+  z.string().uuid().parse(tournamentId)
+  const polls = await db
+    .select({
+      id: tournamentPolls.id, question: tournamentPolls.question,
+      status: tournamentPolls.status, options: tournamentPolls.options,
+      createdAt: tournamentPolls.createdAt,
+    })
+    .from(tournamentPolls)
+    .where(openOnly
+      ? and(
+          eq(tournamentPolls.tenantId, tenantId),
+          eq(tournamentPolls.tournamentId, tournamentId),
+          eq(tournamentPolls.status, "open"),
+        )
+      : and(
+          eq(tournamentPolls.tenantId, tenantId),
+          eq(tournamentPolls.tournamentId, tournamentId),
+        ))
+    .orderBy(desc(tournamentPolls.createdAt))
+    .limit(limit)
+  if (polls.length === 0) return []
+
+  const voteRows = await db
+    .select({ pollId: tournamentPollVotes.pollId, optionIndex: tournamentPollVotes.optionIndex, total: count() })
+    .from(tournamentPollVotes)
+    .where(and(
+      eq(tournamentPollVotes.tenantId, tenantId),
+      inArray(tournamentPollVotes.pollId, polls.map(poll => poll.id)),
+    ))
+    .groupBy(tournamentPollVotes.pollId, tournamentPollVotes.optionIndex)
+
+  const countsByPoll = new Map<string, Map<number, number>>()
+  for (const row of voteRows) {
+    const inner = countsByPoll.get(row.pollId) ?? new Map<number, number>()
+    inner.set(row.optionIndex, Number(row.total))
+    countsByPoll.set(row.pollId, inner)
+  }
+
+  return polls.flatMap(poll => {
+    if (!POLL_STATUS_VALUES.includes(poll.status as typeof POLL_STATUS_VALUES[number])) return []
+    const options = (Array.isArray(poll.options) ? poll.options : [])
+      .filter((option): option is string => typeof option === "string")
+    const inner = countsByPoll.get(poll.id)
+    const counts = options.map((_, index) => inner?.get(index) ?? 0)
+    const total = counts.reduce((sum, value) => sum + value, 0)
+    return [{
+      pollId: poll.id,
+      question: poll.question,
+      status: poll.status as TournamentPollSummary["status"],
+      options,
+      counts,
+      total,
+      createdAt: poll.createdAt.toISOString(),
+    }]
+  })
+}
+
+/** Fan-facing list: only OPEN polls of one tournament, bounded newest-first. */
+export function readFanTournamentPolls(
+  tenantId: string,
+  tournamentId: string,
+): Promise<TournamentPollSummary[]> {
+  return loadPollSummaries(tenantId, tournamentId, true, FAN_POLL_LIMIT)
+}
+
+/** Owner dashboard list: every status, bounded newest-first. */
+export function readTournamentPollManagement(
+  tenantId: string,
+  tournamentId: string,
+): Promise<TournamentPollSummary[]> {
+  return loadPollSummaries(tenantId, tournamentId, false, POLL_MANAGEMENT_LIMIT)
+}
+
+/**
+ * Fail-closed session read for the PUBLIC fan card: a signed-out visitor (or
+ * a non-fan session) just cannot vote - the page renders read-only, and the
+ * exact reason is never leaked to the unauthenticated surface.
+ */
+export async function readMyPollVoteSafe(
+  tenantId: string,
+  pollId: string,
+): Promise<{ vote: number | null; canVote: boolean }> {
+  try {
+    const vote = await readMyPollVote(tenantId, pollId)
+    return { vote, canVote: true }
+  } catch {
+    return { vote: null, canVote: false }
+  }
 }
 
 /**

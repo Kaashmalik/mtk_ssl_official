@@ -5512,6 +5512,45 @@ decision reads them.
 | `git diff --check` | Clean |
 | Migration | `20261018110000` APPLIED remotely + verified + history row |
 
+## Batch 104 - FAN-01 polls UI slice (owner management + fan voting surface)
+
+The polls stack becomes visible. **Owner side** (dashboard tournament page,
+`canEdit` only): a Fan Polls management card lists the tournament's polls
+(all statuses, bounded 50, with aggregate counts) and creates drafts - the
+create form IS the moderation point ("You author the question and options -
+fans only vote, never write"); Open/Close buttons drive the audited
+lifecycle, and the closed state says plainly that it is final.
+
+**Fan side** (public tournament page, open polls only, bounded 5): a poll
+card with option buttons (`aria-pressed`, live vote switching while open),
+AGGREGATE per-option counts with percent bars and an explicit disclosure -
+"Votes are engagement only - they never decide anything official." Guests
+render read-only with a sign-in hint (fail-closed `readMyPollVoteSafe`
+never leaks why); scope safety is structural: a foreign-league poll id
+reads as not-found for the session's league.
+
+Thin action delegates (`app/actions/polls.ts`): create/status revalidate
+the public tournament path; the vote reply carries fresh counts and public
+surfaces are `noStore`, so no revalidation is needed. Pure helpers
+(`pollTotalLabel`, `pollSharePercent`, `pollStatusBadge`,
+`pollOptionResultLine`) are exported for NODE-only copy tests
+(createElement composition - hooks are never invoked outside React).
+
+**Boundary (recorded honestly).** FAN-01 remains open: staged acceptance
+(for the whole polls stack) still waits on the user's SUPABASE_ACCESS_TOKEN;
+checkboxes stay unchecked. Votes still feed nothing official.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - 18 writer/read tests + 8 UI copy tests in the full suite |
+| `npx vitest run` (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (Batch 103 migration serves the UI) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

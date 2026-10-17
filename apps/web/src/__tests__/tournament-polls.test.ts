@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createTournamentPoll, setTournamentPollStatus, voteOnTournamentPoll, readMyPollVote,
+  readMyPollVoteSafe, readFanTournamentPolls, readTournamentPollManagement,
+  FAN_POLL_LIMIT, POLL_MANAGEMENT_LIMIT,
 } from "@/lib/tournament-polls"
 
 const mocks = vi.hoisted(() => ({
@@ -133,7 +135,7 @@ describe("Poll lifecycle (owner, tournament:update)", () => {
   it("opens a draft under the row lock and audits the transition", async () => {
     lockedHarness([{ id: POLL, status: "draft", tournamentId: TOURNAMENT }])
     const result = await setTournamentPollStatus({ pollId: POLL, status: "open" })
-    expect(result).toEqual({ ok: true, status: "open" })
+    expect(result).toEqual({ ok: true, status: "open", tournamentId: TOURNAMENT })
     expect(mocks.updateSets).toHaveLength(1)
     expect(mocks.updateSets[0]).toMatchObject({ status: "open" })
     const audit = mocks.insertPayloads[0] as { method?: string; payload?: { after?: unknown } }
@@ -231,5 +233,89 @@ describe("Reading my vote", () => {
 
     mocks.fan.mockResolvedValue({ ...FAN, tenantId: "00000000-0000-4000-8000-0000000000ff" })
     expect(await readMyPollVote(TENANT, POLL)).toBeNull()
+  })
+})
+
+describe("Poll summary reads (fan + owner)", () => {
+  /** Chain for the summary loader: (1) polls select, (2) grouped votes. */
+  function readSelectHarness(pollRows: unknown[], voteRows: unknown[], limits: number[] = []) {
+    const order = [pollRows, voteRows]
+    let call = 0
+    mocks.select.mockImplementation(() => {
+      const rows = order[Math.min(call++, order.length - 1)]
+      return {
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: (n: number) => {
+                limits.push(n)
+                return Promise.resolve(rows)
+              },
+            }),
+            groupBy: async () => rows,
+            limit: async () => rows,
+          }),
+        }),
+      }
+    })
+    return { limits }
+  }
+
+  const pollRow = {
+    id: POLL, question: "Who wins?", status: "open",
+    options: ["Team A", "Team B"], createdAt: new Date("2026-10-18T10:00:00Z"),
+  }
+
+  it("maps grouped votes into aggregate counts - never per-fan rows", async () => {
+    readSelectHarness([pollRow], [{ pollId: POLL, optionIndex: 1, total: 3 }])
+    const polls = await readFanTournamentPolls(TENANT, TOURNAMENT)
+    expect(polls).toHaveLength(1)
+    expect(polls[0]).toMatchObject({
+      pollId: POLL, question: "Who wins?", status: "open",
+      options: ["Team A", "Team B"], counts: [0, 3], total: 3,
+    })
+    expect(polls[0].createdAt).toBe("2026-10-18T10:00:00.000Z")
+  })
+
+  it("bounds the fan list at 5 and the management list at 50", async () => {
+    const limits: number[] = []
+    readSelectHarness([], [], limits)
+    await readFanTournamentPolls(TENANT, TOURNAMENT)
+    await readTournamentPollManagement(TENANT, TOURNAMENT)
+    expect(limits).toEqual([FAN_POLL_LIMIT, POLL_MANAGEMENT_LIMIT])
+    expect(FAN_POLL_LIMIT).toBe(5)
+    expect(POLL_MANAGEMENT_LIMIT).toBe(50)
+  })
+
+  it("drops unknown-status rows and non-string options instead of guessing", async () => {
+    readSelectHarness([{ ...pollRow, status: "archived", options: ["A", 7] }], [])
+    const polls = await readFanTournamentPolls(TENANT, TOURNAMENT)
+    expect(polls).toEqual([])
+  })
+
+  it("summaries aggregate across polls independently", async () => {
+    const other = "00000000-0000-4000-8000-0000000000d1"
+    readSelectHarness(
+      [pollRow, { ...pollRow, id: other, question: "MOTM?" }],
+      [
+        { pollId: POLL, optionIndex: 0, total: 2 },
+        { pollId: other, optionIndex: 1, total: 5 },
+      ],
+    )
+    const polls = await readTournamentPollManagement(TENANT, TOURNAMENT)
+    expect(polls[0].counts).toEqual([2, 0])
+    expect(polls[1].counts).toEqual([0, 5])
+  })
+})
+
+describe("Safe vote read for the public page (fail-closed)", () => {
+  it("reports canVote for a signed-in fan and false for guests without leaking why", async () => {
+    mocks.select.mockReturnValue({
+      from: () => ({ where: () => ({ limit: async () => [{ optionIndex: 0 }] }) }),
+    })
+    expect(await readMyPollVoteSafe(TENANT, POLL)).toEqual({ vote: 0, canVote: true })
+
+    mocks.fan.mockRejectedValue(new Error("Unauthorized - sign in to follow"))
+    expect(await readMyPollVoteSafe(TENANT, POLL)).toEqual({ vote: null, canVote: false })
   })
 })

@@ -10,6 +10,8 @@ import { Calendar, Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion } from "@/lib/public-visibility"
+import { readFanTournamentPolls, readMyPollVoteSafe } from "@/lib/tournament-polls"
+import { TournamentPollCard } from "@/components/shared/tournament-poll-card"
 import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -29,6 +31,10 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   // FAN-03: the PERSISTED champion (written once by the completion claim) -
   // not a re-derivation from current standings, which can change.
   const champion = await readPublishedTournamentChampion(tenantId, id)
+  // FAN-01: open polls with the fan's own vote (fail-closed for guests -
+  // they see read-only aggregate counts and a sign-in hint).
+  const fanPolls = await readFanTournamentPolls(tenantId, id)
+  const fanVotes = await Promise.all(fanPolls.map(poll => readMyPollVoteSafe(tenantId, poll.pollId)))
 
   const approvedRegs = await db.select().from(leagueRegistrations)
     .where(and(
@@ -161,6 +167,22 @@ export default async function PublicTournamentPage({ params }: { params: Promise
             <span className="sr-only">{champion.championTeamName} won {tournament.name}</span>
           </CardContent>
         </Card>
+      )}
+
+      {/* FAN-01 moderated polls: open polls only, aggregate counts never
+          per-fan, votes are engagement only - disclosed on every card. */}
+      {fanPolls.length > 0 && (
+        <section className="space-y-2" aria-label="Fan polls">
+          <h2 className="text-lg font-semibold">Fan polls</h2>
+          {fanPolls.map((poll, index) => (
+            <TournamentPollCard
+              key={poll.pollId}
+              poll={poll}
+              myVote={fanVotes[index]?.vote ?? null}
+              canVote={fanVotes[index]?.canVote ?? false}
+            />
+          ))}
+        </section>
       )}
 
       {bracketMatches.length > 0 && (
