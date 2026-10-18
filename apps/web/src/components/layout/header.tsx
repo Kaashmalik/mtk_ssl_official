@@ -19,6 +19,7 @@ import {
 import { useRouter } from "next/navigation"
 import { type UserRole, getNavigationForRole } from "@/lib/rbac"
 import { NotificationBell } from "@/components/layout/notification-bell"
+import { LocaleSwitcher } from "@/components/layout/locale-switcher"
 import { useClerkReady } from "@/components/providers"
 
 const ICON_MAP: Record<string, typeof LayoutDashboard> = {
@@ -171,6 +172,7 @@ export function Header({ userRole }: { userRole?: UserRole }) {
         <NotificationBell />
 
         <ThemeToggle />
+        <LocaleSwitcher />
         {clerkReady && <UserButton afterSignOutUrl="/" />}
       </header>
 

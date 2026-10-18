@@ -6171,6 +6171,27 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 140 - UX-03 continuity: the language switcher (completes the i18n slice)
+
+- DELIVERED: the in-app language switcher - three endonym buttons
+  (English / বাংলা / العربية) in the dashboard header between the theme
+  toggle and the user button. Labels read in the TARGET language, so a
+  user who cannot read the current locale can still find their own.
+- ACTION (setLocalePreference): validates against the supported set (a
+  locale-code-shaped injection like "en-US; Path=/admin" refuses - the
+  value only ever reaches the cookie through isLocale), sets mtk-locale
+  for one year (path /, sameSite lax), and revalidates the ROOT LAYOUT
+  so server components re-resolve the locale immediately.
+- COMPONENT (LocaleSwitcher): reads the current preference only AFTER
+  hydration (document.cookie does not exist during SSR - the switcher
+  shows an honest unhighlighted beat during SSR rather than a WRONG
+  highlighted locale), then sets and reflects the chosen locale
+  optimistically.
+- TESTS: action suite (3) - cookie shape + revalidation, unsupported
+  language refusal, injection-shaped value refusal. UX-03's remaining
+  clauses stay open: localized emails, full RTL mirror polish, per-user
+  persisted preference beyond the cookie.
+
 ## Batch 139 - UX-03 slice: i18n/RTL minimal slice (next-intl, no URL routing)
 
 - DELIVERED: the platform's first localized slice. next-intl 4 (cookie +
