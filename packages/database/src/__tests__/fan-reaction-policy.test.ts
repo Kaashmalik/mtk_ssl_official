@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   FAN_REACTION_TYPES, isFanReactionType, reactionRateDecision,
   reactionTargetDecision, FAN_REACTION_MAX_PER_WINDOW, FAN_REACTION_LABELS,
+  isReactionReportReason, reactionReportDecision, fanReportRateDecision,
+  FAN_REPORT_MAX_PER_WINDOW, REACTION_REPORT_REASONS, REACTION_REPORT_REASON_LABELS,
 } from "../lib/fan-reaction-policy"
 
 describe("Fan reaction policy (FAN-01)", () => {
@@ -39,5 +41,42 @@ describe("Fan reaction policy (FAN-01)", () => {
     // Cancelled is outside the published match statuses, so it refuses too.
     expect(reactionTargetDecision({ matchStatus: "cancelled", tournamentStatus: "completed" }))
       .toEqual({ allowed: false, reason: "target_unpublished" })
+  })
+})
+
+describe("Fan reaction report policy (FAN-01 reports slice)", () => {
+  it("exposes a fixed, labelled report reason set with no free text", () => {
+    expect(REACTION_REPORT_REASONS).toEqual(["abusive", "spam", "inappropriate", "other"])
+    for (const reason of REACTION_REPORT_REASONS) {
+      expect(REACTION_REPORT_REASON_LABELS[reason].length).toBeGreaterThan(0)
+    }
+    expect(isReactionReportReason("spam")).toBe(true)
+    expect(isReactionReportReason("SPAM")).toBe(false) // case-pinned: no surprises at the DB CHECK.
+    expect(isReactionReportReason("free text here")).toBe(false)
+    expect(isReactionReportReason(null)).toBe(false)
+  })
+
+  it("decides only open reports; decided states are terminal and the decision must be known", () => {
+    expect(reactionReportDecision({ currentStatus: "open", decision: "dismissed" }))
+      .toEqual({ allowed: true, reason: "ok" })
+    expect(reactionReportDecision({ currentStatus: "open", decision: "actioned" }))
+      .toEqual({ allowed: true, reason: "ok" })
+    // A replay after a decision is refused honestly, never re-decided.
+    expect(reactionReportDecision({ currentStatus: "dismissed", decision: "actioned" }))
+      .toEqual({ allowed: false, reason: "already_decided" })
+    expect(reactionReportDecision({ currentStatus: "actioned", decision: "dismissed" }))
+      .toEqual({ allowed: false, reason: "already_decided" })
+    // No re-opening and no unknown decision shape survives the policy.
+    expect(reactionReportDecision({ currentStatus: "open", decision: "reopen" as "actioned" }))
+      .toEqual({ allowed: false, reason: "invalid_decision" })
+    expect(reactionReportDecision({ currentStatus: "pending" as "open", decision: "actioned" }))
+      .toEqual({ allowed: false, reason: "not_found" })
+  })
+
+  it("rate-limits report submissions at the reports floor", () => {
+    expect(fanReportRateDecision(0)).toEqual({ allowed: true, reason: "ok" })
+    expect(fanReportRateDecision(FAN_REPORT_MAX_PER_WINDOW - 1)).toEqual({ allowed: true, reason: "ok" })
+    expect(fanReportRateDecision(FAN_REPORT_MAX_PER_WINDOW))
+      .toEqual({ allowed: false, reason: "report_rate_limited" })
   })
 })

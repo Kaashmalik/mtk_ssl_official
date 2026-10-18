@@ -68,3 +68,65 @@ export function reactionTargetDecision(input: ReactionTargetInput): ReactionTarg
   if (!matchSet.has(input.matchStatus)) return { allowed: false, reason: "target_unpublished" }
   return { allowed: true, reason: "ok" }
 }
+
+/**
+ * FAN-01 reports slice: fan-facing reports on a match's reaction FEED. The
+ * public bar shows aggregates only, so a report is per match feed, never per
+ * reaction row. Reasons are a FIXED platform-chosen set (no free text, so
+ * nothing offensive is stored); one OPEN report per fan per match is
+ * enforced DB-side (partial unique) and re-reporting must degrade to an
+ * idempotent no-op, never an error.
+ */
+export const REACTION_REPORT_REASONS = ["abusive", "spam", "inappropriate", "other"] as const
+export type ReactionReportReason = (typeof REACTION_REPORT_REASONS)[number]
+
+export function isReactionReportReason(value: unknown): value is ReactionReportReason {
+  return typeof value === "string" && (REACTION_REPORT_REASONS as readonly string[]).includes(value)
+}
+
+export const REACTION_REPORT_REASON_LABELS: Record<ReactionReportReason, string> = {
+  abusive: "Abusive content",
+  spam: "Spam or flooding",
+  inappropriate: "Inappropriate",
+  other: "Something else",
+}
+
+export type ReactionReportStatus = "open" | "dismissed" | "actioned"
+
+/**
+ * Decision state machine: only an OPEN report can be decided, the two
+ * decided states are terminal (a replay reports that honestly instead of
+ * re-deciding or re-opening), and only these two transitions exist. The
+ * reviewer identity + time are required at the write tier - provenance is
+ * enforced there AND by the DB review_provenance CHECK.
+ */
+export type ReportDecisionInput = { currentStatus: ReactionReportStatus; decision: "dismissed" | "actioned" }
+export type ReportDecision =
+  | { allowed: true; reason: "ok" }
+  | { allowed: false; reason: "not_found" | "already_decided" | "invalid_decision" }
+
+export function reactionReportDecision(input: ReportDecisionInput): ReportDecision {
+  if (input.decision !== "dismissed" && input.decision !== "actioned") {
+    return { allowed: false, reason: "invalid_decision" }
+  }
+  if (input.currentStatus === "open") return { allowed: true, reason: "ok" }
+  // A vanished row reads as not_found at the reader tier; a decided one is
+  // final here.
+  return input.currentStatus === "dismissed" || input.currentStatus === "actioned"
+    ? { allowed: false, reason: "already_decided" }
+    : { allowed: false, reason: "not_found" }
+}
+
+/** Floor on report submissions: same spirit as the reaction flood guard. */
+export const FAN_REPORT_WINDOW_MS = 60_000
+export const FAN_REPORT_MAX_PER_WINDOW = 5
+
+export type FanReportRateDecision =
+  | { allowed: true; reason: "ok" }
+  | { allowed: false; reason: "report_rate_limited" }
+
+export function fanReportRateDecision(recentReportCount: number): FanReportRateDecision {
+  return recentReportCount >= FAN_REPORT_MAX_PER_WINDOW
+    ? { allowed: false, reason: "report_rate_limited" }
+    : { allowed: true, reason: "ok" }
+}

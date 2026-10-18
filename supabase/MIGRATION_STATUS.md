@@ -3,6 +3,28 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 116) - `fan_reaction_reports` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261018130000_fan_reaction_reports.sql` (FAN-01 reports
+> slice): additive - one new table, three CHECKs (fixed reason set, fixed
+> status set, review-provenance pairing: open = no reviewer, decided = reviewer
+> AND time required), one PARTIAL unique index
+> `(match_id, reported_by) WHERE status = 'open'` (one open report per fan per
+> match; re-reporting while open is an idempotent no-op at the writer), one
+> queue index `(tenant_id, status, created_at)`, RLS enabled AND forced with
+> grants only to `ssl`/`service_role` (fail-closed; all access via the
+> server-side writers). Reports are moderation signals only - no scoring,
+> standings or award path reads them. Writer:
+> `lib/fan-report-records.ts` (fan gate + publication policy + flood floor +
+> partial-unique replay safety; owner decision via FOR UPDATE lock +
+> `REACTION_REPORT_DECIDE` audit). History row `20261018130000` `'{}'::text[]`
+> - A's Oct-18 window, after Batch 114's `20261018120000`, clear of Session
+> B's chain. Verified remotely: 9 columns as authored, all 3 checks present,
+> partial unique + queue indexes, `relrowsecurity/relforcerowsecurity = t/t`,
+> history `18120000` + `18130000`. Contract tests:
+> `fan-reaction-policy.test.ts` (database) + `fan-report-records.test.ts` /
+> `fan-report-wiring.test.ts` (web).
+
 > **18 October 2026 (Batch 114) - `users_display_time_zone` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261018120000_users_display_time_zone.sql` (UX-03):

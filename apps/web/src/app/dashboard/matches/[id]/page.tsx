@@ -18,6 +18,7 @@ import { PlayingXiCard } from "@/components/matches/playing-xi-card"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import { ReactionModerationCard } from "@/components/matches/reaction-moderation-card"
 import { readMatchReactionsForModeration } from "@/lib/fan-reaction-moderation"
+import { readOpenReactionReports } from "@/lib/fan-report-records"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
 import { auth } from "@clerk/nextjs/server"
@@ -85,11 +86,19 @@ let viewerIsLeagueOwner = false
   // here, to the league owner, bounded newest-first. Fail closed to empty -
   // a moderation read failure is never a page failure.
   let moderatableReactions: Awaited<ReturnType<typeof readMatchReactionsForModeration>> = []
+  let openReactionReports: Awaited<ReturnType<typeof readOpenReactionReports>> = []
   if (viewerIsLeagueOwner) {
     try {
       moderatableReactions = await readMatchReactionsForModeration(id)
     } catch {
       moderatableReactions = []
+    }
+    // FAN-01 reports slice: the owner's open fan reports for this match,
+    // same fail-closed posture - a read failure is never a page failure.
+    try {
+      openReactionReports = await readOpenReactionReports(id)
+    } catch {
+      openReactionReports = []
     }
   }
 
@@ -438,7 +447,7 @@ let viewerIsLeagueOwner = false
       {/* FAN-01: owner-only fan reaction moderation (engagement-only surface) */}
       {viewerIsLeagueOwner && (
         <MotionWrapper variant="fadeInUp" delay={0.18}>
-          <ReactionModerationCard matchId={id} initialReactions={moderatableReactions} />
+          <ReactionModerationCard matchId={id} initialReactions={moderatableReactions} initialReports={openReactionReports} />
         </MotionWrapper>
       )}
 

@@ -14,6 +14,7 @@ import { readPublishedMatch, readPublishedMatchTeams } from "@/lib/public-visibi
 import type { FanReactionType } from "@mtk/database/lib/fan-reaction-policy"
 import { readFanReactionCounts, readMyFanReactions } from "@/lib/fan-reactions"
 import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
+import { ReactionFeedReport } from "@/components/shared/reaction-feed-report"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
@@ -29,13 +30,17 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
   const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
   if (!teamA || !teamB) notFound()
 
-  // FAN-01: engagement-only reactions on this published match. Counts are
+    // FAN-01: engagement-only reactions on this published match. Counts are
   // public and aggregate (never per-fan); the viewer's own rows fail closed to
   // an empty set for an unauthenticated or non-fan visit - never an error page.
+  // A successful fan-context read also proves the viewer CAN report the feed
+  // (identity is the report gate; the writer re-checks publication itself).
   const reactionCounts = await readFanReactionCounts(tenantId, matchId)
   let myReactions: FanReactionType[] = []
+  let canReportFeed = false
   try {
     myReactions = await readMyFanReactions(tenantId, matchId)
+    canReportFeed = true
   } catch {
     myReactions = []
   }
@@ -233,6 +238,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
             </div>
           </div>
           <MatchReactionBar matchId={matchId} initialCounts={reactionCounts} initialMine={myReactions} />
+          {canReportFeed ? <ReactionFeedReport matchId={matchId} /> : null}
           <div className="flex items-center justify-between gap-4">
             <div className="text-center flex-1">
               <div className="h-16 w-16 rounded-2xl mx-auto flex items-center justify-center text-white font-bold text-xl mb-3 border-2 border-white/20" style={{ backgroundColor: teamAColor }}>{teamAShort}</div>

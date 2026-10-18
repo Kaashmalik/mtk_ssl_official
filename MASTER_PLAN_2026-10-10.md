@@ -6007,6 +6007,57 @@ This slice mounts the aggregate record surface.
 | `git diff --check` | Clean |
 | Migration | none (existing persisted champion column only) |
 
+## Batch 116 - FAN-01 fan reaction reports (report -> owner review, migration)
+
+The reaction surface ended at moderation: fans could react, the owner could
+remove individual rows, but a fan had NO way to flag an abusive/spammy feed,
+and the owner's queue showed nothing unless they happened to look. This slice
+adds the fan-facing report flow with append-provenance review.
+
+The public bar shows aggregate counts only, so a fan cannot reference one
+specific reaction row - the report is per MATCH FEED, honestly.
+
+- Migration `20261018130000_fan_reaction_reports` (APPLIED remotely): one
+  table, CHECK-pinned reason set (`abusive|spam|inappropriate|other`) and
+  status set (`open|dismissed|actioned`), a review-provenance CHECK (open =
+  no reviewer; decided = reviewer AND time REQUIRED), a PARTIAL unique index
+  `(match_id, reported_by) WHERE status = 'open'` (one open report per fan
+  per match; a re-report while open is an idempotent no-op), queue index,
+  RLS enabled AND forced with grants only to `ssl`/`service_role` - all
+  access via the server-side writers. Verified remotely: columns, checks,
+  indexes, rls t/t, history rows.
+- Pure policy on the shared `fan-reaction-policy`: reason set + labels,
+  decision state machine (only open reports decide; decided states are
+  terminal; replay reads as `already_decided`), report flood floor.
+- Locked writer `lib/fan-report-records.ts`: fan gate (`fan:follow`) ->
+  publication policy -> flood floor -> insert with `onConflictDoNothing` +
+  empty-returning read as `already_open`; `REACTION_REPORT` audit with
+  reason + provenance. Owner read `readOpenReactionReports` (bounded,
+  tenant-pinned, explicit projection). Owner decision under FOR UPDATE:
+  provenance stamped (reviewer + time) in the same transaction as the
+  `REACTION_REPORT_DECIDE` audit; foreign ids read as `not_found`; replay
+  reads as `already_decided`.
+- Thin action tier `actions/fan-reaction-reports.ts` (no database import).
+- UI, honestly wired both ends: fan control beside the reaction bar on the
+  public match page renders ONLY behind an identity gate (`canReportFeed`
+  earned by a successful fan-context read, never anonymous), fixed reason
+  buttons (no free text), every writer outcome surfaced as a toast; the
+  owner's moderation card gains an open-reports queue with Mark actioned /
+  Dismiss, always popped on a decision, replays surfaced not retried.
+- Boundary: "actioned" records the review outcome; handling itself stays in
+  the existing audited `removeModeratedReaction` flow - the report table
+  records reports and their review provenance, nothing else. Fan-blocking
+  (user-level) is NOT in this slice - recorded as future work. Roadmap
+  checkbox waits on staged acceptance.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - 11 writer tests + 5 static wiring guards + policy extend |
+| database policy suite | PASS - 7 (3 new report-policy) |
+| Migration | `20261018130000` applied remotely + verified (columns/checks/indexes/RLS/history) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
