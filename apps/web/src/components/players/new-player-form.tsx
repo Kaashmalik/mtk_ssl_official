@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -16,10 +16,22 @@ import { createPlayer } from "@/app/actions/players"
 import { resolveActionError } from "@/lib/plan-limit-error"
 import { PlanLimitNotice } from "@/components/billing/plan-limit-notice"
 import type { PlanLimitDetail } from "@mtk/database"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 
 interface TeamOption {
   id: string
   name: string
+}
+
+const EMPTY_PLAYER_DRAFT = {
+  name: "", email: "", phone: "", dateOfBirth: "",
+  nationality: "", city: "",
+  role: "", battingStyle: "", bowlingStyle: "",
+  jerseyNumber: "", heightCm: "", weightKg: "",
+  biography: "",
+  teamId: "",
+  status: "active",
 }
 
 export function NewPlayerForm({ teams = [] }: { teams?: TeamOption[] }) {
@@ -27,18 +39,30 @@ export function NewPlayerForm({ teams = [] }: { teams?: TeamOption[] }) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [planLimit, setPlanLimit] = useState<PlanLimitDetail | null>(null)
-  const [formData, setFormData] = useState({
-    name: "", email: "", phone: "", dateOfBirth: "",
-    nationality: "", city: "",
-    role: "", battingStyle: "", bowlingStyle: "",
-    jerseyNumber: "", heightCm: "", weightKg: "",
-    biography: "",
-    teamId: "",
-    status: "active",
-  })
+  const [formData, setFormData] = useState(EMPTY_PLAYER_DRAFT)
+
+  // UX-03: durable per-browser draft (versioned, restored once with a
+  // visible banner; server truth wins on submit).
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>("new-player", 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
 
   const updateField = (key: string, value: string) => {
-    setFormData(prev => ({ ...prev, [key]: value }))
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData(EMPTY_PLAYER_DRAFT)
+    setDraftRestored(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -71,6 +95,7 @@ export function NewPlayerForm({ teams = [] }: { teams?: TeamOption[] }) {
             | "active" | "injured" | "retired" | "suspended" | "inactive",
         })
         toast.success("Player registered successfully!")
+        clearDraft()
         router.push("/dashboard/players")
       } catch (err) {
         const resolved = resolveActionError(err, "Failed to register player")
@@ -96,6 +121,9 @@ export function NewPlayerForm({ teams = [] }: { teams?: TeamOption[] }) {
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Personal Information */}

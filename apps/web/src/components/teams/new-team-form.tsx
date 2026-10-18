@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -15,19 +15,46 @@ import { createTeam } from "@/app/actions/teams"
 import { resolveActionError } from "@/lib/plan-limit-error"
 import { PlanLimitNotice } from "@/components/billing/plan-limit-notice"
 import type { PlanLimitDetail } from "@mtk/database"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
+
+const EMPTY_TEAM_DRAFT = {
+  name: "", shortName: "", city: "", homeGround: "",
+  primaryColor: "#2D8B4E", secondaryColor: "#1A4F8B",
+  foundedYear: "", maxSquadSize: "15", description: "",
+}
 
 export function NewTeamForm() {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [planLimit, setPlanLimit] = useState<PlanLimitDetail | null>(null)
-  const [formData, setFormData] = useState({
-    name: "", shortName: "", city: "", homeGround: "",
-    primaryColor: "#2D8B4E", secondaryColor: "#1A4F8B",
-    foundedYear: "", maxSquadSize: "15", description: "",
-  })
+  const [formData, setFormData] = useState(EMPTY_TEAM_DRAFT)
 
-  const updateField = (key: string, value: string) => setFormData(prev => ({ ...prev, [key]: value }))
+  // UX-03: the create-team form survives a refresh or accidental close as a
+  // versioned per-browser draft. Restoration is explicit and banner-visible;
+  // server truth always wins on submit.
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>("new-team", 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
+
+  const updateField = (key: string, value: string) => {
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData(EMPTY_TEAM_DRAFT)
+    setDraftRestored(false)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -48,6 +75,7 @@ export function NewTeamForm() {
           description: formData.description.trim() || null,
         })
         toast.success("Team created successfully!")
+        clearDraft()
         router.push("/dashboard/teams")
       } catch (err) {
         const resolved = resolveActionError(err, "Failed to create team")
@@ -71,6 +99,9 @@ export function NewTeamForm() {
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

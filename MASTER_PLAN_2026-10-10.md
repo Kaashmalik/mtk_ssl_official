@@ -5596,6 +5596,46 @@ waits on the user's SUPABASE_ACCESS_TOKEN.
 | `git diff --check` | Clean |
 | Migration | none this batch (derived reads only) |
 
+## Batch 106 - UX-03 durable forms slice 2 (teams / players / registration)
+
+The three remaining CREATE forms get the Batch 101 draft stack -
+`useDurableFormDraft` + never-silent `DraftRestoreBanner`, version 1, form
+ids `new-team` / `new-player` / `register-team`:
+
+- **New team** (`new-team`): all nine fields drafted through the shared
+  `updateField` path; `EMPTY_TEAM_DRAFT` const anchors both the initial
+  state and the explicit discard reset; draft cleared only after a
+  successful create (before navigation).
+- **New player** (`new-player`): all thirteen fields drafted the same way.
+- **Registration** (`register-team`): **scalars only, disclosed in code** -
+  the tournament/team/notes choices draft; the squad player selection is
+  deliberately NOT drafted because `string[]` is not a persistable flat
+  value and a stale squad silently re-selecting players would be worse
+  than re-picking them. Clearing the team resets the selection, as before.
+
+Restoration behavior is identical everywhere: restored ONCE on mount but
+never silently - the banner shows the exact UTC save time with Keep/Discard;
+discard resets to the honest initial state; submit success clears the draft;
+storage failure surfaces as `storageUsable: false`, never a crash. Server
+truth always wins on submit.
+
+**Boundary (recorded honestly).** UX-03 remains open: role journeys
+(manager/captain/coach/player/official), localized/RTL/timezone
+preferences, and the remaining durable surfaces (edit forms stay
+server-truth by policy). Checkbox stays unchecked pending staged
+acceptance.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - full suite incl. the Batch 101 draft-policy/store suites |
+| `npx vitest run` (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (client-only wiring) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

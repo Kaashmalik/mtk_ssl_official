@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Loader2, Save, Users } from "lucide-react"
 import { registerTeam } from "@/app/actions/registrations"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 
 interface TeamOption {
   id: string
@@ -58,6 +60,36 @@ export function RegisterTeamForm({
   const [notes, setNotes] = useState("")
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([])
 
+  // UX-03: durable per-browser draft for the SCALAR choices only
+  // (tournament/team/notes). The squad selection is deliberately NOT
+  // drafted - player lists are not flat persistable values, and a stale
+  // squad silently re-selecting players would be worse than re-picking.
+  // Restoration is explicit and banner-visible; server truth wins on submit.
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>("register-team", 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setTournamentId(restoredDraft.tournamentId ?? tournamentId)
+      setTeamId(restoredDraft.teamId ?? "")
+      setNotes(restoredDraft.notes ?? "")
+      setDraftRestored(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoredDraft])
+
+  const saveScalarDraft = (next: { tournamentId: string; teamId: string; notes: string }) => {
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setTournamentId(initialTournament)
+    setTeamId("")
+    setNotes("")
+    setDraftRestored(false)
+  }
+
   const openTournaments = tournaments.filter((t) => t.registrationOpen)
   const squadCandidates = useMemo(
     () => players.filter((p) => teamId && p.teamId === teamId),
@@ -96,6 +128,7 @@ export function RegisterTeamForm({
           notes: notes.trim() || null,
         })
         toast.success("Registration submitted")
+        clearDraft()
         router.push("/dashboard/registrations")
         router.refresh()
       } catch (err) {
@@ -167,6 +200,9 @@ export function RegisterTeamForm({
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <Card>
@@ -176,7 +212,13 @@ export function RegisterTeamForm({
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>Tournament *</Label>
-              <Select value={tournamentId} onValueChange={setTournamentId}>
+              <Select
+                value={tournamentId}
+                onValueChange={(v) => {
+                  setTournamentId(v)
+                  saveScalarDraft({ tournamentId: v, teamId, notes })
+                }}
+              >
                 <SelectTrigger className="mt-1.5">
                   <SelectValue placeholder="Select tournament" />
                 </SelectTrigger>
@@ -196,6 +238,7 @@ export function RegisterTeamForm({
                 onValueChange={(v) => {
                   setTeamId(v)
                   setSelectedPlayers([])
+                  saveScalarDraft({ tournamentId, teamId: v, notes })
                 }}
               >
                 <SelectTrigger className="mt-1.5">
@@ -215,7 +258,10 @@ export function RegisterTeamForm({
               <Textarea
                 id="notes"
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => {
+                  setNotes(e.target.value)
+                  saveScalarDraft({ tournamentId, teamId, notes: e.target.value })
+                }}
                 placeholder="Optional notes for league admins"
                 rows={3}
                 className="mt-1.5"
