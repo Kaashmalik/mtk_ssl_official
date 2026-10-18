@@ -1,10 +1,10 @@
 import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
-import { Badge } from "@mtk/ui/components/ui/badge"
 import { unstable_noStore as noStore } from "next/cache"
 import { redirect } from "next/navigation"
 import { resolveNotificationMemberContext, readMyNotifications, readMyNotificationPreferences } from "@/lib/notification-reads"
 import { NotificationPreferencesForm } from "@/components/layout/notification-preferences-form"
+import { NotificationsInbox, type InboxItem } from "@/components/layout/notifications-inbox"
 
 export default async function NotificationsPage() {
   noStore()
@@ -35,24 +35,19 @@ export default async function NotificationsPage() {
           <NotificationPreferencesForm initial={preferences} defaultTimeZone={defaultTimeZone} />
         </CardContent>
       </Card>
-      {items.length === 0 && <p className="text-muted-foreground">No notifications yet.</p>}
-      {items.map((n) => (
-        <Card key={n.id} className={n.readAt ? "opacity-70" : ""}>
-          <CardHeader className="py-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">{n.title}</CardTitle>
-              <div className="flex items-center gap-2">
-                {!n.readAt && <Badge className="bg-blue-600 text-white">New</Badge>}
-                <Badge variant="outline">{n.type}</Badge>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="py-3 pt-0">
-            {n.body && <p className="text-sm text-muted-foreground">{n.body}</p>}
-            {n.createdAt && <p className="text-xs text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleString()}</p>}
-          </CardContent>
-        </Card>
-      ))}
+      {/* Per-item read marking (the read loop's missing half): the bell only
+          ever offered "mark all"; here the member closes one notification at
+          a time through the action tier's member-gated writer. */}
+      <NotificationsInbox
+        items={items.map((n): InboxItem => ({
+          id: n.id,
+          title: n.title,
+          type: n.type,
+          body: n.body ?? null,
+          readAt: n.readAt ? n.readAt.toISOString() : null,
+          createdAt: n.createdAt ? n.createdAt.toISOString() : null,
+        }))}
+      />
     </div>
   )
 }

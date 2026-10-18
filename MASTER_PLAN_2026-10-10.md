@@ -6104,6 +6104,42 @@ is a new row, so provenance survives in both directions).
 | Focused suites | fan suites 39/39 (web), policy 10/10 (database) |
 | Migration | `20261018140000` applied remotely + verified (columns/checks/indexes/RLS/history) |
 
+## Batch 118 - FAN-01 completion: league-wide fan interactions queue
+
+Open reports and blocked fans were visible only per match - an organizer
+with reports on several matches had to hunt through match pages. The loop
+gets ONE reviewable home. Visibility only: every decision and lift flows
+through the identical locked writer actions the per-match card uses, which
+re-check the owner gate server-side; no second authority path, no
+migration.
+
+- New league-wide reader `readLeagueOpenReports()`: tenant pinned,
+  oldest-first fairness (queue head = longest waiting), bounded 50,
+  aliased leftJoins to both team names for an honest "A vs B" label
+  (team-less falls back to `Match <id>`), explicit six-field projection.
+- New owner page `dashboard/settings/fan-interactions`, gated
+  `match:update` deliberately (moderation authority, NOT
+  `settings:manage`); both queues fail closed to empty; badge counts.
+- `FanInteractionsManager` decides/lifts via the same locked actions
+  (`decideReactionReportAction` / `liftFanBlockAction`) with honest replay
+  handling; each report links to its match page where removals live.
+- Settings home Quick Links entry. Guard tests: projection regression
+  (double-join label + fallback + exact fields) and the queue-home
+  contract (gate choice, fail-closed reads, no database import on page or
+  manager, action-only mutation path, discoverability).
+
+- Boundary: visibility-only; the follow surface stays ungated by blocks
+  (Batch 117 recorded boundary). Roadmap checkbox waits on staged
+  acceptance.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - 148 files / 3,005 tests (+2) |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| Migration | none (reads + UI only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
