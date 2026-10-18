@@ -42,7 +42,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
   let venueName = "TBD Venue"
   if (match.venueId) {
-    const [venue] = await db.select().from(venues).where(and(eq(venues.id, match.venueId), eq(venues.tenantId, tenantId))).limit(1)
+    const [venue] = await db.select({ name: venues.name, city: venues.city }).from(venues).where(and(eq(venues.id, match.venueId), eq(venues.tenantId, tenantId))).limit(1)
     if (venue) venueName = `${venue.name}, ${venue.city}`
   }
 
@@ -52,16 +52,62 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
     momName = p?.name ?? ""
   }
 
-  const inningsRaw = await db.select().from(matchInnings)
+  // PUB-06/PUB-02: explicit columns only on this unauthenticated page - the
+  // internal scorecard plumbing (matchBalls.clientOpId sync keys, tenant
+  // refs) never loads. All fields listed are what the card renders.
+  const inningsRaw = await db.select({
+    id: matchInnings.id,
+    teamId: matchInnings.teamId,
+    inningsNumber: matchInnings.inningsNumber,
+    totalRuns: matchInnings.totalRuns,
+    totalBalls: matchInnings.totalBalls,
+    totalWickets: matchInnings.totalWickets,
+    extras: matchInnings.extras,
+    wides: matchInnings.wides,
+    noBalls: matchInnings.noBalls,
+    byes: matchInnings.byes,
+    legByes: matchInnings.legByes,
+  }).from(matchInnings)
     .where(and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId)))
     .orderBy(asc(matchInnings.inningsNumber))
 
   const [battingAll, bowlingAll] = await Promise.all([
-    db.select().from(battingScorecards).where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId))),
-    db.select().from(bowlingScorecards).where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId))),
+    db.select({
+      inningsId: battingScorecards.inningsId,
+      battingPosition: battingScorecards.battingPosition,
+      playerId: battingScorecards.playerId,
+      bowlerId: battingScorecards.bowlerId,
+      fielderId: battingScorecards.fielderId,
+      dismissalType: battingScorecards.dismissalType,
+      dismissalText: battingScorecards.dismissalText,
+      runs: battingScorecards.runs,
+      ballsFaced: battingScorecards.ballsFaced,
+      fours: battingScorecards.fours,
+      sixes: battingScorecards.sixes,
+      strikeRate: battingScorecards.strikeRate,
+    }).from(battingScorecards).where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId))),
+    db.select({
+      inningsId: bowlingScorecards.inningsId,
+      bowlingPosition: bowlingScorecards.bowlingPosition,
+      playerId: bowlingScorecards.playerId,
+      overs: bowlingScorecards.overs,
+      maidens: bowlingScorecards.maidens,
+      runsConceded: bowlingScorecards.runsConceded,
+      wickets: bowlingScorecards.wickets,
+      economyRate: bowlingScorecards.economyRate,
+    }).from(bowlingScorecards).where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId))),
   ])
 
-  const wicketBalls = await db.select().from(matchBalls)
+  const wicketBalls = await db.select({
+    inningsId: matchBalls.inningsId,
+    ballSequence: matchBalls.ballSequence,
+    overNumber: matchBalls.overNumber,
+    ballNumber: matchBalls.ballNumber,
+    runs: matchBalls.runs,
+    isWicket: matchBalls.isWicket,
+    batsmanId: matchBalls.batsmanId,
+    bowlerId: matchBalls.bowlerId,
+  }).from(matchBalls)
     .where(and(eq(matchBalls.matchId, matchId), eq(matchBalls.tenantId, tenantId)))
 
   const playerIds = Array.from(new Set([

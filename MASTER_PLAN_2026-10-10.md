@@ -5684,7 +5684,47 @@ unticked.
 | `git diff --check` | Clean |
 | Migration | none this batch (read-shape change only) |
 
-### Definition of done for each batch
+## Batch 108 - PUB-06 slice 2: explicit columns on every public raw query
+
+Slice 1 (Batch 107) allowlisted the shared readers; slice 2 closes the
+same pattern in the page/route bodies themselves. The public tournament
+page, match detail page and scorecard PDF previously issued FULL-ROW
+db.select().from(...) reads on the unauthenticated surface - now every
+one lists its columns explicitly:
+
+- **Tournament page**: approved registrations read only teamId (contact
+  notes on registration rows never load); team reads select the standings
+  triple (id, name, shortName); the fixtures read selects exactly the
+  columns the list, standings inputs and bracket consume, and the
+  ...m row spread is replaced by an explicit object; innings reads
+  select the scoring columns only.
+- **Match detail page**: venue read only name+city; innings, batting/
+  bowling scorecards and the match-balls fall-of-wickets sweep are all
+  column lists - matchBalls.clientOpId (device-sync plumbing) and tenant
+  refs never load on a public page.
+- **Scorecard PDF**: explicit innings/batting/bowling columns (the route
+  is unauthenticated).
+
+**Static guard.** New public-page-hygiene.test.ts reads the five public
+source files and fails if db.select().from( (full-row) or a rendered
+row spread reappears on them: regressing this now requires a deliberate
+code change that the test catches.
+
+**Boundary (recorded honestly).** PUB-06 remains open: minor consent,
+withdrawal/cache invalidation, unauthorized export/socket access - staged
+acceptance still blocked on the user token; checkbox stays unticked.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| npx vitest run (web) | PASS - 3 new hygiene regressions; public-visibility 60, allowlist 5, awards 3 unbroken |
+| npx vitest run (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| tsc --noEmit (web + database + scoring-service + admin) | 0 + 0 + 0 + 0 error lines |
+| git diff --check | Clean |
+| Migration | none this batch (read-shape change only) |
+
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
 - Relevant regression tests and requested checks pass or blockers are recorded.

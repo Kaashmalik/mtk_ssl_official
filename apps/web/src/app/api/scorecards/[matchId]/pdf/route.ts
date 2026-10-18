@@ -48,15 +48,46 @@ export async function GET(
     if (v) venueName = `${v.name}, ${v.city}`
   }
 
-  const innings = await db.select().from(matchInnings)
+  // PUB-06: explicit columns only - the PDF is an unauthenticated route and
+  // must never pull internal plumbing (tenant refs, sync keys).
+  const innings = await db.select({
+    id: matchInnings.id,
+    teamId: matchInnings.teamId,
+    totalRuns: matchInnings.totalRuns,
+    totalBalls: matchInnings.totalBalls,
+    totalWickets: matchInnings.totalWickets,
+    extras: matchInnings.extras,
+  }).from(matchInnings)
     .where(and(eq(matchInnings.matchId, matchId), eq(matchInnings.tenantId, tenantId)))
     .orderBy(asc(matchInnings.inningsNumber))
 
   const [battingAll, bowlingAll] = await Promise.all([
-    db.select().from(battingScorecards)
+    db.select({
+      inningsId: battingScorecards.inningsId,
+      battingPosition: battingScorecards.battingPosition,
+      playerId: battingScorecards.playerId,
+      bowlerId: battingScorecards.bowlerId,
+      fielderId: battingScorecards.fielderId,
+      dismissalType: battingScorecards.dismissalType,
+      dismissalText: battingScorecards.dismissalText,
+      runs: battingScorecards.runs,
+      ballsFaced: battingScorecards.ballsFaced,
+      fours: battingScorecards.fours,
+      sixes: battingScorecards.sixes,
+    }).from(battingScorecards)
       .where(and(eq(battingScorecards.matchId, matchId), eq(battingScorecards.tenantId, tenantId)))
       .orderBy(asc(battingScorecards.battingPosition)),
-    db.select().from(bowlingScorecards)
+    db.select({
+      inningsId: bowlingScorecards.inningsId,
+      bowlingPosition: bowlingScorecards.bowlingPosition,
+      playerId: bowlingScorecards.playerId,
+      ballsBowled: bowlingScorecards.ballsBowled,
+      maidens: bowlingScorecards.maidens,
+      runsConceded: bowlingScorecards.runsConceded,
+      wickets: bowlingScorecards.wickets,
+      wides: bowlingScorecards.wides,
+      noBalls: bowlingScorecards.noBalls,
+    }).from(bowlingScorecards)
       .where(and(eq(bowlingScorecards.matchId, matchId), eq(bowlingScorecards.tenantId, tenantId)))
       .orderBy(asc(bowlingScorecards.bowlingPosition)),
   ])

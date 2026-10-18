@@ -40,7 +40,10 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   // FAN-03: milestones derived from official scorecard rows (publication-gated).
   const milestones = await readPublishedTournamentMilestones(tenantId, id)
 
-  const approvedRegs = await db.select().from(leagueRegistrations)
+  // PUB-06: every raw query on this unauthenticated page selects EXPLICIT
+  // columns - no full-row reads, so internal-only fields (createdBy,
+  // contact/notes provenance, tenant plumbing) never load, let alone travel.
+  const approvedRegs = await db.select({ teamId: leagueRegistrations.teamId }).from(leagueRegistrations)
     .where(and(
       eq(leagueRegistrations.tournamentId, id),
       eq(leagueRegistrations.status, "approved"),
@@ -49,21 +52,34 @@ export default async function PublicTournamentPage({ params }: { params: Promise
 
   const registeredTeamIds = new Set<string>(approvedRegs.map(r => r.teamId))
 
-  const legacyTeams = await db.select().from(teams)
+  const legacyTeams = await db.select({ id: teams.id, name: teams.name, shortName: teams.shortName }).from(teams)
     .where(and(eq(teams.tournamentId, id), eq(teams.tenantId, tenantId)))
     .orderBy(asc(teams.name))
   for (const t of legacyTeams) registeredTeamIds.add(t.id)
 
   const registeredTeams = (
     await Promise.all([...registeredTeamIds].map(async (teamId) => {
-      const [team] = await db.select().from(teams)
+      const [team] = await db.select({ id: teams.id, name: teams.name, shortName: teams.shortName }).from(teams)
         .where(and(eq(teams.id, teamId), eq(teams.tenantId, tenantId)))
         .limit(1)
       return team
     }))
   ).filter((t): t is NonNullable<typeof t> => !!t).sort((a, b) => a.name.localeCompare(b.name))
 
-  const tournamentMatchesRaw = await db.select().from(matches)
+  // Only the columns the fixtures list, standings inputs and bracket consume;
+  // the full row stays server-side by construction.
+  const matchColumns = {
+    id: matches.id,
+    status: matches.status,
+    matchType: matches.matchType,
+    matchNumber: matches.matchNumber,
+    scheduledDate: matches.scheduledDate,
+    teamAId: matches.teamAId,
+    teamBId: matches.teamBId,
+    winnerId: matches.winnerId,
+    result: matches.result,
+  }
+  const tournamentMatchesRaw = await db.select(matchColumns).from(matches)
     .where(and(eq(matches.tournamentId, id), eq(matches.tenantId, tenantId)))
     .orderBy(asc(matches.scheduledDate))
 
@@ -73,7 +89,12 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       .where(and(eq(teams.id, m.teamAId), eq(teams.tenantId, tenantId))).limit(1)
     const [teamB] = await db.select({ name: teams.name }).from(teams)
       .where(and(eq(teams.id, m.teamBId), eq(teams.tenantId, tenantId))).limit(1)
-    const innings = await db.select().from(matchInnings)
+    const innings = await db.select({
+      teamId: matchInnings.teamId,
+      totalRuns: matchInnings.totalRuns,
+      totalBalls: matchInnings.totalBalls,
+      totalWickets: matchInnings.totalWickets,
+    }).from(matchInnings)
       .where(and(eq(matchInnings.matchId, m.id), eq(matchInnings.tenantId, tenantId)))
     const teamAInn = innings.find(inn => inn.teamId === m.teamAId)
     const teamBInn = innings.find(inn => inn.teamId === m.teamBId)
@@ -86,7 +107,13 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       ],
     })
     return {
-      ...m,
+      id: m.id,
+      status: m.status,
+      matchType: m.matchType,
+      matchNumber: m.matchNumber,
+      teamAId: m.teamAId,
+      teamBId: m.teamBId,
+      result: m.result,
       teamAName: teamA?.name ?? "TBD",
       teamBName: teamB?.name ?? "TBD",
       teamAScore: teamAInn ? `${teamAInn.totalRuns}/${teamAInn.totalWickets}` : "",
@@ -120,7 +147,8 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   const scoreByMatchTeam = new Map<string, number>()
   const tournamentMatchIds = tournamentMatchesRaw.map((m) => m.id)
   const inningsAll = tournamentMatchIds.length
-    ? await db.select().from(matchInnings).where(inArray(matchInnings.matchId, tournamentMatchIds))
+    ? await db.select({ matchId: matchInnings.matchId, teamId: matchInnings.teamId, totalRuns: matchInnings.totalRuns })
+        .from(matchInnings).where(inArray(matchInnings.matchId, tournamentMatchIds))
     : []
   for (const inn of inningsAll) {
     scoreByMatchTeam.set(`${inn.matchId}:${inn.teamId}`, inn.totalRuns)
