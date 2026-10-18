@@ -6173,6 +6173,30 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 149 - REG-06 slice: squad composition, transfer eligibility and account-less players (no migration - players.userId already nullable)
+
+- DELIVERED: the third Phase-2 build line. REG-06's core as a pure
+  policy plus a writer over the existing schema:
+  - POLICY (squad-rules-policy.ts, 9 tests): an account-less player is
+    LEAGUE-RECORDED (no claimant, no self-service); squad composition is
+    a DERIVED answer with named blockers (size bounds, duplicates,
+    missing guardian consent for minors); transfers are same-league only,
+    blocked for players in an active match, and a minor's consent travels
+    with the player (no re-consent demanded, no silent loss);
+    participation requires squad membership AND an approved, paid-or-
+    waived registration; member-facing sentences join blockers verbatim.
+  - WRITER (apps/web/src/lib/squad-rules.ts, tsc-clean): registerAccount
+    LessPlayer (manager-of-team, league-recorded, guardian facts stored
+    only when the player is a minor, audit), transferPlayer (same-league
+    guard, manager of either team, identical replay pure read, audit),
+    validateSquadComposition (pure derived answer), isParticipation
+    Eligible.
+  - HONESTY: scheduling-based transfer blocks (COMP-07) are recorded as
+    not-yet-claimed (`playerInActiveMatch` is passed by the caller; the
+    writer defaults false and says so in the comment - never pretends a
+    schedule exists), and cross-tournament transfers are out of scope.
+- VERIFIED: policy 9 tests; db build + web tsc 0; glue scan clean.
+
 ## Batch 148 - REG-04 slice: registration approval, fee status and squad eligibility (no migration - schema already carried the columns)
 
 - DELIVERED: the second Phase-2 build line. REG-04's core, as a pure
