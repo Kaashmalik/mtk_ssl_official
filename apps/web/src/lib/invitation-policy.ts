@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const invitationRole = z.enum(["team_manager", "coach", "scorer"])
+export const invitationRole = z.enum(["team_manager", "captain", "coach", "scorer", "player"])
 export const invitationToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/, "Invalid invitation link")
 export const normalizeInvitationEmail = (email: string) => email.trim().toLowerCase()
 
@@ -16,13 +16,24 @@ export function hasVerifiedInvitedEmail(provider: ProviderUser | null, clerkId: 
     && address.verification?.status === "verified")
 }
 
-/** The current one-role schema cannot represent team-scoped coach/scorer grants. */
+/**
+ * Invitation scope matrix (REG-05, Batch 134):
+ * - team_manager: REQUIRES a team (they manage exactly that team).
+ * - captain: REQUIRES a team (redemption assigns that team's captain pointer).
+ * - coach / scorer: league-wide (the one-role schema cannot represent
+ *   team-scoped coach/scorer grants; the register records this boundary).
+ * - player: league-wide (roster-to-team assignment stays in the roster
+ *   flows - an invitation never creates a player row).
+ */
 export function assertSupportedInvitationScope(role: string, teamId: string | null) {
   invitationRole.parse(role)
+  const team = z.string().uuid().safeParse(teamId).success
   if (role === "team_manager") {
-    if (!z.string().uuid().safeParse(teamId).success) throw new Error("A team manager invitation requires a team")
+    if (!team) throw new Error("A team manager invitation requires a team")
+  } else if (role === "captain") {
+    if (!team) throw new Error("A captain invitation requires a team")
   } else if (teamId !== null) {
-    throw new Error("Team-scoped coach/scorer invitations are not supported yet")
+    throw new Error(`Team-scoped ${role} invitations are not supported yet`)
   }
 }
 

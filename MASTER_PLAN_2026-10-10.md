@@ -6171,6 +6171,48 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 134 - REG-05 invitation slice: captain + player journeys (migration applied remotely)
+
+- DELIVERED: the invitation system now carries the captain and player
+  journeys - previously only team_manager/coach/scorer were invitable.
+- Migration `20261018180000_captain_role` APPLIED remotely and verified:
+  `user_role` enum + 'captain' (AFTER team_manager), type comment recorded.
+  APPLY-TOOLING GOTCHA: the statement splitter must strip comment lines
+  BEFORE semicolon chunking - skipping chunks that merely START with a
+  comment silently skipped the ALTER TYPE while the trailing COMMENT ON
+  still ran (a half-applied migration). The post-apply ENUM verification
+  caught it; apply scripts now verify the actual shape, never assume.
+- RBAC (rbac.ts): captain = read baseline + team:read + invite:accept;
+  roster management stays with team_manager; hierarchy 50 (below manager,
+  above coach/scorer). Labels updated.
+- Policy (invitation-policy.ts): scope matrix - captain REQUIRES a team
+  (redemption assigns that team's captain pointer); player is league-scope
+  ONLY (roster-to-team assignment stays in the roster flows; an invitation
+  never creates a player row); coach/scorer remain league-scope (recorded
+  one-role-schema boundary, unchanged error strings preserved).
+- Writers (invite-records.ts): issue- and claim-time team checks and team
+  pointer assignment branch by role - manager path unchanged (same guards,
+  same error strings); captain redemption assigns teams.captainId
+  null-or-self under the row lock with optimistic returning verification
+  ("Invited team already has a different captain"); player invitations
+  write no team pointer. Membership insert carries the invited role
+  verbatim; audits/notifications unchanged.
+- Consistency: memberEditableRoles (member CRUD) now includes captain so a
+  redeemed captain membership is manageable by the same member journey and
+  not a dead end (B131 un-export pin intact - still not exported).
+- UI (invite-manager.tsx): Captain/Player options, team picker for both
+  team-scoped roles, submit requires the team, honest journey copy
+  (pointer assignment on acceptance; player stays unteammed until the
+  roster adds them).
+- Tests: policy scope matrix (player invitable league-only, captain
+  team-required incl. junk team ids, privilege roles still refused);
+  invitation-view SSR pins (journey copy, picker aria); captain-invite-
+  writer 4 tests (pointer assignment + membership role verbatim,
+  foreign-captain refusal, manager path unchanged, player writes no
+  pointer) with call-order-role-aware issuer/recipient fake reads.
+- Gates: web 153 files / 3,094 tests, web tsc 0, targeted suites green;
+  MIGRATION_STATUS entry recorded.
+
 ## Batch 133 - Public scorecard minor-name gate closure + FAN-03 match recap
 
 - CORRECTION RECORDED (FAN-01 state): the remaining-plan summary listed

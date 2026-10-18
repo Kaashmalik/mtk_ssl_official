@@ -15,12 +15,18 @@ describe("Invitation policy", () => {
   it("does not collapse aliases or names to merge identities", () => {
     expect(hasVerifiedInvitedEmail({ id: "user", emailAddresses: [{ emailAddress: "ali@example.test", verification: { status: "verified" } }] }, "user", "ali+scorer@example.test")).toBe(false)
   })
-  it.each(["super_admin", "league_owner", "player", "fan", "unknown"])("cannot invite privilege %s", role => {
+  it.each(["super_admin", "league_owner", "fan", "unknown"])("cannot invite privilege %s", role => {
     expect(() => assertSupportedInvitationScope(role, null)).toThrow()
   })
-  it.each(["scorer", "coach"])("%s only supports league scope, not misleading team grants", role => {
+  // REG-05 (Batch 134): player joined the invitable roles (league scope only,
+  // roster assignment stays in the roster flows), captain is team-required.
+  it.each(["scorer", "coach", "player"])("%s only supports league scope, not misleading team grants", role => {
     expect(() => assertSupportedInvitationScope(role, null)).not.toThrow()
     expect(() => assertSupportedInvitationScope(role, TEAM)).toThrow("not supported")
+  })
+  it.each([null, "not-a-uuid"])("captain invitation requires a team (batch 134, got %s)", teamId => {
+    expect(() => assertSupportedInvitationScope("captain", teamId as string | null)).toThrow("requires a team")
+    expect(() => assertSupportedInvitationScope("captain", TEAM)).not.toThrow()
   })
   it("manager requires a valid UUID team", () => {
     expect(() => assertSupportedInvitationScope("team_manager", TEAM)).not.toThrow()

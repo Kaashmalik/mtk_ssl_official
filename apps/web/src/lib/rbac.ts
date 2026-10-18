@@ -4,13 +4,14 @@
  */
 
 export type UserRole =
-  | "super_admin"
-  | "league_owner"
-  | "team_manager"
-  | "coach"
-  | "scorer"
-  | "player"
-  | "fan";
+| "super_admin"
+| "league_owner"
+| "team_manager"
+| "captain"
+| "coach"
+| "scorer"
+| "player"
+| "fan";
 
 /**
  * All available permissions in the system
@@ -118,6 +119,21 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "stats:read",
     "fan:follow", "fan:read",
   ],
+  // REG-05 (Batch 134): captain joins the league through a team-scoped
+  // invitation and reads team/match records. Availability and correction
+  // request journeys are later REG-05 slices - the matrix grows with them,
+  // never ahead of them. Roster management stays with team_manager.
+  captain: [
+    "tournament:read",
+    "team:read",
+    "player:read",
+    "match:read",
+    "venue:read",
+    "scorecard:read",
+    "stats:read",
+    "user:read", "invite:accept",
+    "fan:follow", "fan:read",
+  ],
   scorer: [
     "tournament:read",
     "team:read",
@@ -181,6 +197,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
   league_owner: "League Owner",
   team_manager: "Team Manager",
+  captain: "Captain",
   coach: "Coach",
   scorer: "Scorer",
   player: "Player",
@@ -194,6 +211,7 @@ const ROLE_HIERARCHY: Record<UserRole, number> = {
   super_admin: 100,
   league_owner: 80,
   team_manager: 60,
+  captain: 50,
   coach: 40,
   scorer: 40,
   player: 20,

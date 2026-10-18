@@ -29,8 +29,10 @@ interface InviteRow {
 
 const ROLE_LABELS: Record<string, string> = {
   team_manager: "Team Manager",
+  captain: "Captain",
   coach: "Coach",
   scorer: "Scorer",
+  player: "Player",
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -101,7 +103,7 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
         const res = await createInvite({
           tenantId,
           email,
-          role: role as "team_manager" | "coach" | "scorer",
+          role: role as "team_manager" | "captain" | "coach" | "scorer" | "player",
           teamId: teamId === "none" ? null : teamId,
           membershipExpiresAt: computeMembershipBound(bound)?.toISOString() ?? null,
         })
@@ -142,7 +144,7 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
           <UserPlus className="h-5 w-5" /> Invite Team Staff
         </CardTitle>
         <CardDescription>
-          Invite a team manager, coach, or scorer. Verify the invited email through the sign-in provider before acceptance. Links expire in 7 days. The delivery column shows the last provider outcome — acceptance is not proof of delivery.
+          Invite a team manager, captain, coach, scorer, or player. Verify the invited email through the sign-in provider before acceptance. Links expire in 7 days. The delivery column shows the last provider outcome — acceptance is not proof of delivery.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -165,15 +167,17 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
               <SelectTrigger className="mt-1.5" aria-label="Invited league role"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="team_manager">Team Manager</SelectItem>
+                <SelectItem value="captain">Captain</SelectItem>
                 <SelectItem value="coach">Coach</SelectItem>
                 <SelectItem value="scorer">Scorer</SelectItem>
+                <SelectItem value="player">Player</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {role === "team_manager" && <div>
+          {(role === "team_manager" || role === "captain") && <div>
             <Label>Team</Label>
             <Select disabled={isPending} value={teamId} onValueChange={setTeamId}>
-              <SelectTrigger className="mt-1.5" aria-label="Team for invited manager"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="mt-1.5" aria-label="Team for the invited manager or captain"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Choose a team</SelectItem>
                 {teams.map((t) => (
@@ -195,8 +199,8 @@ export function InviteManager({ tenantId }: { tenantId: string }) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">The membership bound is separate from the link expiry: it bounds the accepted member's league access itself and must be extended by an owner to last longer. A bound is applied at acceptance with you recorded as the granting owner; no bound leaves access unbounded.</p>
-        <p className="text-xs text-muted-foreground">Coach and scorer invitations grant a league role only. Scorers still need an explicit match assignment. Team-scoped coach/scorer grants are not available.</p>
-        <Button onClick={submit} disabled={isPending || !!loadError || !email || (role === "team_manager" && teamId === "none")}>
+        <p className="text-xs text-muted-foreground">Coach and scorer invitations grant a league role only. Scorers still need an explicit match assignment. Team-scoped coach/scorer grants are not available. Captain invitations require a team and assign its captain pointer on acceptance; player invitations grant a league role and stay unteammed until the roster adds them.</p>
+        <Button onClick={submit} disabled={isPending || !!loadError || !email || ((role === "team_manager" || role === "captain") && teamId === "none")}>
           {isPending ? "Creating..." : "Create Invitation"}
         </Button>
 

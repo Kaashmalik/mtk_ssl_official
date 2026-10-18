@@ -13,6 +13,7 @@ export const userRoleEnum = pgEnum("user_role", [
   "super_admin",
   "league_owner",
   "team_manager",
+  "captain",
   "coach",
   "scorer",
   "player",

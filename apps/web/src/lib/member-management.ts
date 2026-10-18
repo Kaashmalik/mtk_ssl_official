@@ -13,8 +13,10 @@ import { membershipGrantsAccess, parseMembershipExpiry } from "@mtk/database"
  * write transaction after the ordered locks.
  */
 
-/** Roles an owner may assign here. Owner/platform roles are transfer-only. */
-const memberEditableRoles = ["team_manager", "coach", "scorer", "player", "fan"] as const
+/** Roles an owner may assign here. Owner/platform roles are transfer-only.
+ * Captain joined with the REG-05 invitation journeys (Batch 134): a redeemed
+ * captain membership is managed by the same member CRUD, not a dead end. */
+const memberEditableRoles = ["team_manager", "captain", "coach", "scorer", "player", "fan"] as const
 
 const memberKey = z.object({
   tenantId: z.string().uuid(),

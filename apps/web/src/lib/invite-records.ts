@@ -19,7 +19,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Actor = typeof users.$inferSelect
 type Invite = typeof userInvites.$inferSelect
 /** Exactly the roles an invitation may grant. */
-type InvitableRole = "team_manager" | "coach" | "scorer"
+type InvitableRole = "team_manager" | "captain" | "coach" | "scorer" | "player"
 type ProviderUser = {
   id: string
   emailAddresses: { emailAddress: string; verification: { status: string | null } | null }[]
@@ -143,11 +143,17 @@ export async function issueInviteInLeague(input: {
   return db.transaction(async tx => {
     const authority = await lockInvitationAuthority(tx, tenantId, actorId, undefined, true, clerkId)
     if (teamId) {
+      // Issue-time team checks are role-specific (Batch 134): a manager
+      // invitation requires the manager pointer free; a captain invitation
+      // requires the captain pointer free. The redemption writer re-checks
+      // under the row lock - this is the fail-fast sibling, not the gate.
       await tx.execute(sql`SELECT ${teams.id} FROM ${teams} WHERE ${and(eq(teams.id, teamId), eq(teams.tenantId, tenantId))} FOR SHARE`)
       const team = await tx.query.teams.findFirst({ where: and(eq(teams.id, teamId), eq(teams.tenantId, tenantId)) })
-      if (!team || team.id !== teamId || team.tenantId !== tenantId || team.isActive !== true || team.managerId !== null) {
+      if (!team || team.id !== teamId || team.tenantId !== tenantId || team.isActive !== true) {
         throw new Error("Team is unavailable or already has a manager")
       }
+      if (role === "team_manager" && team.managerId !== null) throw new Error("Team is unavailable or already has a manager")
+      if (role === "captain" && team.captainId !== null) throw new Error("Team is unavailable or already has a captain")
     }
     const duplicate = await tx.query.userInvites.findFirst({ where: and(
       eq(userInvites.tenantId, tenantId), eq(userInvites.email, email), eq(userInvites.role, role),
@@ -278,10 +284,16 @@ export async function claimInvite(input: {
     if (invite.teamId) {
       await tx.execute(sql`SELECT ${teams.id} FROM ${teams} WHERE ${and(eq(teams.id, invite.teamId), eq(teams.tenantId, invite.tenantId))} FOR UPDATE`)
       const team = await tx.query.teams.findFirst({ where: and(eq(teams.id, invite.teamId), eq(teams.tenantId, invite.tenantId)) })
-      if (!team || team.id !== invite.teamId || team.tenantId !== invite.tenantId || team.isActive !== true
-        || (team.managerId !== null && team.managerId !== actor.id)) throw new Error("Invited team is unavailable or has a different manager")
-      const otherTeam = await tx.query.teams.findFirst({ where: and(eq(teams.tenantId, invite.tenantId), eq(teams.managerId, actor.id), ne(teams.id, invite.teamId)) })
-      if (otherTeam) throw new Error("You already manage another team in this league. Ask the owner to review the assignment.")
+      if (!team || team.id !== invite.teamId || team.tenantId !== invite.tenantId || team.isActive !== true) throw new Error("Invited team is unavailable or has a different manager")
+      if (invite.role === "team_manager") {
+        if (team.managerId !== null && team.managerId !== actor.id) throw new Error("Invited team is unavailable or has a different manager")
+        const otherTeam = await tx.query.teams.findFirst({ where: and(eq(teams.tenantId, invite.tenantId), eq(teams.managerId, actor.id), ne(teams.id, invite.teamId)) })
+        if (otherTeam) throw new Error("You already manage another team in this league. Ask the owner to review the assignment.")
+      } else if (invite.role === "captain" && team.captainId !== null && team.captainId !== actor.id) {
+        // A captain is assigned to exactly one team via the invitation; the
+        // pointer is currently held by someone else.
+        throw new Error("Invited team already has a different captain")
+      }
     }
     const [claimed] = await tx.update(userInvites).set({ status: "accepted", acceptedAt: new Date() }).where(and(
       eq(userInvites.id, invite.id), eq(userInvites.tenantId, invite.tenantId), eq(userInvites.tokenHash, tokenHash),
@@ -305,9 +317,18 @@ export async function claimInvite(input: {
       await tx.update(userTenantRoles).set({ expiresAt: proposedBound, delegatedByUserId: invite.invitedBy })
         .where(and(eq(userTenantRoles.id, membership.id), eq(userTenantRoles.tenantId, invite.tenantId)))
     }
-    if (invite.teamId) {
+    if (invite.teamId && invite.role === "team_manager") {
       const [assigned] = await tx.update(teams).set({ managerId: actor.id, updatedAt: new Date() }).where(and(
         eq(teams.id, invite.teamId), eq(teams.tenantId, invite.tenantId), eq(teams.isActive, true), or(isNull(teams.managerId), eq(teams.managerId, actor.id)),
+      )).returning({ id: teams.id })
+      if (!assigned) throw new Error("Team assignment changed")
+    }
+    // REG-05 (Batch 134): a redeemed captain invitation assigns the team's
+    // captain pointer with the same null-or-self guarantee the manager path
+    // carries - optimistic predicate, verified through returning().
+    if (invite.teamId && invite.role === "captain") {
+      const [assigned] = await tx.update(teams).set({ captainId: actor.id, updatedAt: new Date() }).where(and(
+        eq(teams.id, invite.teamId), eq(teams.tenantId, invite.tenantId), eq(teams.isActive, true), or(isNull(teams.captainId), eq(teams.captainId, actor.id)),
       )).returning({ id: teams.id })
       if (!assigned) throw new Error("Team assignment changed")
     }

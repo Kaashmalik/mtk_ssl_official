@@ -42,13 +42,16 @@ describe("Invitation verification/UI contracts (SSR and source, not browser/OTP 
     expect(source).not.toContain("console.")
     expect(source).not.toContain("localStorage")
   })
-  it("manager requires a team, describes league-only coach/scorer scope and honest delivery limits", () => {
+  it("manager requires a team, describes the invite scope (coach/scorer league-only, captain player journeys) and honest delivery limits", () => {
     const html = renderToStaticMarkup(<InviteManager tenantId="league" />)
     expect(html).toContain("Choose a team")
     expect(html).not.toContain("Whole league")
     expect(html).toContain("Team-scoped coach/scorer grants are not available")
+    // REG-05 (Batch 134): the new journeys are described and selectable.
+    expect(html).toContain("Captain invitations require a team")
+    expect(html).toContain("player invitations grant a league role")
+    expect(html).toContain('aria-label="Team for the invited manager or captain"')
     expect(html).toContain("acceptance is not proof of delivery")
-    expect(html).toContain('aria-label="Team for invited manager"')
   })
   it("offers membership-bound presets that are separate from the 7-day link expiry", () => {
     const html = renderToStaticMarkup(<InviteManager tenantId="league" />)

@@ -3,6 +3,15 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 134) - `captain_role` applied remotely** (same
+> proven path: original file, original stamp `20261018180000`, applied
+> statement-by-statement, verified in the same session). `user_role` enum
+> + 'captain' (AFTER team_manager) for the REG-05 captain invitation
+> journeys; additive, no data/grant changes. Apply-tooling note: strip
+> comment lines BEFORE semicolon chunking — chunk-skip half-applied the
+> migration (COMMENT ran, ALTER TYPE skipped) and the post-apply enum
+> verification caught it.
+
 > **18 October 2026 (Batch 132) - `minor_consent` applied remotely**
 > (same proven path: original file, original stamp `20261018170000`,
 > applied statement-by-statement, shape-verified in the same session).
