@@ -27,8 +27,7 @@ const PUBLIC_FILES = [
 ]
 
 describe("PUB-06: public surfaces use explicit column selects only", () => {
-  it("has no full-row db.select().from() on any unauthenticated surface", () => {
-    for (const rel of PUBLIC_FILES) {
+  it("has no full-row db.select().from() on any unauthenticated surface", () => {    for (const rel of PUBLIC_FILES) {
       const source = readFileSync(join(WEB_SRC, rel), "utf8")
       const offenders = source
         .split("\n")
@@ -47,5 +46,31 @@ describe("PUB-06: public surfaces use explicit column selects only", () => {
     const suite = readFileSync(join(WEB_SRC, "__tests__/public-allowlist.test.ts"), "utf8")
     expect(suite).toContain('"championTeamId"')
     expect(suite).toContain('"captainId"')
+  })
+})
+
+describe("PUB-06 (Batch 133): official-record public surfaces gate minor NAMES", () => {
+  const read = (rel: string) => readFileSync(join(WEB_SRC, rel), "utf8")
+
+  it("the public match page loads the gate columns and resolves names through the policy", () => {
+    const source = read("app/matches/[matchId]/page.tsx")
+    expect(source).toContain("applyMinorNameGate(playerRows)")
+    expect(source).toContain("guardianConsentAt: players.guardianConsentAt")
+    expect(source).not.toContain("new Map(playerRows.map(p => [p.id, p.name]))")
+  })
+
+  it("the printable scorecard resolves names through the same gate", () => {
+    const source = read("app/api/scorecards/[matchId]/pdf/route.ts")
+    expect(source).toContain("applyMinorNameGate(playerRows)")
+    expect(source).toContain("guardianConsentAt: players.guardianConsentAt")
+  })
+
+  it("the FAN-03 recap derives from already-loaded official rows only", () => {
+    const source = read("app/matches/[matchId]/page.tsx")
+    expect(source).toContain("deriveMatchRecap(")
+    expect(source).toContain("RECAP_LABELS.title")
+    // The recap must not open new database reads - inputs come from the
+    // rows the page already loaded (inningsRaw + the mapped `innings`).
+    expect(source).not.toMatch(/deriveMatchRecap\(\{[\s\S]{0,120}db\./)
   })
 })

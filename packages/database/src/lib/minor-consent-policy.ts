@@ -62,8 +62,7 @@ export function minorPublicDecision(
   return { visible: false, basis: "minor_without_consent" }
 }
 
-/** UI copy - tested verbatim, never improvised in components. */
-export const MINOR_CONSENT_LABELS = {
+/** UI copy - tested verbatim, never improvised in components. */export const MINOR_CONSENT_LABELS = {
   minor: "Minor (recorded date of birth)",
   adult: "Adult",
   unknownAge: "Age unknown - recorded date of birth required to gate visibility",
@@ -75,3 +74,34 @@ export const MINOR_CONSENT_LABELS = {
   disclosure:
     "Minors stay off public leaderboards and career records unless guardian consent is recorded. The consent is a league record, not a platform check.",
 } as const
+
+/**
+ * Name-withholding for OFFICIAL-RECORD surfaces (Batch 133 public match
+ * page + scorecard PDF): unlike leaderboards (where a withholdable row is
+ * dropped), a scorecard is the competition's official record - dropping a
+ * batting row would corrupt the innings math (the team total still includes
+ * those runs). There the person's IDENTITY is withheld, not the stat: a
+ * proven minor without recorded guardian consent renders as
+ * WITHHELD_NAME_LABEL everywhere their name would resolve. The map covers
+ * every involved player id; ids absent from the rows resolve undefined so
+ * callers keep their existing fallback behavior.
+ */
+export const WITHHELD_NAME_LABEL = "Name withheld pending guardian consent"
+
+export function applyMinorNameGate(
+  rows: ReadonlyArray<{
+    id: string
+    name: string | null | undefined
+    dateOfBirth?: string | Date | null
+    guardianConsentAt?: Date | string | null
+  }>,
+  at: Date = new Date(),
+): Map<string, string> {
+  const byId = new Map<string, string>()
+  for (const row of rows) {
+    if (!row || typeof row.id !== "string" || row.id.length === 0) continue
+    const decision = minorPublicDecision(row.dateOfBirth, row.guardianConsentAt, at)
+    byId.set(row.id, decision.visible ? row.name ?? "" : WITHHELD_NAME_LABEL)
+  }
+  return byId
+}

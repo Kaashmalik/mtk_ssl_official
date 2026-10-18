@@ -3,6 +3,7 @@ import { db, teams, matchInnings, players, battingScorecards, bowlingScorecards,
 import { eq, and, asc, inArray } from "drizzle-orm"
 import { getPublicTenantContext } from "@/lib/public-tenant"
 import { readPublishedMatch } from "@/lib/public-visibility"
+import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
 
 /**
  * GET /api/scorecards/[matchId]/pdf
@@ -100,10 +101,13 @@ export async function GET(
     ...bowlingAll.map(b => b.playerId),
   ]))
   const playerRows = playerIds.length
-    ? await db.select({ id: players.id, name: players.name })
+    ? await db.select({ id: players.id, name: players.name, dateOfBirth: players.dateOfBirth, guardianConsentAt: players.guardianConsentAt })
         .from(players).where(and(inArray(players.id, playerIds), eq(players.tenantId, tenantId)))
     : []
-  const nameById = new Map(playerRows.map(p => [p.id, p.name]))
+  // PUB-06 (Batch 133): the printable scorecard is the same official record
+  // as the public page - identities pass the same minor-name gate; the rows
+  // and totals stay intact so the record keeps adding up.
+  const nameById = applyMinorNameGate(playerRows)
 
   // Team name lookup
   const teamNameById = new Map([

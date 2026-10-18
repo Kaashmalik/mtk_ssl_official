@@ -15,6 +15,8 @@ import type { FanReactionType } from "@mtk/database/lib/fan-reaction-policy"
 import { readFanReactionCounts, readMyFanReactions } from "@/lib/fan-reactions"
 import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
 import { ReactionFeedReport } from "@/components/shared/reaction-feed-report"
+import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
+import { deriveMatchRecap, RECAP_LABELS } from "@mtk/database/lib/match-recap"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
@@ -53,8 +55,9 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
   let momName = ""
   if (match.manOfMatchId) {
-    const [p] = await db.select({ name: players.name }).from(players).where(and(eq(players.id, match.manOfMatchId), eq(players.tenantId, tenantId))).limit(1)
-    momName = p?.name ?? ""
+    const [p] = await db.select({ id: players.id, name: players.name, dateOfBirth: players.dateOfBirth, guardianConsentAt: players.guardianConsentAt }).from(players).where(and(eq(players.id, match.manOfMatchId), eq(players.tenantId, tenantId))).limit(1)
+    // PUB-06 (Batch 133): the player-of-the-match name passes the same gate.
+    if (p) momName = applyMinorNameGate([p]).get(p.id) ?? ""
   }
 
   // PUB-06/PUB-02: explicit columns only on this unauthenticated page - the
@@ -123,11 +126,15 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
     ...wicketBalls.map(b => b.batsmanId).filter((x): x is string => !!x),
     ...wicketBalls.map(b => b.bowlerId).filter((x): x is string => !!x),
   ]))
+  // PUB-06 (Batch 133 closure): the scorecard is an official record, so a
+  // proven minor's IDENTITY is withheld, not their stat row - the team total
+  // must keep adding up. The gate is the same pure policy the leaderboards
+  // use; a viewer only ever sees WITHHELD_NAME_LABEL in place of the name.
   const playerRows = playerIds.length
-    ? await db.select({ id: players.id, name: players.name }).from(players)
+    ? await db.select({ id: players.id, name: players.name, dateOfBirth: players.dateOfBirth, guardianConsentAt: players.guardianConsentAt }).from(players)
         .where(and(inArray(players.id, playerIds), eq(players.tenantId, tenantId)))
     : []
-  const nameById = new Map(playerRows.map(p => [p.id, p.name]))
+  const nameById = applyMinorNameGate(playerRows)
 
   const fowByInnings = new Map<string, { over: string; batsman: string; bowler: string; scoreAtFall: number; wicketsAtFall: number }[]>()
   {
@@ -223,6 +230,23 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
   const teamAInnings = innings.find(inn => inn.team === teamA.name)
   const teamBInnings = innings.find(inn => inn.team === teamB.name)
 
+  // FAN-03 (Batch 133): the recap derives ONLY from the official rows this
+  // page already loaded and publication-gated - it is a deterministic view,
+  // never a narrative. With no innings there is no recap and the section
+  // simply does not render. Names arrive already minor-gated via nameById.
+  const recap = deriveMatchRecap({
+    resultText,
+    manOfMatchName: momName || null,
+    innings: inningsRaw.map((inn, idx) => ({
+      teamName: innings[idx].team,
+      totalRuns: inn.totalRuns,
+      totalWickets: inn.totalWickets,
+      totalBalls: inn.totalBalls,
+      batting: innings[idx].batting.map(b => ({ name: b.name, runs: b.runs, balls: b.balls })),
+      bowling: innings[idx].bowling.map(b => ({ name: b.name, wickets: b.wickets, runs: b.runs, overs: Number(b.overs) || 0 })),
+    })),
+  })
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 p-4">
       <Card className="overflow-hidden border-none shadow-xl relative text-white">
@@ -273,6 +297,48 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           </div>
         </CardContent>
       </Card>
+
+      {recap && (
+        <Card data-testid="match-recap">
+          <CardHeader><CardTitle className="text-lg">{RECAP_LABELS.title}</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm font-medium">{recap.summary}</p>
+            {(recap.topBatters.length > 0 || recap.topBowlers.length > 0) && (
+              <div className="grid gap-2 sm:grid-cols-2 text-sm">
+                {recap.topBatters.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{RECAP_LABELS.topBatters}</p>
+                    {recap.topBatters.map((row, i) => (
+                      <p key={`b${i}`} className="tabular-nums">{row.playerName} — {row.runs} ({row.balls}b)</p>
+                    ))}
+                  </div>
+                )}
+                {recap.topBowlers.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{RECAP_LABELS.topBowlers}</p>
+                    {recap.topBowlers.map((row, i) => (
+                      <p key={`w${i}`} className="tabular-nums">{row.playerName} — {row.wickets}/{row.runs} ({row.overs} ov)</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {recap.moments.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{RECAP_LABELS.moments}</p>
+                <ul className="text-sm space-y-1">
+                  {recap.moments.map((moment, i) => (
+                    <li key={i}>
+                      <span className="font-semibold">{RECAP_LABELS.momentLabels[moment.kind]}</span> {moment.playerName} — {moment.detail}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">{RECAP_LABELS.derivedNotice}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {innings.length === 0 ? (
         <Card>

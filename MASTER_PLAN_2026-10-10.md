@@ -6171,6 +6171,53 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 133 - Public scorecard minor-name gate closure + FAN-03 match recap
+
+- CORRECTION RECORDED (FAN-01 state): the remaining-plan summary listed
+  FAN-01 report/block fan tooling as "honest-refused, needs wiring
+  decision" - the registers show B116/B117/B118 already BUILT reports,
+  league-scoped fan blocks and the interactions queue. FAN-01's open state
+  is staged acceptance/tick only, not build work. Phase 1 moved to the next
+  genuine gap.
+- B132 HOLE CLOSED (found while planning B133): the public match page
+  (matches/[matchId]) and the printable scorecard PDF route resolved every
+  player name straight from scorecard joins - the Batch 132 minor gate
+  covered leaderboards/milestones/career/awards but NOT these two official-
+  record surfaces. Fixed with the "identity withheld, record intact" rule:
+  a proven minor without recorded guardian consent renders
+  WITHHELD_NAME_LABEL everywhere a name would resolve (batting/bowling
+  rows, dismissal texts, fall-of-wickets, player-of-the-match). Unlike
+  leaderboards, ROWS ARE NOT DROPPED here - a scorecard is the
+  competition's official record and the team total must keep adding up;
+  the person's identity is the sensitive bit. Both surfaces load
+  date_of_birth + guardian_consent_at explicitly (public-surface explicit-
+  column rule kept) and resolve names through the new policy helper.
+- Pure policy additions (@mtk/database/lib/minor-consent-policy):
+  WITHHELD_NAME_LABEL + applyMinorNameGate(rows) -> id->name map, unit-
+  tested (withhold/consent/adult/no-DOB/missing-name edges).
+- FAN-03 recap tool (the recap half; highlights stay an honest boundary -
+  they need a media pipeline): @mtk/database/lib/match-recap.ts derives a
+  recap OBJECT from official rows the page already loaded - NO new database
+  reads, no narrative invention, null when no innings (caller renders
+  nothing). Threshold constants (50/100 runs, 3/5 wickets) with highest-
+  bracket barring (a hundred is not also a fifty), deterministic ties
+  (input order), official overs notation 4.2 -> 26 balls. Rendered as a
+  Match Recap card on the public match page with the derived-not-fabricated
+  disclosure; names arrive already minor-gated.
+- B132 TEST DISCOVERY CORRECTED: minor-consent-policy.test.ts had been
+  written into src/lib/ but the database package's vitest include is
+  src/**/__tests__/ - the 5 policy units NEVER RAN in B132's battery
+  (the 34/360 count was unchanged, which was the tell). Both policy test
+  files now live in src/__tests__; the database battery is honestly 36
+  files / 373 passing (+2 files, +13 tests = the B132 units now counted,
+  plus 8 recap/name-gate units).
+- Pins: public-page-hygiene extended (both scorecard surfaces resolve
+  names through applyMinorNameGate with explicit gate columns; the recap
+  opens no db reads); earlier guardian-consent reader-gate pin untouched
+  (still 10 occurrences).
+- Gates: db tsc 0 + db 36/373; web tsc 0; targeted suites green; full
+  battery in the batch record.
+
 ## Batch 132 - Minor consent, PUB-06 + REG-06 slice (migration applied remotely)
 
 - DECISION RECORDED (consent-on-publication, product default per the

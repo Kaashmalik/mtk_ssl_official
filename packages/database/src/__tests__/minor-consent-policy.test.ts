@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
-  MINOR_AGE_THRESHOLD, MINOR_CONSENT_LABELS,
-  isMinorByRecord, minorPublicDecision, playerAgeYears,
+  MINOR_AGE_THRESHOLD, MINOR_CONSENT_LABELS, WITHHELD_NAME_LABEL,
+  applyMinorNameGate, isMinorByRecord, minorPublicDecision, playerAgeYears,
 } from "../lib/minor-consent-policy"
 
 /**
@@ -46,5 +46,31 @@ describe("minor-consent policy", () => {
     expect(MINOR_AGE_THRESHOLD).toBe(18)
     expect(MINOR_CONSENT_LABELS.consentMissing).toContain("hidden from public records")
     expect(MINOR_CONSENT_LABELS.disclosure).toContain("league record, not a platform check")
+  })
+})
+
+describe("applyMinorNameGate (official-record name withholding, Batch 133)", () => {
+  const NOW = new Date("2026-10-18T12:00:00Z")
+
+  it("withholds a proven minor's name without consent; consent or adulthood shows it", () => {
+    const byId = applyMinorNameGate(
+      [
+        { id: "minor-no", name: "Hidden Kid", dateOfBirth: "2015-01-05", guardianConsentAt: null },
+        { id: "minor-ok", name: "Consented Kid", dateOfBirth: "2015-01-05", guardianConsentAt: new Date("2026-06-01T00:00:00Z") },
+        { id: "adult", name: "Adult Player", dateOfBirth: "1990-05-05" },
+        { id: "no-dob", name: "Unknown Age", dateOfBirth: null },
+      ],
+      NOW,
+    )
+    expect(byId.get("minor-no")).toBe(WITHHELD_NAME_LABEL)
+    expect(byId.get("minor-ok")).toBe("Consented Kid")
+    expect(byId.get("adult")).toBe("Adult Player")
+    expect(byId.get("no-dob")).toBe("Unknown Age") // never guessed into a minor
+  })
+
+  it("keeps ids stable and tolerates missing names without inventing one", () => {
+    const byId = applyMinorNameGate([{ id: "anon", name: null, dateOfBirth: "1990-01-01" }], NOW)
+    expect(byId.get("anon")).toBe("")
+    expect(applyMinorNameGate([], NOW).size).toBe(0)
   })
 })
