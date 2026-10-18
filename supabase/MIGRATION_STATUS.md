@@ -4,8 +4,9 @@
 > `db reset`, or adding a migration.
 
 > **19 October 2026 (Batch 141) - `scorecard_correction_requests` applied remotely**
-> (same proven path; table + 2 enums + 4 indexes + resolution CHECK +
-> RLS verified in the same session). REG-05 member-raised scorecard
+> (original file, original stamp `20261018220000`; same proven path; table
+> + 2 enums + 4 indexes + resolution CHECK + RLS verified in the same
+> session). REG-05 member-raised scorecard
 > correction requests; records never mutations; additive, no data/grant
 > changes to existing objects.
 

@@ -17,7 +17,7 @@
     "type-check": "turbo run type-check",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
-    "test:release": "node --test scripts/release-evidence.test.mjs",
+    "test:release": "node --test scripts/release-evidence.test.mjs scripts/migration-inventory.test.mjs",
     "test:roadmap": "node --test scripts/roadmap-status.test.mjs",
     "roadmap:status": "node scripts/roadmap-status.mjs",
     "release:check": "node scripts/release-evidence.mjs",

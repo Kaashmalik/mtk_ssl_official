@@ -6171,6 +6171,54 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
+
+## Batch 146 - REL-07 + BASE-04 slice: release/rollback documentation and the migration inventory (no migration, no DB touched)
+
+- DELIVERED: the two Phase-3 items that need no user resources:
+  1. REL-07 - RELEASE_CHECKLIST.md: the go/no-go gate between merge and
+     ship. Six sections (scope discipline, automated gates CI+operator,
+     schema/data gates, evidence manifest, deploy pointers, owner
+     approvals). Key honesty properties: a release with FEWER passing
+     tests than the last register entry is a stop; evidence requirements
+     NOT claimed stay explicitly absent (a missing artifact for an
+     unclaimed requirement is correct; a fabricated one is corruption);
+     the previous-good SHA is recorded BEFORE deploying.
+  2. REL-07 - docs/ROLLBACK_RUNBOOK.md: five scenarios with one
+     data-safety position each - A: code-only rollback (git reset +
+     redeploy <5min, Vercel promote), B: failing/drifting migration
+     (STOP; never re-run blindly, never hand-edit; both drift directions
+     defined), C: data corruption (freeze write path, PITR/forward-fix
+     owner decision, restore is a new environment), D: crash-loop
+     (envs bake at start; force-recreate not restart), E: schema-
+     advancing release (additive migrations stay; removal is a planned
+     FUTURE migration, never a rollback DROP). Drill requirements tied
+     to scripts/release-evidence.mjs RELEASE_REQUIREMENTS: until a drill
+     runs on real infrastructure the artifact does not exist and MUST
+     NOT be claimed.
+  3. BASE-04 - scripts/migration-inventory.cjs + .test.mjs (4 tests;
+     wired into pnpm test:release, now 91 passing): the inventory is the
+     migrations FOLDER (source of truth), reconciled three ways:
+     --manifest (pure JSON inventory, CI-safe), --registry (vs
+     MIGRATION_STATUS stamps - INFORMATIONAL: the register documents
+     batches since Oct 6 only, so legacy 3-digit stamps legitimately
+     show unregistered), --db (vs supabase_migrations.schema_migrations;
+     OFF by default, connects only when explicitly asked - the
+     deployed-schema GATE: zero missingInDb, zero untrackedInDb).
+     Drift rules tested pure: applied-registry-only = missingInDb,
+     db-only stamp = untrackedInDb (flagged, NEVER normalized).
+     REPO FACTS FOUND: both filename shapes are real (3-digit legacy
+     x26, 8-digit x1, 14-digit x50 - all opaque digit stamps,
+     lexicographic run order).
+  4. MIGRATION_STATUS.md truth fix: B141's entry lacked its provenance
+     stamp - amended from the filename (20261018220000), a fact, not a
+     claim.
+- VERIFIED: test:release 91/91 (87 evidence-checker + 4 inventory);
+  manifest run: 77 migrations, first 001_enable_uuid_v7_and_helpers,
+  last 20261018220000_scorecard_correction_requests. The --db gate
+  itself is GATED on a staging DATABASE_URL (Phase 2, user-provided) -
+  the tool is ready, the live reconciliation has not run.
+
 ## Batch 145 - UX-03 slice: RTL mirror discipline on the localized surfaces (the last Phase-1 build target)
 
 - DELIVERED: UX-03's "full mirror polish" scoped HONESTLY. A full census
