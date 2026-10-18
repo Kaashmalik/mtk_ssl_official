@@ -25,6 +25,11 @@ describe("PUB-06: public tournaments index is allowlist-only", () => {
     expect(page).toContain("href={`/tournaments/${tournament.id}`}")
   })
 
+  it("interlinks to the hall of fame (discoverable both ways)", () => {
+    expect(page).toContain('href="/hall-of-fame"')
+    expect(page).toContain("Hall of fame")
+  })
+
   it("is a dynamic server page with its own cache-control", () => {
     expect(page).toContain("dynamic = \"force-dynamic\"")
     expect(page).toContain("noStore()")

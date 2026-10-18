@@ -794,8 +794,21 @@ Exit: one accepted ball yields one durable scoring effect and convergent authori
   awards and raise disputes, the live acceptance family extends to them
   before this caveat is retired. Fan-favorite hardening beyond the gallery
   statement is new scope, recorded for the roadmap, not hidden debt.
-- [ ] **PUB-05:** Implement configurable prize categories/currency/sponsors, approval and truthful payout records.
-- [ ] **PUB-06:** Verify public field allowlists, minor consent, withdrawal/cache invalidation and unauthorized export/socket access.
+- [x] **PUB-05:** Implement configurable prize categories/currency/sponsors, approval and truthful payout records.
+  **TICKED 2026-10-18** (user decision): schema + pure policy + locked
+  audited writers (B92), public gallery + owner management UI (B93),
+  approved-prize supersede corrections (B94), and live staged acceptance
+  3/3 PASS against the production database (B121: exact disclosed
+  projections, approved + non-superseded visibility, foreign-league empty,
+  REST anon fail-closed). Caveat recorded, not dropped: zero real prize
+  money had been declared at acceptance time - positive paths are
+  structurally verified against production and representatively thin;
+  when a real league records approvals/payouts the live family extends
+  before this caveat is retired.
+- [ ] **PUB-06:** Verify public field allowlists (B107/108, live-verified
+  B121), withdrawal/cache invalidation (B109) and unauthorized export/socket
+  access (B110) are delivered; **minor consent remains the open clause** -
+  it has no data model or product policy yet and needs a product decision.
 
 Exit: common users can browse published leagues and records without any private operational/contact/financial leakage.
 

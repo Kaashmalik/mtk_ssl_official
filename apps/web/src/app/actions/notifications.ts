@@ -3,7 +3,6 @@
 import {
   requireNotificationMemberContext, readMyNotifications, readUnreadNotificationCount,
   markNotificationReadById, markAllNotificationsReadFor, notificationListLimit,
-  readMyNotificationPreferences,
 } from "@/lib/notification-reads"
 import { saveNotificationPreferencesForMember } from "@/lib/notification-dispatch"
 
@@ -54,15 +53,6 @@ export async function markAllNotificationsRead() {
   const context = await requireNotificationMemberContext()
   await markAllNotificationsReadFor(context)
   return { success: true }
-}
-
-/**
- * The member's saved notification preferences in the active league, or `null`
- * when none were ever saved. Personal settings - no broader permission, same
- * verified-membership gate as the bell itself.
- */
-export async function getMyNotificationPreferences() {
-  return readOrEmpty(readMyNotificationPreferences, null)
 }
 
 /**

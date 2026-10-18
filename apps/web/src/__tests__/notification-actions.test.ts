@@ -17,6 +17,9 @@ vi.mock("@/lib/notification-reads", () => ({
 import {
   getMyNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead,
 } from "@/app/actions/notifications"
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 const context = { tenantId: "t", actorId: "a", clerkId: "c", role: "player" as const }
 
@@ -66,5 +69,18 @@ describe("Notification actions keep the personal-read contract", () => {
     await expect(markNotificationRead("00000000-0000-4000-8000-000000000003")).rejects.toThrow("Forbidden")
     await expect(markAllNotificationsRead()).rejects.toThrow("Forbidden")
     expect(mocks.markAll).not.toHaveBeenCalled()
+  })
+})
+
+describe("notification actions surface hygiene", () => {
+  const actionsFile = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../app/actions/notifications.ts"), "utf8")
+  it("exposes no dead preferences read - the settings page reads the lib function directly", () => {
+    // getMyNotificationPreferences was a duplicate server-action surface with
+    // zero consumers (the dashboard notifications page uses
+    // readMyNotificationPreferences server-side); removing it removes an
+    // unused reachable HTTP endpoint.
+    expect(actionsFile).not.toContain("getMyNotificationPreferences")
+    expect(actionsFile).toContain("saveNotificationPreferences")
+    expect(actionsFile).toContain("readOrEmpty")
   })
 })

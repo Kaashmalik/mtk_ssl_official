@@ -39,6 +39,11 @@ describe("FAN-03: public hall of fame page", () => {
     expect(page).not.toContain("entry.championTeamId")
   })
 
+  it("interlinks back to the tournaments index (discoverable both ways)", () => {
+    expect(page).toContain('href="/tournaments"')
+    expect(page).toContain("Browse tournaments")
+  })
+
   it("is covered by the PUBLIC_FILES hygiene guard", () => {
     const hygiene = readFileSync(join(WEB_SRC, "__tests__/public-page-hygiene.test.ts"), "utf8")
     expect(hygiene).toContain(`"app/hall-of-fame/page.tsx"`)

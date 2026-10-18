@@ -3,7 +3,7 @@ import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { unstable_noStore as noStore } from "next/cache"
-import { Trophy } from "lucide-react"
+import { Trophy, Calendar } from "lucide-react"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedHallOfFame } from "@/lib/public-visibility"
 
@@ -23,12 +23,18 @@ export default async function PublicHallOfFamePage() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto px-4 py-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Hall of fame</h1>
-        <p className="text-muted-foreground mt-2">
-          Champions of this league&apos;s published competitions, recorded exactly as
-          claimed at completion. Aggregate record only - no entrant-level detail.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Hall of fame</h1>
+          <p className="text-muted-foreground mt-2 max-w-2xl">
+            Champions of this league&apos;s published competitions, recorded exactly as
+            claimed at completion. Aggregate record only - no entrant-level detail.
+          </p>
+        </div>
+        <Link href="/tournaments" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <Calendar className="h-4 w-4" />
+          Browse tournaments
+        </Link>
       </div>
       {!entries.length ? (
         <Card>

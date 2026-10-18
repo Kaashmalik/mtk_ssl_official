@@ -6169,6 +6169,22 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 129 - Fan-surface interlinking + dead action cleanup (decision-free pair)
+
+- /tournaments <-> /hall-of-fame interlinking: the tournaments index header
+  gains a "Hall of fame" link (Trophy icon) and the hall of fame gains
+  "Browse tournaments" back - both fan surfaces become mutually discoverable
+  without touching any reader, gate or projection. Source-grep regressions
+  pin both directions.
+- Dead action removed: `getMyNotificationPreferences` in
+  app/actions/notifications.ts had ZERO consumers - the dashboard
+  notifications page reads `readMyNotificationPreferences` server-side
+  directly from the lib. An unused reachable HTTP endpoint is attack
+  surface, so the duplicate surface is gone (the dispatch path's own
+  preferences read is NOT a duplicate: it is the tx-locked FOR UPDATE read
+  the delivery decision serializes against). A surface-hygiene regression
+  pins the removal so the action cannot silently return.
+
 ## Batch 128 - Award revocation (PUB-04 delivered-able clauses complete)
 
 Revocation closes PUB-04's recorded close-out clause, built on the SAME
