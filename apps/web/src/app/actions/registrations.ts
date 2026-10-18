@@ -45,6 +45,8 @@ export const approveRegistration = withAuth("registration:manage", async (regist
   const reg = await approveLeagueRegistration(userId, tenantId, registrationId)
   revalidatePath(`/dashboard/tournaments/${reg.tournamentId}`)
   revalidatePath("/dashboard/registrations")
+  // PUB-06 cache invalidation: an approved entry joins the public team list.
+  revalidatePath(`/tournaments/${reg.tournamentId}`)
   return { success: true, registration: { id: reg.id, status: reg.status } }
 })
 
@@ -56,6 +58,7 @@ export const rejectRegistration = withAuth("registration:manage", async (registr
   const reg = await rejectLeagueRegistration(userId, tenantId, registrationId, reason)
   revalidatePath(`/dashboard/tournaments/${reg.tournamentId}`)
   revalidatePath("/dashboard/registrations")
+  revalidatePath(`/tournaments/${reg.tournamentId}`)
   return { success: true, registration: { id: reg.id, status: reg.status } }
 })
 
@@ -68,6 +71,9 @@ export const withdrawRegistration = withAuth("registration:create", async (regis
   const reg = await withdrawLeagueRegistration(userId, tenantId, registrationId)
   revalidatePath(`/dashboard/tournaments/${reg.tournamentId}`)
   revalidatePath("/dashboard/registrations")
+  // Withdrawal is the team-list removal path: a previously approved entry
+  // must leave the public page immediately.
+  revalidatePath(`/tournaments/${reg.tournamentId}`)
   return { success: true, registration: { id: reg.id, status: reg.status } }
 })
 

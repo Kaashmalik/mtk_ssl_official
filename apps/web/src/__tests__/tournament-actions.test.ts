@@ -223,6 +223,9 @@ describe("Tournament action tenant and author boundaries", () => {
     expect(locks[3].sql).toContain("FOR UPDATE")
     expect(mocks.txValues.mock.calls[0][0]).toMatchObject({ method: "TOURNAMENT_UPDATE", actorId: USER_ID, actorRole: "league_owner" })
     expect(mocks.revalidate).toHaveBeenCalled()
+    // PUB-06: the public page renders name/description/status/dates - an
+    // update (including unpublish) invalidates the public route too.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/tournaments/${TOURNAMENT_ID}`)
   })
 
   it("does not open a transaction for a denied update", async () => {
@@ -356,6 +359,9 @@ describe("Tournament archival replaces destructive delete", () => {
     expect(mocks.txValues.mock.calls[0][0]).toMatchObject({ tenantId: ACTIVE_TENANT, actorId: USER_ID,
       actorRole: "league_owner", method: "TOURNAMENT_ARCHIVE" })
     expect(mocks.revalidate).toHaveBeenCalled()
+    // PUB-06 withdrawal path: archival (status cancelled) must drop the
+    // cached public route, not only the dashboard copy.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/tournaments/${TOURNAMENT_ID}`)
     expect(mocks.revalidate.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.txValues.mock.invocationCallOrder[0])
   })
 
@@ -540,6 +546,8 @@ describe("Fixture generation action delegation", () => {
     expect(result).toMatchObject({ success: true, tournament: { id: TOURNAMENT_ID } })
     expect(mocks.revalidate).toHaveBeenCalledWith(`/dashboard/tournaments/${TOURNAMENT_ID}`)
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/matches")
+    // PUB-06: created fixtures and the live status are public content.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/tournaments/${TOURNAMENT_ID}`)
   })
 
   it("validates the tournament id shape before any lookup", async () => {
@@ -559,6 +567,8 @@ describe("Fixture generation action delegation", () => {
     expect(result).toMatchObject({ success: true, stage: "Semi-finals" })
     expect(mocks.revalidate).toHaveBeenCalledWith(`/dashboard/tournaments/${TOURNAMENT_ID}`)
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/matches")
+    // PUB-06: bracket, results and a freshly persisted champion are public.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/tournaments/${TOURNAMENT_ID}`)
   })
 })
 

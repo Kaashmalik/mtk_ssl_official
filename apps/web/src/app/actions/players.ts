@@ -47,6 +47,9 @@ export const updatePlayer = withAuth("player:update", async (id: string, input: 
   const tenantId = await mutationTenant("player:update")
   const player = await mutateRosterPlayer(userId, tenantId, { kind: "PLAYER_UPDATE", id, data })
   revalidatePath("/dashboard", "layout")
+  // PUB-06 cache invalidation: public leaderboards and career hubs render
+  // this player's name - a rename must drop them, not just the dashboard.
+  revalidatePath("/leaderboards")
   return { success: true, player }
 })
 
@@ -59,6 +62,8 @@ export const deletePlayer = withAuth("player:delete", async (id: string) => {
   await requirePermissionServer("player:delete", tenantId)
   const result = await archiveRosterResource(userId, tenantId, "player", id)
   revalidatePath("/dashboard", "layout")
+  // Archival changes how (or whether) the player renders on public boards.
+  revalidatePath("/leaderboards")
   return result
 })
 

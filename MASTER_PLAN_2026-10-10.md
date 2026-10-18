@@ -5726,6 +5726,50 @@ acceptance still blocked on the user token; checkbox stays unticked.
 | Migration | none this batch (read-shape change only) |
 
 
+## Batch 109 - PUB-06 withdrawal/cache invalidation (public path revalidation)
+
+The audit found the writers revalidated only /dashboard/* paths. awards,
+prizes and polls already revalidated the public tournament route - but the
+tournament lifecycle actions, registration review actions, match writes,
+player edits and career consent did not, so a visited public route could
+keep serving pre-withdrawal content from the client Router Cache.
+
+- **Tournament lifecycle**: updateTournament (status/metadata, including
+  unpublish) and deleteTournament (archive = the withdrawal path) now
+  revalidate /tournaments/<id>; generateFixtures and advanceTournament do
+  too (fixtures, bracket, results and a freshly persisted champion are
+  public content).
+- **Registrations**: approve, reject and withdraw revalidate
+  /tournaments/<id> (the public team list is derived from approved
+  entries; withdrawal is the removal path).
+- **Matches**: the shared revalidateMatch helper (create/update/delete/
+  reschedule) and the toss/start/end score actions revalidate the public
+  match detail route /matches/<id>.
+- **Players**: update and archive revalidate /leaderboards (public boards
+  and career hubs render the player name).
+- **Career consent**: setPublicCareerConsent now returns the internal
+  userId and the action revalidates /hub/players/<userId> in BOTH
+  directions - a withdrawal must not leave a cached grant readable.
+
+**Boundary (recorded honestly).** A match completion cannot revalidate its
+parent tournament page from the action: the completion result carries no
+tournamentId and the scoring service owns the canonical broadcasts. Left
+as-is rather than adding a lookup; PUB-06 stays unticked pending staged
+acceptance.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| vitest run (web) | PASS - new public-cache-invalidation 3; extended tournament-actions, registration-management, match-lifecycle, roster-management, career-consent |
+| vitest run (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| tsc --noEmit (web + database + scoring-service + admin) | 0 + 0 + 0 + 0 error lines |
+| git diff --check | Clean |
+| Migration | none this batch (action wiring only) |
+
+### Definition of done for each batch
+
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
 - Relevant regression tests and requested checks pass or blockers are recorded.
   Builds run only when requested for the delivery batch.

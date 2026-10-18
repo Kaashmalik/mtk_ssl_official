@@ -54,6 +54,9 @@ describe("Public career consent (PUB-03)", () => {
 
     expect(result.granted).toBe(true)
     expect(result.consentedAt).toBe(CONSENTED_AT)
+    // PUB-06 cache invalidation: the action needs the internal user id to
+    // revalidate the public career hub for exactly this account.
+    expect(result.userId).toBe(USER)
     // The lock precedes the re-read and the write.
     expect(tx.execute).toHaveBeenCalledTimes(1)
     expect(tx.update).toHaveBeenCalledTimes(1)

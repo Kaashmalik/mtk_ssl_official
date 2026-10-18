@@ -271,6 +271,8 @@ describe("Registration review transitions", () => {
     await approveRegistration(REG)
     const teamUpdate = mocks.set.mock.calls.find((_, index) => mocks.update.mock.calls[index][0] === teams)
     expect(teamUpdate?.[0]).toMatchObject({ tournamentId: TOURNAMENT })
+    // PUB-06 cache invalidation: an approved entry joins the public team list.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/tournaments/${TOURNAMENT}`)
   })
   it("requires a rejection reason and only updates pending rows", async () => {
     await expect(rejectRegistration(REG, "   ")).rejects.toThrow("Provide a reason")
@@ -298,6 +300,8 @@ describe("Registration review transitions", () => {
   it("allows an assigned manager to withdraw, but not after the entry is rejected", async () => {
     mocks.state.member = { ...member, role: "team_manager" }
     await expect(withdrawRegistration(REG)).resolves.toMatchObject({ success: true, registration: { status: "withdrawn" } })
+    // PUB-06 withdrawal path: the removed entry must leave the public page.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/tournaments/${TOURNAMENT}`)
     mocks.state.registration.status = "rejected"
     await expect(withdrawRegistration(REG)).rejects.toThrow("can no longer be withdrawn")
   })

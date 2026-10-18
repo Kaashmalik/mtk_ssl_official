@@ -14,7 +14,7 @@ import { eq, sql } from "drizzle-orm"
  * untouched by it, and the user-level audit row intentionally crosses no
  * league (tenant_id stays null).
  */
-export async function setPublicCareerConsent(consent: boolean): Promise<{ granted: boolean; consentedAt: Date | null }> {
+export async function setPublicCareerConsent(consent: boolean): Promise<{ userId: string; granted: boolean; consentedAt: Date | null }> {
   const { userId: clerkId } = await auth()
   if (!clerkId) throw new Error("Unauthorized")
   const [account] = await db
@@ -54,7 +54,7 @@ export async function setPublicCareerConsent(consent: boolean): Promise<{ grante
         after: { publicCareerConsentAt: updated.publicCareerConsentAt },
       },
     })
-    return { granted: careerConsentGranted(updated), consentedAt: updated.publicCareerConsentAt }
+    return { userId: account.id, granted: careerConsentGranted(updated), consentedAt: updated.publicCareerConsentAt }
   }, { isolationLevel: "read committed" })
 }
 

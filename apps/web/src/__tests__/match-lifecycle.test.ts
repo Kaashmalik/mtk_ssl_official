@@ -196,6 +196,8 @@ describe("Canonical match completion bridge", () => {
     expect(mocks.directUpdate).not.toHaveBeenCalled()
     expect(mocks.fallback).not.toHaveBeenCalled()
     expect(mocks.revalidate).toHaveBeenCalledWith(`/matches/${MATCH}/live`)
+    // PUB-06: the public match detail page shows the completed result.
+    expect(mocks.revalidate).toHaveBeenCalledWith(`/matches/${MATCH}`)
   })
   it("supports no-winner completion without a fabricated team or award", async () => {
     await endMatch(MATCH, null, "No result", null)

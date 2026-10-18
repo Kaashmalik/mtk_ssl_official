@@ -40,6 +40,9 @@ function revalidateMatch(matchId: string) {
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/matches/${matchId}/live`)
   revalidatePath(`/matches/${matchId}/scoring`)
+  // PUB-06 cache invalidation: the public match DETAIL page renders status,
+  // result, scorecards and venue - every match write drops it too.
+  revalidatePath(`/matches/${matchId}`)
 }
 
 export const createMatch = withAuth("match:create", async (input: CreateMatchInput) => {
@@ -140,6 +143,7 @@ export const setTossResult = withAuth("match:score", async (matchId: string, tos
   })
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/matches/${matchId}/scoring`)
+  revalidatePath(`/matches/${matchId}`)
   return { success: true, match }
 })
 
@@ -157,6 +161,8 @@ export const startMatch = withAuth("match:score", async (matchId: string) => {
   })
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/matches/${matchId}/scoring`)
+  revalidatePath(`/matches/${matchId}/live`)
+  revalidatePath(`/matches/${matchId}`)
   return { success: true, match }
 })
 
@@ -179,6 +185,8 @@ export const endMatch = withAuth("match:score", withScoringFence(async (matchId:
   revalidatePath("/dashboard", "layout")
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/matches/${matchId}/live`)
+  // The completed result and the scorecard are public match-detail content.
+  revalidatePath(`/matches/${matchId}`)
   return { success: true, matchId, status: "completed" as const }
 }))
 

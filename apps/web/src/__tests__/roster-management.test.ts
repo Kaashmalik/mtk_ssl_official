@@ -100,6 +100,15 @@ describe.each(operations)("Current %s mutation authority", operation => {
     expect(mocks.values.mock.calls.at(-1)![0]).toMatchObject({ tenantId: TENANT, actorId: ACTOR, actorRole: "league_owner", method: operation })
     expect(mocks.revalidate.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.values.mock.invocationCallOrder.at(-1)!)
   })
+  it("invalidates the public leaderboards exactly for player renames (PUB-06)", async () => {
+    await run(operation)
+    if (operation === "PLAYER_UPDATE") {
+      expect(mocks.revalidate).toHaveBeenCalledWith("/leaderboards")
+    } else {
+      // Team and roster-shape writes do not change any public leaderboard.
+      expect(mocks.revalidate).not.toHaveBeenCalledWith("/leaderboards")
+    }
+  })
   it.each([null, { id: OTHER }, { isActive: false }, { clerkId: "remapped" }, { clerkId: null }])("rechecks locked actor %s", async change => {
     mocks.user.mockReset().mockResolvedValueOnce(actor).mockResolvedValueOnce(change === null ? null : { ...actor, ...change })
     await expect(run(operation)).rejects.toThrow("access changed")

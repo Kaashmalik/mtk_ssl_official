@@ -148,6 +148,10 @@ export async function updateTournament(id: string, input: UpdateTournamentInput)
 
   revalidatePath("/dashboard/tournaments")
   revalidatePath(`/dashboard/tournaments/${id}`)
+  // PUB-06 withdrawal/cache invalidation: the public page renders name,
+  // description, status and dates - an update (including unpublish) must
+  // drop the cached public route too, not just the dashboard copy.
+  revalidatePath(`/tournaments/${id}`)
   return { success: true, tournament }
 }
 
@@ -165,6 +169,9 @@ export async function deleteTournament(id: string) {
   revalidatePath("/dashboard/tournaments")
   revalidatePath(`/dashboard/tournaments/${id}`)
   revalidatePath("/dashboard")
+  // Archival is the withdrawal path: the public page must stop serving the
+  // cached tournament immediately (publication gate 404s on next render).
+  revalidatePath(`/tournaments/${id}`)
   return { success: true }
 }
 
@@ -243,6 +250,9 @@ export async function generateFixtures(tournamentId: string) {
 
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
   revalidatePath("/dashboard/matches")
+  // Fixtures + the live status are public content (PUB-06 cache
+  // invalidation): the public tournament page must re-render.
+  revalidatePath(`/tournaments/${tournamentId}`)
   return { success: true, ...result }
 }
 
@@ -259,6 +269,8 @@ export async function advanceTournament(tournamentId: string) {
 
   revalidatePath(`/dashboard/tournaments/${tournamentId}`)
   revalidatePath("/dashboard/matches")
+  // Bracket, results and a freshly persisted champion are public content.
+  revalidatePath(`/tournaments/${tournamentId}`)
   return { success: true, ...result }
 }
 
