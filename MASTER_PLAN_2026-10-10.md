@@ -6058,6 +6058,52 @@ specific reaction row - the report is per MATCH FEED, honestly.
 | database policy suite | PASS - 7 (3 new report-policy) |
 | Migration | `20261018130000` applied remotely + verified (columns/checks/indexes/RLS/history) |
 
+## Batch 117 - FAN-01 anti-abuse completion: league-scoped fan blocks (migration)
+
+Reports (Batch 116) closed fan -> organizer; blocks close organizer ->
+abuser. The league owner can now stop one fan from reacting to or reporting
+on ANY match of THEIR league. A block is LEAGUE-SCOPED - it never reaches
+another league and is never feed-permanent: only active and lifted exist,
+the lift carrying reviewer provenance, history kept (a re-block after a lift
+is a new row, so provenance survives in both directions).
+
+- Migration `20261018140000_fan_blocks` (APPLIED remotely): one table,
+  CHECK-pinned reasons (`report_abuse|reaction_abuse|other`) and statuses,
+  lift-provenance CHECK mirroring the policy, PARTIAL unique
+  `(tenant_id, blocked_user_id) WHERE status = 'active'` (re-block = idem-
+  potent no-op), RLS enabled AND forced, grants only `ssl`/`service_role`.
+  Verified remotely: columns/checks/indexes/rls t/t/history.
+- Pure policy: block reason set + labels, lift state machine (only ACTIVE
+  lifts; lifted is terminal on that row), `fanBlockEnforcement` (block only
+  when an active row exists - a lift is a real, immediate return).
+- Locked writer `lib/fan-block-records.ts`: `match:update`-gated (the same
+  gate as the rest of the moderation surface), tenant pinned on every path
+  (a foreign fan cannot be blocked into another league; a foreign block
+  reads not_found), `onConflictDoNothing` re-block absorb, lift under FOR
+  UPDATE with reviewer + time stamped in-transaction beside the audit;
+  `FAN_BLOCK` / `FAN_BLOCK_LIFT` audits carry the fan id (never the name)
+  and a `scope: "league"` marker.
+- ENFORCEMENT at the engagement writers: both `toggleFanReaction` and
+  `reportMatchReactionFeed` probe the active block on the fan context alone
+  and refuse `blocked` BEFORE any target, rate or write logic - a blocked
+  fan's contribution is refused fail-closed; lifting restores participation
+  on the very next action (the probe re-reads every time).
+- UI closes the loop: the moderation card's reaction rows gain "Block fan";
+  a "Fans blocked in this league" section lists active blocks with Lift;
+  fan-side bars/controls surface the durable refusal honestly (the reaction
+  bar also drops its optimistic state). Actions tier stays a thin delegate.
+- Boundary: follows are NOT gated by blocks in this slice (the follow
+  write path lives behind a different gate; recorded here, not silently
+  assumed). Blocks never feed scoring, standings or awards. Roadmap
+  checkbox waits on staged acceptance.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| Focused suites | fan suites 39/39 (web), policy 10/10 (database) |
+| Migration | `20261018140000` applied remotely + verified (columns/checks/indexes/RLS/history) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

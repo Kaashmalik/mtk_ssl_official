@@ -130,3 +130,56 @@ export function fanReportRateDecision(recentReportCount: number): FanReportRateD
     ? { allowed: false, reason: "report_rate_limited" }
     : { allowed: true, reason: "ok" }
 }
+
+/**
+ * FAN-01 anti-abuse slice: LEAGUE-SCOPED interaction blocks. The league
+ * owner stops one fan from reacting to or reporting on any match of THEIR
+ * league - never another league's, and never feed-permanent (only active and
+ * lifted exist; a lift carries reviewer provenance, enforced here AND by the
+ * DB lift_provenance CHECK). Reasons are a fixed platform-chosen set; no
+ * free text is stored.
+ */
+export const FAN_BLOCK_REASONS = ["report_abuse", "reaction_abuse", "other"] as const
+export type FanBlockReason = (typeof FAN_BLOCK_REASONS)[number]
+
+export function isFanBlockReason(value: unknown): value is FanBlockReason {
+  return typeof value === "string" && (FAN_BLOCK_REASONS as readonly string[]).includes(value)
+}
+
+export const FAN_BLOCK_REASON_LABELS: Record<FanBlockReason, string> = {
+  report_abuse: "Abusive reports",
+  reaction_abuse: "Abusive reactions",
+  other: "Other disruption",
+}
+
+export type FanBlockStatus = "active" | "lifted"
+
+/**
+ * Block state machine: a block starts active; only an ACTIVE block can be
+ * lifted; lifted is terminal on that row (a fresh block after a lift is a
+ * NEW active row - history is kept, provenance both ways).
+ */
+export type BlockLiftInput = { currentStatus: FanBlockStatus }
+export type BlockLiftDecision =
+  | { allowed: true; reason: "ok" }
+  | { allowed: false; reason: "not_found" | "already_lifted" }
+
+export function fanBlockLiftDecision(input: BlockLiftInput): BlockLiftDecision {
+  if (input.currentStatus === "active") return { allowed: true, reason: "ok" }
+  return input.currentStatus === "lifted"
+    ? { allowed: false, reason: "already_lifted" }
+    : { allowed: false, reason: "not_found" }
+}
+
+/**
+ * Enforcement decision at the engagement writers: an ACTIVE block refuses
+ * the fan's reaction/report contribution fail-closed. Lifted or absent never
+ * refuses - a lift is a real, immediate return of participation.
+ */
+export type FanBlockEnforcement =
+  | { blocked: false }
+  | { blocked: true }
+
+export function fanBlockEnforcement(activeBlockExists: boolean): FanBlockEnforcement {
+  return activeBlockExists ? { blocked: true } : { blocked: false }
+}

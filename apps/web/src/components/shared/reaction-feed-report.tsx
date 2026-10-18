@@ -28,6 +28,9 @@ export function ReactionFeedReport({ matchId }: { matchId: string }) {
         setOpen(false)
       } else if (result.reason === "report_rate_limited") {
         toast.error("Too many reports too quickly - please wait a minute")
+      } else if (result.reason === "blocked") {
+        toast.error("Your fan interactions are currently blocked in this league")
+        setOpen(false)
       } else {
         toast.error("Reporting is not available for this match")
       }

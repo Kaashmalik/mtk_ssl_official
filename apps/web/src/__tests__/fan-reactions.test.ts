@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { toggleFanReaction, FAN_REACTION_TYPES } from "@/lib/fan-reactions"
 
-const mocks = vi.hoisted(() => ({ context: vi.fn(), select: vi.fn(), insert: vi.fn(), deletes: [] as unknown[] }))
+const mocks = vi.hoisted(() => ({ context: vi.fn(), select: vi.fn(), insert: vi.fn(), fanBlock: vi.fn(), deletes: [] as unknown[] }))
 
 // Passthrough for real schema tables + policy; only the db handles are mocked.
 vi.mock("@mtk/database", async (importOriginal) => ({
@@ -12,6 +12,7 @@ vi.mock("@mtk/database", async (importOriginal) => ({
   } },
 }))
 vi.mock("@/lib/fan-follows", () => ({ requireFanContext: mocks.context }))
+vi.mock("@/lib/fan-block-records", () => ({ readActiveFanBlockExists: mocks.fanBlock }))
 
 const FAN = { tenantId: "00000000-0000-4000-8000-0000000000a1", actorId: "00000000-0000-4000-8000-0000000000a2", clerkId: "clerk_1", role: "fan" }
 const MATCH = "00000000-0000-4000-8000-0000000000b1"
@@ -38,6 +39,7 @@ function selectHarness(target: unknown[], existing: unknown[] = [], recent: unkn
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.deletes.length = 0
+  mocks.fanBlock.mockResolvedValue(false)
   mocks.insert.mockImplementation(() => ({
     values: () => ({ onConflictDoNothing: async () => {} }),
   }))
@@ -45,6 +47,18 @@ beforeEach(() => {
 })
 
 describe("Fan reaction toggle (FAN-01 slice)", () => {
+  it("refuses a league-blocked fan before any target, rate or write logic runs", async () => {
+    mocks.fanBlock.mockResolvedValue(true)
+    mocks.select.mockImplementation(() => {
+      throw new Error("no query may run past an active block")
+    })
+    const result = await toggleFanReaction({ matchId: MATCH, reaction: "six" })
+    expect(result).toEqual({ action: "refused", reason: "blocked" })
+    expect(mocks.fanBlock).toHaveBeenCalledWith(FAN.tenantId, FAN.actorId)
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.deletes).toHaveLength(0)
+  })
+
   it("adds a reaction to a published live match and returns fresh counts", async () => {
     selectHarness([{ status: "live", tournamentStatus: "live" }], [], [{ total: 0 }])
     const result = await toggleFanReaction({ matchId: MATCH, reaction: "six" })

@@ -3,6 +3,31 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 117) - `fan_blocks` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261018140000_fan_blocks.sql` (FAN-01 anti-abuse
+> slice): additive - one new table, three CHECKs (fixed reason set
+> `report_abuse|reaction_abuse|other`, fixed status set `active|lifted`,
+> lift-provenance pairing: active = no lift reviewer, lifted = reviewer AND
+> time required), one PARTIAL unique index
+> `(tenant_id, blocked_user_id) WHERE status = 'active'` (one active block
+> per fan per league; a re-block while active is an idempotent no-op at the
+> writer), history index, RLS enabled AND forced with grants only to
+> `ssl`/`service_role` (fail-closed; all access via server-side writers).
+> Blocks are LEAGUE-SCOPED anti-abuse signals only - enforcement lives in
+> the engagement writers (reactions + reports), fail-closed; follows are
+> NOT gated in this slice (recorded boundary); never an input to scoring,
+> standings or awards. Writer: `lib/fan-block-records.ts`
+> (`match:update`-gated block/lift/probe/list; lift under FOR UPDATE with
+> reviewer provenance + `FAN_BLOCK`/`FAN_BLOCK_LIFT` audits). History row
+> `20261018140000` `'{}'::text[]` - A's Oct-18 window, after Batch 116's
+> `20261018130000`, clear of Session B's chain. Verified remotely: 9 columns
+> as authored, all 3 checks present, partial unique + history indexes,
+> `relrowsecurity/relforcerowsecurity = t/t`, history `18130000` +
+> `18140000`. Contract tests: `fan-reaction-policy.test.ts` (database) +
+> `fan-block-records.test.ts` / `fan-report-wiring.test.ts` /
+> `fan-reactions.test.ts` (web enforcement).
+
 > **18 October 2026 (Batch 116) - `fan_reaction_reports` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261018130000_fan_reaction_reports.sql` (FAN-01 reports

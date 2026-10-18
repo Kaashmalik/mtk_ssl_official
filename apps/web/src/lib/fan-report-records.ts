@@ -10,6 +10,7 @@ import {
   FAN_REPORT_WINDOW_MS,
 } from "@mtk/database/lib/fan-reaction-policy"
 import { requireFanContext } from "./fan-follows"
+import { readActiveFanBlockExists } from "./fan-block-records"
 import { requireActiveLeagueContext } from "./league-reads"
 
 /**
@@ -42,7 +43,7 @@ const decideInputSchema = z.object({
 export type FanReportResult =
   | { action: "open"; reportId: string }
   | { action: "already_open" }
-  | { action: "refused"; reason: "target_unpublished" | "report_rate_limited" }
+  | { action: "refused"; reason: "target_unpublished" | "report_rate_limited" | "blocked" }
 
 /**
  * Read the published/played-state of the target match in the same league.
@@ -68,6 +69,12 @@ async function readReactionTarget(tenantId: string, matchId: string) {
 export async function reportMatchReactionFeed(input: unknown): Promise<FanReportResult> {
   const parsed = reportInputSchema.parse(input)
   const context = await requireFanContext("fan:follow")
+
+  // (0) Anti-abuse gate: a league-scoped active block refuses this fan's
+  // report fail-closed, before any target or rate logic runs.
+  if (await readActiveFanBlockExists(context.tenantId, context.actorId)) {
+    return { action: "refused", reason: "blocked" }
+  }
 
   // (1) Target gate: published tournament, published, never-cancelled match.
   const target = await readReactionTarget(context.tenantId, parsed.matchId)

@@ -33,9 +33,14 @@ export function MatchReactionBar({
       try {
         const result = await toggleMatchReaction({ matchId }, reaction)
         if (result.action === "refused") {
+          // Blocked is a durable refusal: also drop the optimistic state so
+          // the bar reflects that this fan's toggles no longer apply.
+          if (result.reason === "blocked") setMine([])
           const reason = result.reason === "rate_limited"
             ? "Too fast - take a short break before reacting again"
-            : "Reactions are not available for this match"
+            : result.reason === "blocked"
+              ? "Your fan interactions are currently blocked in this league"
+              : "Reactions are not available for this match"
           toast.error(reason)
           return
         }

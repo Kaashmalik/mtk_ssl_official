@@ -4,6 +4,8 @@ import {
   reactionTargetDecision, FAN_REACTION_MAX_PER_WINDOW, FAN_REACTION_LABELS,
   isReactionReportReason, reactionReportDecision, fanReportRateDecision,
   FAN_REPORT_MAX_PER_WINDOW, REACTION_REPORT_REASONS, REACTION_REPORT_REASON_LABELS,
+  isFanBlockReason, fanBlockLiftDecision, fanBlockEnforcement,
+  FAN_BLOCK_REASONS, FAN_BLOCK_REASON_LABELS,
 } from "../lib/fan-reaction-policy"
 
 describe("Fan reaction policy (FAN-01)", () => {
@@ -78,5 +80,31 @@ describe("Fan reaction report policy (FAN-01 reports slice)", () => {
     expect(fanReportRateDecision(FAN_REPORT_MAX_PER_WINDOW - 1)).toEqual({ allowed: true, reason: "ok" })
     expect(fanReportRateDecision(FAN_REPORT_MAX_PER_WINDOW))
       .toEqual({ allowed: false, reason: "report_rate_limited" })
+  })
+})
+
+describe("Fan interaction block policy (FAN-01 anti-abuse slice)", () => {
+  it("exposes a fixed, labelled block reason set with no free text", () => {
+    expect(FAN_BLOCK_REASONS).toEqual(["report_abuse", "reaction_abuse", "other"])
+    for (const reason of FAN_BLOCK_REASONS) {
+      expect(FAN_BLOCK_REASON_LABELS[reason].length).toBeGreaterThan(0)
+    }
+    expect(isFanBlockReason("reaction_abuse")).toBe(true)
+    expect(isFanBlockReason("REACTION_ABUSE")).toBe(false) // case-pinned: no surprises at the DB CHECK.
+    expect(isFanBlockReason("because")).toBe(false)
+    expect(isFanBlockReason(undefined)).toBe(false)
+  })
+
+  it("lifts only active blocks; lifted is terminal with provenance required at the write tier", () => {
+    expect(fanBlockLiftDecision({ currentStatus: "active" })).toEqual({ allowed: true, reason: "ok" })
+    expect(fanBlockLiftDecision({ currentStatus: "lifted" }))
+      .toEqual({ allowed: false, reason: "already_lifted" })
+    expect(fanBlockLiftDecision({ currentStatus: "revoked" as "lifted" }))
+      .toEqual({ allowed: false, reason: "not_found" })
+  })
+
+  it("refuses fail-closed only when an ACTIVE block exists - a lift restores participation", () => {
+    expect(fanBlockEnforcement(true)).toEqual({ blocked: true })
+    expect(fanBlockEnforcement(false)).toEqual({ blocked: false })
   })
 })

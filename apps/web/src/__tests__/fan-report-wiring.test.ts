@@ -70,4 +70,32 @@ describe("FAN-01 reports slice wiring", () => {
       expect(actions).toContain(delegate)
     }
   })
+
+  it("enforces blocks inside the engagement writers, before any other gate", () => {
+    for (const writerRel of ["lib/fan-reactions.ts", "lib/fan-report-records.ts"]) {
+      const writer = source(writerRel)
+      expect(writer).toContain("readActiveFanBlockExists")
+      // The gate runs on the fan context alone (tenant + actor), before the
+      // target read: order enforced by the gate comment numbering "before any".
+      const gateAt = writer.indexOf("readActiveFanBlockExists")
+      const targetAt = writer.indexOf("readReactionTarget")
+      if (targetAt !== -1) expect(gateAt).toBeLessThan(targetAt)
+    }
+  })
+
+  it("keeps the block surface league-scoped, replay-safe and lift-provenance-honest", () => {
+    const blockWriter = source("lib/fan-block-records.ts")
+    // League scope: tenant pinned on every path (insert payload + both reads).
+    expect(blockWriter).toContain("tenantId,")
+    expect(blockWriter).toContain('eq(fanBlocks.tenantId, tenantId)')
+    // Replay safety + provenance: partial-unique absorb, lift under lock.
+    expect(blockWriter).toContain("onConflictDoNothing")
+    expect(blockWriter).toContain('for("update")')
+    expect(blockWriter).toContain('"already_blocked"')
+    expect(blockWriter).toContain('"already_lifted"')
+    // Queued actions stay thin delegates with no database import.
+    const actions = source("app/actions/fan-interaction-blocks.ts")
+    expect(actions.startsWith('"use server"')).toBe(true)
+    expect(actions).not.toMatch(/from "@mtk\/database"|from "drizzle-orm"/)
+  })
 })

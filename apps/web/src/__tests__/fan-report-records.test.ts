@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   insert: vi.fn(),
   transaction: vi.fn(),
+  fanBlock: vi.fn(),
 }))
 
 vi.mock("@mtk/database", async (importOriginal) => ({
@@ -22,6 +23,10 @@ vi.mock("@/lib/fan-follows", async (importOriginal) => ({
 vi.mock("@/lib/league-reads", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/league-reads")>(),
   requireActiveLeagueContext: mocks.leagueContext,
+}))
+vi.mock("@/lib/fan-block-records", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/fan-block-records")>(),
+  readActiveFanBlockExists: mocks.fanBlock,
 }))
 
 const LEAGUE = "00000000-0000-4000-8000-0000000000a1"
@@ -111,6 +116,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   mocks.fanContext.mockResolvedValue({ tenantId: LEAGUE, actorId: FAN, clerkId: "clerk_f", role: FAN_ROLE })
   mocks.leagueContext.mockResolvedValue(OWNER)
+  mocks.fanBlock.mockResolvedValue(false)
 })
 
 describe("FAN-01 report a match's reaction feed (fan side)", () => {
@@ -162,6 +168,17 @@ describe("FAN-01 report a match's reaction feed (fan side)", () => {
     await expect(reportMatchReactionFeed({ matchId: MATCH, reason: "free text" })).rejects.toThrow()
     expect(mocks.fanContext).not.toHaveBeenCalled()
     expect(mocks.select).not.toHaveBeenCalled()
+  })
+
+  it("refuses a league-blocked fan before any target or rate logic runs", async () => {
+    mocks.fanBlock.mockResolvedValue(true)
+    mocks.select.mockImplementation(() => {
+      throw new Error("no query may run past an active block")
+    })
+    const result = await reportMatchReactionFeed({ matchId: MATCH, reason: "spam" })
+    expect(result).toEqual({ action: "refused", reason: "blocked" })
+    expect(mocks.fanBlock).toHaveBeenCalledWith(LEAGUE, FAN)
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 })
 

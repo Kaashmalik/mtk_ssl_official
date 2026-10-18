@@ -33,6 +33,7 @@ export * from "./fan-follows";
 export * from "./notification-preferences";
 export * from "./fan-reactions";
 export * from "./fan-reaction-reports";
+export * from "./fan-blocks";
 export * from "./tournament-polls";
 
 // League Management

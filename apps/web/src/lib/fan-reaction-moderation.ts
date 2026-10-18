@@ -28,6 +28,7 @@ const removeInputSchema = z.object({
 export type ModeratableReaction = {
   id: string
   reaction: FanReactionType
+  userId: string
   fanName: string | null
   createdAt: string
 }
@@ -44,6 +45,7 @@ export async function readMatchReactionsForModeration(
     .select({
       id: fanReactions.id,
       reaction: fanReactions.reaction,
+      userId: fanReactions.userId,
       fanName: users.displayName,
       createdAt: fanReactions.createdAt,
     })
@@ -56,6 +58,7 @@ export async function readMatchReactionsForModeration(
     ? [{
         id: row.id,
         reaction: row.reaction,
+        userId: row.userId,
         fanName: row.fanName ?? null,
         createdAt: row.createdAt.toISOString(),
       }]

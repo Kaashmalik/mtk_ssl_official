@@ -6,6 +6,7 @@ import {
   reactionTargetDecision, FAN_REACTION_WINDOW_MS, type FanReactionType,
 } from "@mtk/database/lib/fan-reaction-policy"
 import { requireFanContext, FanContext } from "./fan-follows"
+import { readActiveFanBlockExists } from "./fan-block-records"
 
 /**
  * FAN-01 moderated fan reactions (locked writer).
@@ -21,7 +22,11 @@ export { FAN_REACTION_TYPES, FAN_REACTION_LABELS } from "@mtk/database/lib/fan-r
 
 export type FanReactionToggleResult = {
   action: "added" | "removed" | "refused"
-  reason?: "target_unpublished" | "rate_limited" | "unknown_reaction"
+  reason?:
+    | "target_unpublished"
+    | "rate_limited"
+    | "unknown_reaction"
+    | "blocked"
   /** Fresh counts after a successful toggle; absent when refused. */
   counts?: Record<FanReactionType, number>
 }
@@ -95,6 +100,12 @@ export async function toggleFanReaction(
   const parsed = toggleInputSchema.parse(input)
   const reaction = parsed.reaction as FanReactionType
   const context: FanContext = await requireFanContext("fan:follow")
+
+  // (0) Anti-abuse gate: a league-scoped active block refuses this fan's
+  // contribution fail-closed, before any target or rate logic runs.
+  if (await readActiveFanBlockExists(context.tenantId, context.actorId)) {
+    return { action: "refused", reason: "blocked" }
+  }
 
   // (1) Target gate: published tournament, published, never-cancelled match.
   const target = await readReactionTarget(context.tenantId, parsed.matchId)
