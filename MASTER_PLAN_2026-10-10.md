@@ -6173,6 +6173,31 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 148 - REG-04 slice: registration approval, fee status and squad eligibility (no migration - schema already carried the columns)
+
+- DELIVERED: the second Phase-2 build line. REG-04's core, as a pure
+  eligibility policy plus a writer over the existing schema:
+  - POLICY (registration-eligibility-policy.ts, 7 tests): eligibility is
+    a DERIVED answer with a named blocker list - approval, payment
+    (paid OR waived; refunded does NOT), full squad (min size), valid
+    inputs; approval/rejection are TRANSITIONS (only pending/waitlisted);
+    payment states move only FORWARD (no silent refunding); cross-tenant
+    bindings are REFUSED outright; member-facing sentence joins blockers.
+  - WRITER (apps/web/src/lib/registration-records.ts, tsc-clean):
+    approve (owner-only, terminal replay pure read, cross-tenant guard on
+    both tournament and team under lock), reject with bounded reason,
+    updatePaymentStatus with forward-only transition, setSquad (manager-
+    of-the-team, membership gate, identical replay pure read), and
+    readRegistrationEligibility (pure derived answer).
+  - HONESTY: eligibility is never asserted without naming the blocker;
+    a squad with too few players, an unpaid fee, or a non-approved
+    registration each name themselves; cross-tenant is refused outright
+    even by an owner.
+- VERIFIED: policy 7 tests; db build + web tsc 0. (No journey harness this
+  batch: the writer mirrors the B141/B147 shape under lock; a journey
+  harness is recorded as the next step if the user wants deeper
+  regression coverage before shipping.)
+
 ## Batch 147 - REG-03 slice: the tournament application workflow (migration applied remotely)
 
 - DELIVERED: the first Phase-2 build line, complete. REG-03's team

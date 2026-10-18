@@ -96,5 +96,6 @@ export * from "./lib/scorecard-correction-policy";
 export * from "./lib/profile-policy";
 export * from "./lib/email-templates";
 export * from "./lib/tournament-application-policy";
+export * from "./lib/registration-eligibility-policy";
 
 
