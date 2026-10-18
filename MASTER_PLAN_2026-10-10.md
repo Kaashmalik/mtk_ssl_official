@@ -6171,6 +6171,44 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 142 - REG-05 slice: the self-profile display-name journey (no migration)
+
+- DELIVERED: the personal identity edit REG-05 implied all along - the
+  member's own display name, editable ONLY by the person it names:
+  - Policy (packages/database/src/lib/profile-policy.ts): pure
+    normalizeDisplayName - trim + whitespace collapse, hard 60-char cap
+    (refused with a reason, never silently truncated), empty input is an
+    explicit REMOVAL (null stored; an empty string would be corruption,
+    not a name), and describeDisplayName - the exact sentence the card
+    renders, including the honest "shows you as unnamed" fallback.
+  - Writer (apps/web/src/lib/profile-records.ts): readMyDisplayName +
+    setMyDisplayName - PUB-03 discipline (personal surface, outside the
+    league RBAC matrix): Clerk session gate, account active check
+    (fail-closed), FOR UPDATE row lock so a deactivation serializes
+    against the profile write, identical replay = pure read (no update,
+    no second audit row), before/after audited at user level
+    (method DISPLAY_NAME, tenantId null, payload before/after).
+  - Action updateMyDisplayName (zod max-200 transport bound; the writer's
+    policy remains the authority) + revalidatePath("/dashboard/account").
+  - UI: DisplayNameCard on the personal account page - the third sibling
+    beside consent and timezone; errors shown, never swallowed; control
+    disabled in flight; copy rides verbatim on the policy describe fn
+    (card re-exports it per the sibling-card convention; i18n for the
+    personal-account cards is recorded future work).
+- VERIFIED: profile-policy 4 tests; profile-records journey 6 tests
+  (normalized save w/ FOR UPDATE + audit payload shape, identical
+  replay = pure read, empty = removal to null with before/after, over-
+  length refused BEFORE any transaction opens, unavailable account
+  fail-closed, self-read); account page 15 tests extended with nameRead
+  wiring mirrors (verbatim name props, null preserved, read failure
+  renders the page with an unset name instead of failing; cards stubbed,
+  copy asserted through the real describe fn).
+- HONESTY: no fakes - the rejection reason text, the FOR UPDATE lock and
+  the audit payload shape are asserted exactly; the write path is code-
+  inspected against account-preferences twin (same transaction shape,
+  same lock, same replay discipline). No migration: users.displayName
+  exists already.
+
 ## Batch 141 - REG-05 slice: scorecard correction requests (records, never mutations; migration applied remotely)
 
 - DELIVERED: the reviewed correction workflow the plan explicitly called

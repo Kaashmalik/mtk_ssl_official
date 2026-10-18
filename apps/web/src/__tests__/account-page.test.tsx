@@ -4,8 +4,8 @@ import Link from "next/link"
 import AccountPage from "@/app/dashboard/account/page"
 
 const mocks = vi.hoisted(() => ({
-  auth: vi.fn(), consent: vi.fn(), hub: vi.fn(), tz: vi.fn(), redirect: vi.fn(),
-  cardProps: [] as unknown[], zoneProps: [] as unknown[],
+  auth: vi.fn(), consent: vi.fn(), hub: vi.fn(), tz: vi.fn(), name: vi.fn(), redirect: vi.fn(),
+  cardProps: [] as unknown[], zoneProps: [] as unknown[], nameProps: [] as unknown[],
 }))
 
 /**
@@ -38,8 +38,22 @@ vi.mock("@/components/account/display-timezone-card", async (importOriginal) => 
   }
 })
 
+// The display-name card is stubbed like its siblings; its copy rides on the
+// real policy's describe function (imported below for the copy assertions).
+vi.mock("@/components/account/display-name-card", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/components/account/display-name-card")>()
+  return {
+    DisplayNameCard: (props: { displayName: string | null }) => {
+      mocks.nameProps.push(props)
+      return null
+    },
+    describeDisplayName: real.describeDisplayName,
+  }
+})
+
 import { describeCareerConsent, consentControlLabel } from "@/components/account/career-consent-card"
 import { describeDisplayTimeZone } from "@/components/account/display-timezone-card"
+import { describeDisplayName } from "@/components/account/display-name-card"
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }))
@@ -47,6 +61,7 @@ vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/career-records", () => ({ readMyCareerConsent: mocks.consent }))
 vi.mock("@/lib/career-hub", () => ({ readMyCareerHub: mocks.hub }))
 vi.mock("@/lib/account-preferences", () => ({ readMyDisplayTimeZone: mocks.tz }))
+vi.mock("@/lib/profile-records", () => ({ readMyDisplayName: mocks.name }))
 
 const CONSENTED_AT = new Date("2026-10-17T00:00:00Z")
 
@@ -63,11 +78,13 @@ beforeEach(() => {
   vi.resetAllMocks()
   mocks.cardProps.length = 0
   mocks.zoneProps.length = 0
+  mocks.nameProps.length = 0
   mocks.auth.mockResolvedValue({ userId: "clerk_1" })
   mocks.redirect.mockImplementation(() => { throw new Error("redirect") })
   mocks.consent.mockResolvedValue({ granted: false, consentedAt: null })
   mocks.hub.mockResolvedValue({ consented: false, career: null, leagues: [] })
   mocks.tz.mockResolvedValue({ timeZone: null })
+  mocks.name.mockResolvedValue(null)
 })
 
 describe("Display timezone card copy (pure label derivation)", () => {
@@ -111,6 +128,29 @@ describe("Display timezone wiring (UX-03)", () => {
     mocks.tz.mockRejectedValue(new Error("db down"))
     const text = collectText(await AccountPage()).join(" ")
     expect(mocks.zoneProps).toEqual([{ timeZone: null }])
+    expect(text).toContain("Your account")
+  })
+})
+
+describe("Display-name wiring (REG-05, Batch 142)", () => {
+  it("copies the pure describe function verbatim", () => {
+    expect(describeDisplayName("Ayesha Khan")).toContain('"Ayesha Khan"')
+    expect(describeDisplayName(null)).toMatch(/unnamed/)
+  })
+
+  it("wires the reader's name into the card verbatim (null preserved)", async () => {
+    mocks.name.mockResolvedValue("Ayesha Khan")
+    collectText(await AccountPage())
+    expect(mocks.nameProps).toEqual([{ displayName: "Ayesha Khan" }])
+    mocks.name.mockResolvedValue(null)
+    collectText(await AccountPage())
+    expect(mocks.nameProps).toEqual([{ displayName: "Ayesha Khan" }, { displayName: null }])
+  })
+
+  it("renders the page with an unset name instead of failing when the read errors", async () => {
+    mocks.name.mockRejectedValue(new Error("db down"))
+    const text = collectText(await AccountPage()).join(" ")
+    expect(mocks.nameProps).toEqual([{ displayName: null }])
     expect(text).toContain("Your account")
   })
 })

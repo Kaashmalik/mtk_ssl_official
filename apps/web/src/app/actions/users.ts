@@ -13,6 +13,7 @@ import type { MemberRoleChange, MemberStatusChange, MemberRemoval } from "@/lib/
 import { readMemberDirectory, readMemberDetails } from "@/lib/member-directory"
 import { memberDirectoryRequest, memberDetailRequest, type MemberDirectoryRequest, type MemberDetailRequest } from "@/lib/member-directory-filters"
 import { setMyDisplayTimeZone } from "@/lib/account-preferences"
+import { setMyDisplayName } from "@/lib/profile-records"
 
 export type { MemberRoleChange, MemberStatusChange, MemberRemoval }
 
@@ -92,4 +93,19 @@ export async function updateMyDisplayTimeZone(input: unknown) {
   revalidatePath("/dashboard")
   revalidatePath("/dashboard/account")
   return { success: true as const, timeZone: result.timeZone }
+}
+
+const displayNameSchema = z.object({ displayName: z.string().max(200) })
+
+/**
+ * REG-05 (Batch 142): set or clear the caller's display name (the writer's
+ * policy normalizes honestly: trim + collapse, 60-char cap, empty = remove).
+ * Personal surface, outside the league RBAC matrix; both revalidations cover
+ * the account page and any league surfaces rendering the label.
+ */
+export async function updateMyDisplayName(input: unknown) {
+  const parsed = displayNameSchema.parse(input)
+  const result = await setMyDisplayName({ displayName: parsed.displayName })
+  revalidatePath("/dashboard/account")
+  return { success: true as const, displayName: result.displayName, changed: result.changed }
 }

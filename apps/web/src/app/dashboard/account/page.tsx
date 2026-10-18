@@ -6,8 +6,10 @@ import { unstable_noStore as noStore } from "next/cache"
 import { readMyCareerConsent } from "@/lib/career-records"
 import { readMyCareerHub } from "@/lib/career-hub"
 import { readMyDisplayTimeZone } from "@/lib/account-preferences"
+import { readMyDisplayName } from "@/lib/profile-records"
 import { CareerConsentCard } from "@/components/account/career-consent-card"
 import { DisplayTimezoneCard } from "@/components/account/display-timezone-card"
+import { DisplayNameCard } from "@/components/account/display-name-card"
 
 /**
  * Personal account surface (PUB-03/PUB-02). Deliberately OUTSIDE the league
@@ -25,7 +27,7 @@ export default async function AccountPage() {
   // boundary reason is the same message the writer enforces, never a
   // silent empty state. The timezone preference reading is additive: if it
   // fails the card still renders with the honest UTC-labelled default.
-  const [consent, hubResult, timeZoneState] = await Promise.all([
+  const [consent, hubResult, timeZoneState, displayName] = await Promise.all([
     readMyCareerConsent(),
     readMyCareerHub().then(
       (hub) => ({ ok: true as const, hub }),
@@ -33,6 +35,10 @@ export default async function AccountPage() {
     ),
     readMyDisplayTimeZone().then(
       (state) => state.timeZone,
+      () => null,
+    ),
+    readMyDisplayName().then(
+      (name) => name,
       () => null,
     ),
   ])
@@ -52,6 +58,7 @@ export default async function AccountPage() {
         <>
           <CareerConsentCard granted={consent.granted} consentedAt={consent.consentedAt ? consent.consentedAt.toISOString() : null} />
           <DisplayTimezoneCard timeZone={timeZoneState} />
+          <DisplayNameCard displayName={displayName} />
           <section aria-labelledby="career-hub-heading" className="rounded-2xl border bg-card p-5 shadow-sm">
             <h2 id="career-hub-heading" className="text-lg font-semibold">Your public career</h2>
             {!hubResult.hub.consented ? (
