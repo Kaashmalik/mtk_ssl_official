@@ -73,4 +73,16 @@ describe("PUB-06 (Batch 133): official-record public surfaces gate minor NAMES",
     // rows the page already loaded (inningsRaw + the mapped `innings`).
     expect(source).not.toMatch(/deriveMatchRecap\(\{[\s\S]{0,120}db\./)
   })
+
+  // SCORE-13 (Batch 137): Match Center overlays are folded views of the
+  // SAME recorded ball rows - the strip never opens its own read and never
+  // claims legal deliveries it cannot verify.
+  it("the Match Center partnership/recent strip folds the shared ball rows, never a new read", () => {
+    const source = read("app/matches/[matchId]/page.tsx")
+    expect(source).toContain("deriveInningsOverlay(ballsByInnings.get(inn.id) ?? [])")
+    expect(source).toContain("OVERLAY_LABELS.recordedDeliveries")
+    // The overlay build sits after the single ball-row read; the page keeps
+    // exactly one matchBalls select (the wicketBalls read the FoW map uses).
+    expect(source.match(/from\(matchBalls\)/g)?.length).toBe(1)
+  })
 })

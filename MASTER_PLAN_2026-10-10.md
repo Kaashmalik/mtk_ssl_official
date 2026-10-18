@@ -6171,6 +6171,36 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 137 - SCORE-13 slice: Match Center partnership/recent-balls overlays (pure fold, zero new reads)
+
+- DELIVERED: the public match page renders a per-innings overlay strip
+  above the batting card - current partnership (runs + RECORDED delivery
+  count + basis: "since last wicket" at its exact over.ball, or "ball
+  one") and a bounded, chronological recent-balls strip (·/1/2/3/4/6/W
+  chips with titles and tone classes).
+- POLICY HONESTY (match-overlays.ts): matchBalls rows carry runs +
+  isWicket but NOT the extra type, so counts are recorded deliveries -
+  the policy never claims legality it cannot see, and labels say so.
+  Partnership resets at every recorded wicket; a trailing wicket yields
+  an honest zero partnership pointing at the fall spot; an innings with
+  no recorded rows derives NULL (the strip does not render empty poses).
+  Recent window = last 12, oldest to newest like a TV strip.
+- ZERO NEW READS: the overlay folds the SAME ball rows the FoW map
+  already loads (the shared ballsByInnings grouping was hoisted so both
+  derivations consume one read + one ordering). Hygiene pin added: the
+  page keeps EXACTLY ONE matchBalls select, forever.
+- Boring-stack discipline: derivation is a pure module in
+  @mtk/database/lib/match-overlays (8 unit tests: chips, ball-one
+  basis, wicket reset + fall spot, recorded-delivery honesty, 12-ball
+  window chronological order, trailing-wicket zero, all-runs markers);
+  the page wiring is thin rendering plus the hygiene pin.
+- Classifies SCORE-13: its protection clauses (private HTTP/socket read
+  hardening, publication lifecycle gates) are DELIVERED across prior
+  batches (B24/34/107-110 hardening, scoring-public-access suite,
+  ISO-08 slice); the "expand rich Match Center" clause now has its first
+  concrete overlay; further center/overlay polish stays open scope.
+
+
 ## Batch 136 - COMP-03 slice: idempotent tournament creation recovery (migration applied remotely)
 
 - DELIVERED: tournament creation is now recoverable - a retried submit

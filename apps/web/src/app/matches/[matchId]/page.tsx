@@ -17,6 +17,7 @@ import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
 import { ReactionFeedReport } from "@/components/shared/reaction-feed-report"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
 import { deriveMatchRecap, RECAP_LABELS } from "@mtk/database/lib/match-recap"
+import { deriveInningsOverlay, OVERLAY_LABELS, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
@@ -136,14 +137,17 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
     : []
   const nameById = applyMinorNameGate(playerRows)
 
+  // Shared ball-row grouping (SCORE-13, Batch 137): the FoW attribution and
+  // the Match Center overlays fold over the SAME recorded rows - no second
+  // read, no divergent orderings.
+  const ballsByInnings = new Map<string, typeof wicketBalls>()
+  for (const b of wicketBalls) {
+    const arr = ballsByInnings.get(b.inningsId) ?? []
+    arr.push(b)
+    ballsByInnings.set(b.inningsId, arr)
+  }
   const fowByInnings = new Map<string, { over: string; batsman: string; bowler: string; scoreAtFall: number; wicketsAtFall: number }[]>()
   {
-    const ballsByInnings = new Map<string, typeof wicketBalls>()
-    for (const b of wicketBalls) {
-      const arr = ballsByInnings.get(b.inningsId) ?? []
-      arr.push(b)
-      ballsByInnings.set(b.inningsId, arr)
-    }
     for (const [inningsId, balls] of ballsByInnings) {
       const sorted = [...balls].sort((a, b) => a.ballSequence - b.ballSequence || (a.overNumber - b.overNumber) || (a.ballNumber - b.ballNumber))
       let runs = 0
@@ -246,6 +250,20 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
       bowling: innings[idx].bowling.map(b => ({ name: b.name, wickets: b.wickets, runs: b.runs, overs: Number(b.overs) || 0 })),
     })),
   })
+
+  // SCORE-13 (Batch 137): Match Center overlays per innings - partnership
+  // and recent-balls folded over the SAME recorded ball rows the FoW map
+  // used. Zero new reads; counts are RECORDED deliveries (the policy never
+  // claims legality it cannot see), and innings with no rows render no
+  // strip at all.
+  const overlays = inningsRaw.map(inn => deriveInningsOverlay(ballsByInnings.get(inn.id) ?? []))
+  const chipTone: Record<OverlayBallKind, string> = {
+    dot: "bg-muted text-muted-foreground",
+    run: "bg-muted text-foreground",
+    four: "bg-sky-600 text-white",
+    six: "bg-violet-600 text-white",
+    wicket: "bg-red-600 text-white",
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 p-4">
@@ -356,6 +374,33 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           </TabsList>
           {innings.map((inn, idx) => (
             <TabsContent key={idx} value={`innings${idx + 1}`} className="space-y-4">
+              {overlays[idx] && (
+                <Card>
+                  <CardContent className="py-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                    <span>
+                      <span className="font-semibold">{OVERLAY_LABELS.partnership}</span>{" "}
+                      {overlays[idx]!.partnershipRuns} ({overlays[idx]!.partnershipDeliveries}{" "}
+                      {OVERLAY_LABELS.recordedDeliveries}, {overlays[idx]!.partnershipBasis})
+                    </span>
+                    {overlays[idx]!.lastWicketAt && (
+                      <span className="text-muted-foreground text-xs">
+                        {OVERLAY_LABELS.lastWicket}: {overlays[idx]!.lastWicketAt}
+                      </span>
+                    )}
+                    <span className="ml-auto flex gap-1" aria-label={OVERLAY_LABELS.recentBalls}>
+                      {overlays[idx]!.recent.map((chip, i) => (
+                        <span
+                          key={i}
+                          title={chip.title}
+                          className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs font-bold ${chipTone[chip.kind]}`}
+                        >
+                          {chip.marker}
+                        </span>
+                      ))}
+                    </span>
+                  </CardContent>
+                </Card>
+              )}
               <Card>
                 <CardHeader><CardTitle className="text-lg">Batting — {inn.team} ({inn.score})</CardTitle></CardHeader>
                 <CardContent>
