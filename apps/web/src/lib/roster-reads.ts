@@ -39,7 +39,8 @@ const rosterPlayerColumns = {
   city: players.city, status: players.status, isActive: players.isActive,
 }
 const editablePlayerColumns = { ...rosterPlayerColumns, email: players.email, phone: players.phone,
-  dateOfBirth: players.dateOfBirth, heightCm: players.heightCm, weightKg: players.weightKg, biography: players.biography }
+  dateOfBirth: players.dateOfBirth, heightCm: players.heightCm, weightKg: players.weightKg, biography: players.biography,
+  guardianName: players.guardianName, guardianConsentAt: players.guardianConsentAt, guardianConsentRecordedBy: players.guardianConsentRecordedBy }
 export type EditableRosterPlayer = Pick<typeof players.$inferSelect, keyof typeof editablePlayerColumns>
 
 const teamColumns = {

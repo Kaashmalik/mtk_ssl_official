@@ -81,6 +81,15 @@ export const players = pgTable("players", {
   createdBy: text("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+
+  // Minor consent (PUB-06/REG-06, Batch 132): league-RECORDED guardian fact,
+  // never platform-verified identity. A recorded date_of_birth under 18 makes
+  // the player a minor; minors appear on public surfaces only while consent
+  // is recorded. Withdrawal clears all three columns together (cohesion
+  // CHECK); audit logs carry the provenance.
+  guardianName: text("guardian_name"),
+  guardianConsentAt: timestamp("guardian_consent_at", { withTimezone: true }),
+  guardianConsentRecordedBy: text("guardian_consent_recorded_by"),
 });
 
 export type Player = typeof players.$inferSelect;

@@ -8,6 +8,7 @@ import { HUB_LISTED, hubListingEligible } from "@mtk/database/lib/public-hub-pol
 import { PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 import { hubLeagueUrl } from "@/lib/public-hub"
 import { and, asc, eq, inArray, sql, sum } from "drizzle-orm"
+import { minorConsentPublicSql } from "./public-visibility"
 
 /**
  * PUB-02: the PUBLIC cross-league career profile read model.
@@ -129,7 +130,14 @@ export async function readPublicCareerProfile(userId: string): Promise<PublicCar
         sql`${tenants.hubListedAt} IS NOT NULL`,
       ),
     )
-    .where(eq(players.userId, userId))
+    .where(and(
+      eq(players.userId, userId),
+      // Minor-consent gate (Batch 132): a proven minor's contributions are
+      // folded out of the PUBLIC career aggregate without recorded guardian
+      // consent. All-rows-withheld aggregates just as empty = ineligible on
+      // this page, which the page already renders indistinguishably.
+      minorConsentPublicSql,
+    ))
     .groupBy(
       players.tenantId,
       tenants.name,

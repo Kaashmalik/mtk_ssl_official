@@ -14,6 +14,7 @@ import { PlayerIdActions } from "@/components/players/player-id-actions"
 import { PlayerListTable } from "@/components/players/player-list-table"
 import { TeamListGrid } from "@/components/teams/team-list-grid"
 import { EditPlayerForm } from "@/components/players/edit-player-form"
+import { GuardianConsentCard } from "@/components/players/guardian-consent-card"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), permission: vi.fn(), team: vi.fn(), player: vi.fn(),
   squad: vi.fn(), teams: vi.fn(), players: vi.fn(), editable: vi.fn(), options: vi.fn(), teamHistory: vi.fn(), playerHistory: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@/components/teams/team-roster-manager", () => ({ TeamRosterManager: ()
 vi.mock("@/components/players/player-list-table", () => ({ PlayerListTable: () => null }))
 vi.mock("@/components/teams/team-list-grid", () => ({ TeamListGrid: () => null }))
 vi.mock("@/components/players/edit-player-form", () => ({ EditPlayerForm: () => null }))
+vi.mock("@/components/players/guardian-consent-card", () => ({ GuardianConsentCard: () => null }))
 vi.mock("@/components/players/new-player-form", () => ({ NewPlayerForm: () => null }))
 vi.mock("@/components/teams/edit-team-form", () => ({ EditTeamForm: () => null }))
 vi.mock("@/components/teams/new-team-form", () => ({ NewTeamForm: () => null }))
@@ -158,6 +160,13 @@ describe("Roster page scope, limits and private-data serialization", () => {
     expect(form.props.teams).toEqual([{ id: OTHER, name: "Other" }, { id: TEAM, name: "Team" }])
     expect(text(tree)).toContain("first 100 active teams plus the current team")
     expect(text(tree)).toContain("remove them from their current roster first")
+    // Minor consent (Batch 132): the edit page carries the guardian-consent
+    // card fed from the editable read - DOB and consent state come straight
+    // from the row, and the card knows whether the viewer is an owner.
+    const consent = elements(tree).find(element => element.type === GuardianConsentCard)!
+    expect(consent.props.playerId).toBe(PLAYER)
+    expect(consent.props.dateOfBirth).toBe(privatePlayer.dateOfBirth)
+    expect(consent.props.isOwner).toBe(context.role === "league_owner")
   })
   it("explains a truncated creation picker rather than silently dropping teams", async () => {
     mocks.options.mockResolvedValue({ teams: [], truncated: true })

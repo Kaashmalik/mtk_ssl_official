@@ -269,6 +269,8 @@ async function readPublicLeaderboard(
       eq(playerSeasonStats.tenantId, tenantId),
       // Competition/season dimension (PUB-03): optional published-tournament scoping.
       filters.tournamentId ? eq(playerSeasonStats.tournamentId, filters.tournamentId) : undefined,
+      // Minor-consent gate (Batch 132): proven minors need recorded guardian consent.
+      minorConsentPublicSql,
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(playerSeasonStats.playerId, players.name, players.userId, users.isActive)
@@ -319,6 +321,8 @@ async function readFormatQualifiedLeaderboard(
         // The metric-only caller guarantees a declared format; see the guard in readPublicLeaderboard.
         eq(matches.matchFormat, filters.format!),
         filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
+        // Minor-consent gate (Batch 132).
+        minorConsentPublicSql,
         published,
       ))
       .groupBy(battingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -355,6 +359,8 @@ async function readFormatQualifiedLeaderboard(
       // The metric discriminant guarantees a declared format here.
       eq(matches.matchFormat, filters.format!),
       filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
+      // Minor-consent gate (Batch 132).
+      minorConsentPublicSql,
       published,
     ))
     .groupBy(bowlingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -418,6 +424,23 @@ export async function readPublicTournamentOptions(
 const FIELDING_DISMISSALS_SEASON = sql<number>`COALESCE(sum(${playerSeasonStats.catches} + ${playerSeasonStats.runOuts} + ${playerSeasonStats.stumpings}), 0)`.mapWith(Number)
 const FIELDING_DISMISSALS_MATCH = sql<number>`COALESCE(sum(${fieldingScorecards.catches} + ${fieldingScorecards.runOuts} + ${fieldingScorecards.stumpings}), 0)`.mapWith(Number)
 
+/**
+ * Minor-consent gate (Batch 132, PUB-06 + REG-06): a player with a recorded
+ * date_of_birth under 18 appears on public surfaces only while a guardian
+ * consent is recorded on the player row - the consent is a league-RECORDED
+ * fact, never a platform-verified identity. A missing date_of_birth is never
+ * guessed into a minor: the league can only gate what it has actually
+ * recorded, and that DOB discipline is the disclosed foundation of this gate.
+ * SQL twin of `minorPublicDecision` in @mtk/database/lib/minor-consent-policy;
+ * the policy's unit tests pin the shared semantics. Withdrawing consent
+ * (clearing the columns) re-withholds the records - nothing is deleted.
+ */
+export const minorConsentPublicSql = sql`(
+  ${players}.date_of_birth IS NULL
+  OR ${players}.date_of_birth > (CURRENT_DATE - INTERVAL '18 years')
+  OR ${players}.guardian_consent_at IS NOT NULL
+)`
+
 function toPublicLeaderboardRows(
   rows: Array<{ playerId: string; playerName: string; total: number; playerUserId: string | null; linkedUserActive: boolean | null }>,
 ): PublicLeaderboardRow[] {
@@ -467,6 +490,8 @@ export async function readPublicFieldingLeaderboard(
         eq(fieldingScorecards.tenantId, tenantId),
         eq(matches.matchFormat, filters.format),
         filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
+        // Minor-consent gate (Batch 132).
+        minorConsentPublicSql,
         inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
       ))
       .groupBy(fieldingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -493,6 +518,8 @@ export async function readPublicFieldingLeaderboard(
     .where(and(
       eq(playerSeasonStats.tenantId, tenantId),
       filters.tournamentId ? eq(playerSeasonStats.tournamentId, filters.tournamentId) : undefined,
+      // Minor-consent gate (Batch 132).
+      minorConsentPublicSql,
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(playerSeasonStats.playerId, players.name, players.userId, users.isActive)
@@ -550,6 +577,8 @@ export async function readPublicWicketkeepingLeaderboard(
       eq(fieldingScorecards.tenantId, tenantId),
       filters.format ? eq(matches.matchFormat, filters.format) : undefined,
       filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
+      // Minor-consent gate (Batch 132).
+      minorConsentPublicSql,
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(fieldingScorecards.playerId, players.name, players.userId, users.isActive)
@@ -607,7 +636,15 @@ export async function readPublishedTournamentAwards(
       declaredAt: tournamentAwards.declaredAt,
     })
     .from(tournamentAwards)
-    .leftJoin(players, and(eq(players.id, tournamentAwards.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(players, and(
+      eq(players.id, tournamentAwards.playerId),
+      eq(players.tenantId, tenantId),
+      // Minor-consent gate (Batch 132): an award won by a proven minor
+      // without recorded guardian consent renders without the winner's
+      // name (the LEFT JOIN simply fails to resolve) - the award record
+      // itself stays public, the person's name does not.
+      minorConsentPublicSql,
+    ))
     .leftJoin(teams, and(eq(teams.id, tournamentAwards.teamId), eq(teams.tenantId, tenantId)))
     .where(and(
       eq(tournamentAwards.tenantId, tenantId),
@@ -782,6 +819,9 @@ export async function readPublishedTournamentMilestones(
     .where(and(
       eq(battingScorecards.tenantId, tenantId),
       eq(matches.tournamentId, tournamentId),
+      // Minor-consent gate (Batch 132): a proven minor's milestones stay off
+      // the public celebration card without recorded guardian consent.
+      minorConsentPublicSql,
       published,
     ))
   const centuries = battingRows
@@ -814,6 +854,8 @@ export async function readPublishedTournamentMilestones(
     .where(and(
       eq(bowlingScorecards.tenantId, tenantId),
       eq(matches.tournamentId, tournamentId),
+      // Minor-consent gate (Batch 132).
+      minorConsentPublicSql,
       published,
     ))
   const fiveFors = bowlingRows

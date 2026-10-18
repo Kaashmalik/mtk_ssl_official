@@ -2,12 +2,13 @@ import { randomUUID } from "crypto"
 import { db, users, tenants, userTenantRoles, teams, players, tournaments, matches, auditLogs,
   checkPlanLimit, membershipGrantsAccess, type PlanKey, type Team, type Player } from "@mtk/database"
 import { teamManagementGrant } from "@mtk/database/lib/resource-grants"
+import { isMinorByRecord } from "@mtk/database/lib/minor-consent-policy"
 import { and, eq, inArray, or, count, sql } from "drizzle-orm"
 import { z } from "zod"
 import { teamInput, teamPatch, playerInput, playerPatch } from "./roster-input"
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
-type Operation = "TEAM_CREATE" | "TEAM_UPDATE" | "PLAYER_CREATE" | "PLAYER_UPDATE" | "ROSTER_ADD" | "ROSTER_REMOVE"
+type Operation = "TEAM_CREATE" | "TEAM_UPDATE" | "PLAYER_CREATE" | "PLAYER_UPDATE" | "PLAYER_GUARDIAN_CONSENT" | "PLAYER_GUARDIAN_CONSENT_WITHDRAWN" | "ROSTER_ADD" | "ROSTER_REMOVE"
 
 // Participating writers lock account -> league -> membership -> sorted teams
 // -> player. READ COMMITTED reads after waits must recheck current authority and
@@ -189,5 +190,68 @@ export async function mutateRosterPlayer(clerkId: string, tenantId: string, comm
     if (!updated) throw new Error("Player changed. Reload before saving.")
     await audit(tx, context, tenantId, command.kind, player.id, playerSnapshot(player), playerSnapshot(updated), Object.keys(patch))
     return updated
+  }, { isolationLevel: "read committed" })
+}
+
+/**
+ * Minor guardian consent (Batch 132, PUB-06 + REG-06): league owner records
+ * or withdraws the guardian consent that lets a PROVEN minor (recorded
+ * date_of_birth under 18) appear on public surfaces. The consent is a
+ * league-RECORDED fact, never a platform-verified identity. Owner-only
+ * authority; the player row is locked FOR UPDATE pinned to id + tenant;
+ * replays are honest pure reads with no audit; withdrawal clears the whole
+ * consent (cohesion CHECK keeps it all-or-nothing) - nothing is deleted.
+ */
+export const guardianConsentInput = z.object({ guardianName: z.string().trim().min(2).max(120) })
+
+export async function setPlayerGuardianConsent(clerkId: string, tenantId: string, id: string, input: z.infer<typeof guardianConsentInput>) {
+  const { guardianName } = guardianConsentInput.parse(input)
+  return db.transaction(async tx => {
+    const context = await actorContext(tx, clerkId, tenantId, "PLAYER_GUARDIAN_CONSENT")
+    if (context.member.role !== "league_owner") throw new Error("Only a league owner can record guardian consent")
+    const key = and(eq(players.id, id), eq(players.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${players.id} FROM ${players} WHERE ${key} FOR UPDATE`)
+    const player = await tx.query.players.findFirst({ where: key })
+    if (!player || player.id !== id || player.tenantId !== tenantId) throw new Error("Player not found")
+    if (!isMinorByRecord(player.dateOfBirth)) {
+      throw new Error("Guardian consent applies only to a player with a recorded date of birth under 18")
+    }
+    if (player.guardianConsentAt && player.guardianName === guardianName) {
+      return { changed: false as const, player }
+    }
+    const [updated] = await tx.update(players).set({
+      guardianName,
+      guardianConsentAt: new Date(),
+      guardianConsentRecordedBy: context.actor.id,
+      updatedAt: new Date(),
+    }).where(key).returning()
+    if (!updated) throw new Error("Player changed. Reload before saving.")
+    await audit(tx, context, tenantId, "PLAYER_GUARDIAN_CONSENT", player.id,
+      { guardianConsentRecorded: player.guardianConsentAt != null },
+      { guardianConsentRecorded: true }, ["guardianName", "guardianConsentAt", "guardianConsentRecordedBy"])
+    return { changed: true as const, player: updated }
+  }, { isolationLevel: "read committed" })
+}
+
+export async function withdrawPlayerGuardianConsent(clerkId: string, tenantId: string, id: string) {
+  return db.transaction(async tx => {
+    const context = await actorContext(tx, clerkId, tenantId, "PLAYER_GUARDIAN_CONSENT_WITHDRAWN")
+    if (context.member.role !== "league_owner") throw new Error("Only a league owner can withdraw guardian consent")
+    const key = and(eq(players.id, id), eq(players.tenantId, tenantId))
+    await tx.execute(sql`SELECT ${players.id} FROM ${players} WHERE ${key} FOR UPDATE`)
+    const player = await tx.query.players.findFirst({ where: key })
+    if (!player || player.id !== id || player.tenantId !== tenantId) throw new Error("Player not found")
+    if (player.guardianConsentAt == null) return { changed: false as const, player }
+    const [updated] = await tx.update(players).set({
+      guardianName: null,
+      guardianConsentAt: null,
+      guardianConsentRecordedBy: null,
+      updatedAt: new Date(),
+    }).where(key).returning()
+    if (!updated) throw new Error("Player changed. Reload before saving.")
+    await audit(tx, context, tenantId, "PLAYER_GUARDIAN_CONSENT_WITHDRAWN", player.id,
+      { guardianConsentRecorded: true },
+      { guardianConsentRecorded: false }, ["guardianName", "guardianConsentAt", "guardianConsentRecordedBy"])
+    return { changed: true as const, player: updated }
   }, { isolationLevel: "read committed" })
 }

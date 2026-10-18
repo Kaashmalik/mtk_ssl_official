@@ -3,6 +3,16 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 132) - `minor_consent` applied remotely**
+> (same proven path: original file, original stamp `20261018170000`,
+> applied statement-by-statement, shape-verified in the same session).
+> `players` + `guardian_name`, `guardian_consent_at`,
+> `guardian_consent_recorded_by` (PUB-06 + REG-06 slice, consent-on-
+> publication): cohesion CHECK `players_guardian_consent_cohesion_check`
+> (consent all-or-nothing), no new grants (players RLS forced, service-role
+> writes only), withdrawal clears all three columns together. Verified
+> remotely: 3 columns typed, CHECK present, RLS still forced.
+
 > **18 October 2026 (Batch 127) - `award_disputes` applied remotely** (same
 > proven path: original file, original stamp `20261018160000`, history row
 > inserted, shape-verified in the same session). New table

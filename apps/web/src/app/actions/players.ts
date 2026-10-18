@@ -7,7 +7,7 @@ import { withAuth } from "./action-guard"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { archiveRosterResource } from "@/lib/archive-roster-resource"
 import { playerInput, playerPatch } from "@/lib/roster-input"
-import { createRosterPlayer, mutateRosterPlayer } from "@/lib/roster-management"
+import { createRosterPlayer, mutateRosterPlayer, setPlayerGuardianConsent, withdrawPlayerGuardianConsent } from "@/lib/roster-management"
 import { requireRosterReadContext, readRosterPlayer, readRosterPlayers, rosterPlayerFilters } from "@/lib/roster-reads"
 
 
@@ -20,7 +20,7 @@ export type CreatePlayerInput = z.infer<typeof createPlayerSchema>
 export type UpdatePlayerInput = z.infer<typeof updatePlayerSchema>
 export type PlayerFilters = z.input<typeof rosterPlayerFilters>
 
-async function mutationTenant(permission: "player:create" | "player:update") {
+async function mutationTenant(permission: "player:create" | "player:update" | "user:manage") {
   const tenantId = await resolveActiveTenantId()
   if (!tenantId) throw new Error("Tenant not found")
   await requirePermissionServer(permission, tenantId)
@@ -77,5 +77,35 @@ export const getPlayers = withAuth("player:read", async (filters: PlayerFilters)
   const data = rosterPlayerFilters.parse(filters)
   const { tenantId } = await requireRosterReadContext("player:read")
   return readRosterPlayers(tenantId, data)
+})
+
+/**
+ * Minor guardian consent (Batch 132, PUB-06 + REG-06). Owner authority is
+ * re-verified inside the writer under the row lock; this tier owns session,
+ * uuid validation and the public-path revalidation - consent changes change
+ * what the leaderboards, career hub and public career profiles render.
+ */
+export const setGuardianConsent = withAuth("user:manage", async (id: string, input: { guardianName: string }) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(id)
+  const tenantId = await mutationTenant("user:manage")
+  const result = await setPlayerGuardianConsent(userId, tenantId, id, input)
+  revalidatePath("/dashboard", "layout")
+  revalidatePath("/leaderboards")
+  revalidatePath("/hub/players")
+  return { changed: result.changed }
+})
+
+export const withdrawGuardianConsent = withAuth("user:manage", async (id: string) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(id)
+  const tenantId = await mutationTenant("user:manage")
+  const result = await withdrawPlayerGuardianConsent(userId, tenantId, id)
+  revalidatePath("/dashboard", "layout")
+  revalidatePath("/leaderboards")
+  revalidatePath("/hub/players")
+  return { changed: result.changed }
 })
 

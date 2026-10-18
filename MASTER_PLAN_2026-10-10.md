@@ -6169,6 +6169,50 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Phase 1 of the three-phase completion (user directive 2026-10-18)
+
+## Batch 132 - Minor consent, PUB-06 + REG-06 slice (migration applied remotely)
+
+- DECISION RECORDED (consent-on-publication, product default per the
+  user's "complete all in three phases" directive): a player with a
+  recorded date_of_birth under 18 is a MINOR; a minor's public records are
+  visible ONLY while a guardian consent is recorded on the player row. The
+  consent is a league-RECORDED fact (guardian name + instant + recorder),
+  never a platform-verified identity. A MISSING date_of_birth is never
+  guessed into a minor - the league can only gate what it recorded, and
+  that DOB discipline is the disclosed foundation of the gate.
+- Migration `20261018170000_minor_consent.sql` APPLIED remotely and
+  shape-verified: players + guardian_name/guardian_consent_at/
+  guardian_consent_recorded_by, cohesion CHECK (consent is all-or-nothing),
+  RLS still forced, no new grants. Withdrawal clears all three columns
+  (nothing deleted; audits carry provenance).
+- Pure policy `@mtk/database/lib/minor-consent-policy` (age, fail-closed
+  decision, verbatim labels) - unit-tested in the package; the web readers
+  carry the documented SQL twin.
+- READERS: the SQL gate `minorConsentPublicSql` is applied to ALL public
+  player paths in public-visibility.ts (combined/batting/bowling/fielding/
+  wicketkeeping leaderboards + milestone batting/bowling) and the public
+  career profile fold; the awards gallery withholds a minor winner's NAME
+  (LEFT-JOIN condition) while the award record stays public. The PRIVATE
+  dashboard career hub deliberately stays ungated.
+- WRITERS: owner-only setPlayerGuardianConsent / withdrawPlayerGuardianConsent
+  in roster-management.ts (row-locked FOR UPDATE id+tenant, minor proof via
+  the shared policy, identical replay = pure read no audit, audits
+  PLAYER_GUARDIAN_CONSENT[_WITHDRAWN] without copying guardian name into
+  payloads); thin actions setGuardianConsent/withdrawGuardianConsent
+  (user:manage) revalidating leaderboards + hub.
+- UI: owner-visible GuardianConsentCard on the player edit page (minor
+  status from recorded DOB, consent state, save/withdraw with honest
+  replay toasts).
+- Tests: 5 policy units (db) + 8 web (writer guards, replay honesty,
+  reader-gate source pin incl. the exact 10-occurrence count and the
+  private-career-not-gated boundary) + the edit-page render wiring in
+  roster-pages (B125 lesson: mock block extended proactively). Two test
+  iterations were needed to learn actorContext's membership gate needs
+  status:"active" in fakes - recorded for future writer tests.
+- Gates: web tsc 0; targeted suites green; db suite 34/360; battery per
+  batch record.
+
 ## Batch 131 - Dead-surface tier 2: lib export audit (decision-free)
 
 - Sweep of every exported `const`/function across `apps/web/src/lib/` for
