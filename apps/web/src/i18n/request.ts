@@ -1,25 +1,19 @@
-import { cookies, headers } from "next/headers"
 import { getRequestConfig } from "next-intl/server"
-import { DEFAULT_LOCALE, LOCALE_COOKIE, isLocale, negotiateLocale } from "./config"
+import { resolveRequestLocale } from "./server-locale"
 
 /**
  * UX-03 (Batch 139): the request locale WITHOUT URL routing - an explicit
  * cookie wins, then the browser's Accept-Language negotiation, then
- * English. Messages load per resolved locale; a locale that fails to
- * load would be Corruption, so the config only ever names supported
- * locales and each messages file must exist (pinned by i18n tests).
+ * English. Batch 144 moves the resolution itself into server-locale.ts so
+ * transactional emails compose in the SAME locale the user chose (the
+ * fail-soft English fallback there covers out-of-scope callers; a page
+ * render always has a request scope). Messages load per resolved locale; a
+ * locale that fails to load would be Corruption, so the config only ever
+ * names supported locales and each messages file must exist (pinned by
+ * i18n tests).
  */
 export default getRequestConfig(async () => {
-  const store = await cookies()
-  const cookieLocale = store.get(LOCALE_COOKIE)?.value
-
-  let locale = DEFAULT_LOCALE
-  if (isLocale(cookieLocale)) {
-    locale = cookieLocale
-  } else {
-    const headerLocale = negotiateLocale((await headers()).get("accept-language"))
-    if (headerLocale) locale = headerLocale
-  }
+  const locale = await resolveRequestLocale()
 
   const messages = (await import(`../../messages/${locale}.json`)).default
   return { locale, messages }

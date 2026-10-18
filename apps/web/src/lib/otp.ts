@@ -23,6 +23,9 @@ export function verifyOtpHash(identifier: string, code: string, expectedHash: st
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+import { renderVerificationEmail } from "@mtk/database/lib/email-templates"
+import { resolveRequestLocale } from "@/i18n/server-locale"
+
 export type OtpChannel = "whatsapp" | "sms" | "email";
 
 export async function dispatchOtp(channel: OtpChannel, identifier: string, code: string): Promise<{ mock: boolean }> {
@@ -34,14 +37,18 @@ export async function dispatchOtp(channel: OtpChannel, identifier: string, code:
       console.warn(`[otp][mock] email to ${identifier}: ${message}`);
       return { mock: true };
     }
+    // UX-03 (Batch 144): the verification email composes in the requester's
+    // resolved locale (cookie -> Accept-Language -> honest English fallback;
+    // resolveRequestLocale also degrades to English outside a request scope).
+    const rendered = renderVerificationEmail({ locale: await resolveRequestLocale(), code, ttlMinutes: 10 });
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: process.env.OTP_EMAIL_FROM || "SSL <onboarding@ssl.mtkcodex.site>",
         to: identifier,
-        subject: "Your SSL verification code",
-        text: message,
+        subject: rendered.subject,
+        text: rendered.text,
       }),
     });
     if (!res.ok) throw new Error(`Resend error: ${res.status}`);

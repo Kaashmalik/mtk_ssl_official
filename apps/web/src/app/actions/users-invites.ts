@@ -11,6 +11,8 @@ import { assertSupportedInvitationScope, hasVerifiedInvitedEmail, invitationBase
 import { claimInvite, findInviteByTokenHash, findPendingInvitePreview, findUserByClerkId,
   issueInviteInLeague, readLeagueInvites, recordEmailAttempt,
   revokePendingInvite, rotateInviteToken } from "@/lib/invite-records"
+import { renderInvitationEmail } from "@mtk/database/lib/email-templates"
+import { resolveRequestLocale } from "@/i18n/server-locale"
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const createInviteSchema = z.object({
@@ -34,15 +36,20 @@ async function requireManager(expectedTenantId: string) {
 }
 
 /** Synchronous attempt, not a durable queue or delivery confirmation. No secret logs. */
-async function sendInviteEmail(inviteId: string, idempotencyKey: string, to: string, inviterName: string, leagueName: string, role: string, link: string): Promise<InvitationEmailState> {
+async function sendInviteEmail(inviteId: string, idempotencyKey: string, to: string, inviterName: string, leagueName: string, role: string, link: string, locale: string | null | undefined): Promise<InvitationEmailState> {
   if (!process.env.RESEND_API_KEY) return "unconfigured"
+  // UX-03 (Batch 144): the invitation composes in the sender's resolved
+  // locale (cookie -> Accept-Language -> English fallback inside the
+  // template policy). The policy also sanitizes interpolated fields, so no
+  // header/body injection can ride a name or league name.
+  const rendered = renderInvitationEmail({ locale, inviterName, leagueName, role, link, expiresDays: 7 })
   try {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST", signal: AbortSignal.timeout(10_000),
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify({ from: process.env.RESEND_FROM_EMAIL || "SSL <onboarding@ssl.mtkcodex.site>", to,
-        subject: `You have been invited to join ${leagueName} on SSL`,
-        text: `${inviterName} invited you to join "${leagueName}" as ${role.replaceAll("_", " ")}.\n\nAccept: ${link}\n\nExpires in 7 days. Verify the invited email through your sign-in provider before accepting.`,
+        subject: rendered.subject,
+        text: rendered.text,
         // Lets the delivery webhook correlate an event back to the invitation.
         tags: [{ name: "invite_id", value: inviteId }],
       }),
@@ -71,7 +78,7 @@ export async function createInvite(input: CreateInviteInput) {
     membershipExpiresAt: validated.membershipExpiresAt ? new Date(validated.membershipExpiresAt) : null,
   })
   const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
-  const emailState = await sendInviteEmail(result.invite.id, `league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link)
+  const emailState = await sendInviteEmail(result.invite.id, `league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link, await resolveRequestLocale())
   await recordEmailAttempt(result.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")
   return { success: true as const, invite: { id: result.invite.id, email, role: validated.role }, link, emailState }
@@ -114,7 +121,7 @@ export async function resendInvite(input: { tenantId: string; inviteId: string }
   // Distinct idempotency key per attempt so the provider does not dedupe a resend.
   const attempt = (prepared.invite.emailAttemptCount ?? 0) + 1
   const emailState = await sendInviteEmail(prepared.invite.id, `league-invite/${prepared.invite.id}/r${attempt}`,
-    prepared.invite.email, prepared.issuer.displayName || "A league owner", prepared.league.name, prepared.invite.role, link)
+    prepared.invite.email, prepared.issuer.displayName || "A league owner", prepared.league.name, prepared.invite.role, link, await resolveRequestLocale())
   await recordEmailAttempt(prepared.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")
   return { success: true as const, invite: { id: prepared.invite.id, email: prepared.invite.email, role: prepared.invite.role }, link, emailState }

@@ -6171,6 +6171,42 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 144 - UX-03 slice: localized transactional emails (templates in the pure package; provider unchanged)
+
+- DELIVERED: the UX-03 clause left open since B140 ("localized emails").
+  The provider (Resend) was already integrated with truthful delivery
+  states; the honest gap was that BOTH emails the platform sends were
+  English-only:
+  1. TEMPLATES AS POLICY (packages/database/src/lib/email-templates.ts +
+     5 tests): renderInvitationEmail + renderVerificationEmail - subject
+     and body tables for en/bn/ar with key parity across locales enforced
+     by test. bn/ar strings are MACHINE-DRAFTED and flagged for HUMAN
+     REVIEW (standing convention). normalizeEmailLocale: unknown/missing
+     locale NEVER becomes a wrong language, it falls back to English.
+     Unknown invitation role REFUSES (fixed 5-role enum; nothing invented).
+     plainEmailLine: interpolated user-controlled values (inviter display
+     name, league name) survive as ONE inline line - header/body
+     structure can no longer be forged through them (flattening, never
+     deletion; asserted both in policy and at action level).
+  2. SHARED LOCALE RESOLUTION (apps/web/src/i18n/server-locale.ts +
+     request.ts refactor): cookie -> Accept-Language -> English, now
+     fail-soft (outside a request scope the honest result is the English
+     default, never a guessed language). The page request config reuses
+     the same resolver, so page i18n and email i18n can no longer drift.
+  3. WIRING: sendInviteEmail (both create + resend paths) composes the
+     subject/text through the policy in the SENDER's resolved locale;
+     dispatchOtp's email branch composes the verification code email the
+     same way. Unconfigured-provider behavior UNCHANGED ("unconfigured"
+     stays explicit, never a logged secret or a fake success). OTP
+     sms/whatsapp branches remain English (recorded: SMS = carrier-encoding
+     and channel-length constraints, open scope, not silently dropped).
+- VERIFIED: policy 5 tests (parity table, fallback, role refusal,
+  injection flattening, code interpolation); invite action suite extended
+  to 115 passing: the fetch body is asserted to come from the policy
+  (English fallback composition without a request scope) and a
+  display-name header-injection shape is asserted to produce subject/
+  body with no forged structure. db build + tsc 0, web tsc 0.
+
 ## Batch 143 - FAN-04 slice: the automatic recap goes through the dictionary (labeled, never official)
 
 - DELIVERED: FAN-04's buildable clause on the ALREADY-delivered recap

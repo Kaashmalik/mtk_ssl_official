@@ -93,5 +93,6 @@ export * from "./schema/scorecard-correction-requests";
 export * from "./lib/match-availability-policy";
 export * from "./lib/scorecard-correction-policy";
 export * from "./lib/profile-policy";
+export * from "./lib/email-templates";
 
 

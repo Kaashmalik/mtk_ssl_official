@@ -256,6 +256,22 @@ describe("Owner issuance, revocation and truthful synchronous dispatch", () => {
     const options = mocks.fetch.mock.calls[0][1]
     expect(options.headers["Idempotency-Key"]).toBe(`league-invite/${INVITE}`)
     expect(options.signal).toBeInstanceOf(AbortSignal)
+    // Batch 144: the body is authored by the template policy, not inline. In
+    // this suite there is no request scope, so resolveRequestLocale degrades
+    // honestly to English - asserted here as the composition contract.
+    const payload = JSON.parse(options.body)
+    expect(payload.subject).toContain("on SSL")
+    expect(payload.text).toContain("Accept: ")
+    expect(payload.text).toContain("as scorer.")
+  })
+  it("a header-injection shape in a display name cannot forge email structure", async () => {
+    vi.stubEnv("RESEND_API_KEY", "test-only")
+    mocks.fetch.mockResolvedValue({ ok: true })
+    mocks.issuer.mockResolvedValue({ id: OWNER, clerkId: "clerk-owner", isActive: true, displayName: "Issuer\n\nUnit" })
+    await create()
+    const payload = JSON.parse(mocks.fetch.mock.calls[0][1].body)
+    expect(payload.subject).not.toMatch(/[\r\n]/)
+    expect(payload.text).not.toContain("\n\nUnit")
   })
   it("provider rejection does not delete the confirmed pending invitation", async () => {
     vi.stubEnv("RESEND_API_KEY", "test-only"); mocks.fetch.mockResolvedValue({ ok: false, status: 422 })
