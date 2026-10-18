@@ -3,6 +3,22 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 123) - `hub_listing` applied remotely via the
+> `DATABASE_URL` fallback — applying the ORIGINAL file
+> `supabase/migrations/20261017103000_hub_listing.sql` (Batch 86 slice,
+> recorded "LOCAL-ONLY" at the time). Discovered LIVE by the Batch 123
+> staged-acceptance suite: `readListedHubLeagues()` failed against
+> production with `column "hub_listed_at" does not exist` (42703) — the
+> exact drift staged acceptance exists to catch. Idempotent migration:
+> `hub_listing_status` enum (`unlisted|listed`), `tenants.hub_listing_status`
+> NOT NULL DEFAULT 'unlisted', nullable `hub_listed_at`, column comments.
+> History row `20261017103000` `'{}'::text[]` inserted (original ts, A's
+> window, clear of Session B's chain). Verified remotely: enum labels
+> `unlisted,listed`, both columns with correct shapes/defaults, listing
+> counts 1 league currently `unlisted` (fail-closed default proven by the
+> empty hub directory on live data). Live evidence: the PUB-02 hub family
+> (`public-hub.live.test.ts`) 2/2 PASS post-apply.
+
 > **18 October 2026 (Batch 117) - `fan_blocks` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261018140000_fan_blocks.sql` (FAN-01 anti-abuse
