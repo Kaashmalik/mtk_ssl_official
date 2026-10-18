@@ -94,6 +94,33 @@ beforeEach(() => {
 })
 
 describe("setPlayingXis (COMP-06 slice)", () => {
+  it("stores the wicketkeeper flag on exactly the designated slot and refuses a second", async () => {
+    const txm = buildTx({ match: happyMatch(), actor: activeActor(), member: ownerMember() })
+
+    const aEntries = xiEntries(A_PLAYERS).map((entry, i) => (i === 3 ? { ...entry, wicketkeeper: true } : entry))
+    await setPlayingXis({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH,
+      teamAXi: aEntries, teamBXi: xiEntries(B_PLAYERS),
+    })
+
+    const xiInsert = txm.insertValues[0] as Record<string, unknown>[]
+    expect(xiInsert.filter((row: Record<string, unknown>) => row.wicketkeeper === true)).toHaveLength(1)
+    expect(xiInsert.find((row: Record<string, unknown>) => row.wicketkeeper === true)).toMatchObject({
+      teamId: TEAM_A, playerId: A_PLAYERS[3], battingOrder: 4,
+    })
+    // Undesignated slots and the other side read false - a non-flag is never "true".
+    expect(xiInsert.every((row: Record<string, unknown>) =>
+      row.wicketkeeper === true || row.wicketkeeper === false)).toBe(true)
+
+    const twoKeepers = buildTx({ match: happyMatch(), actor: activeActor(), member: ownerMember() })
+    const doubled = xiEntries(A_PLAYERS).map((entry, i) => (i === 0 || i === 1 ? { ...entry, wicketkeeper: true } : entry))
+    await expect(setPlayingXis({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH,
+      teamAXi: doubled, teamBXi: xiEntries(B_PLAYERS),
+    })).rejects.toThrow("cannot designate more than one wicketkeeper")
+    expect(twoKeepers.insertValues).toHaveLength(0)
+  })
+
   it("stores both sides, arms the requirement and clears any prior approval", async () => {
     const txm = buildTx({
       match: { ...happyMatch(), xiRequired: true, xiApprovedAt: new Date("2026-10-01T00:00:00Z") },
@@ -247,6 +274,37 @@ describe("approvePlayingXis (COMP-06 slice)", () => {
 
 describe("substituteInPlayingXi (SCORE-10)", () => {
   const armedMatch = () => ({ ...happyMatch(), xiRequired: true })
+
+  it("a keeper substitution hands the designation to the incoming player, audited", async () => {
+    const txm = buildTx({ match: armedMatch(), actor: activeActor(), member: ownerMember(),
+      activeXis: [
+        ...A_PLAYERS.map((playerId, i) => ({ teamId: TEAM_A, playerId, battingOrder: i + 1, wicketkeeper: i === 2 })),
+        ...B_PLAYERS.map((playerId, i) => ({ teamId: TEAM_B, playerId, battingOrder: i + 1 })),
+      ] })
+    ;(txm.tx.query.players.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { id: T(50), tenantId: TENANT, teamId: TEAM_A, isActive: true, status: "active" })
+
+    await substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })
+
+    const xiInsert = txm.insertValues[0] as Record<string, unknown>
+    expect(xiInsert).toMatchObject({ playerId: T(50), battingOrder: 3, wicketkeeper: true })
+    const audit = txm.insertValues[1] as Record<string, unknown>
+    expect(audit.payload).toMatchObject({ keeperHandover: true })
+
+    // The same substitution of a NON-keeper carries no designation.
+    const plain = buildTx({ match: armedMatch(), actor: activeActor(), member: ownerMember() })
+    ;(plain.tx.query.players.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { id: T(50), tenantId: TENANT, teamId: TEAM_A, isActive: true, status: "active" })
+    await substituteInPlayingXi({
+      userId: CLERK, tenantId: TENANT, matchId: MATCH, teamId: TEAM_A,
+      outgoingPlayerId: A_PLAYERS[2], incomingPlayerId: T(50),
+    })
+    expect((plain.insertValues[0] as Record<string, unknown>).wicketkeeper).toBe(false)
+    expect((plain.insertValues[1] as Record<string, unknown>).payload).toMatchObject({ keeperHandover: false })
+  })
 
   it("supersedes the outgoing declaration, inherits the slot and keeps the approval intact", async () => {
     const txm = buildTx({ match: { ...armedMatch(), xiApprovedAt: new Date("2026-10-17T10:00:00Z") },

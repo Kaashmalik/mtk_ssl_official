@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { validateDeclaredXi, xiEnforcementLevel, xiIsApproved, xiCoversParticipants,
-  xiSubstitutionOrder, PLAYING_XI_SIZE } from "../lib/playing-xi-policy"
+  xiSubstitutionOrder, entryIsWicketkeeper, PLAYING_XI_SIZE } from "../lib/playing-xi-policy"
 
 const T = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const TEAM_A = T(21)
@@ -23,6 +23,24 @@ describe("Shared playing-XI policy (COMP-06)", () => {
     expect(() => validateDeclaredXi(declared(100).map(e => ({ ...e, battingOrder: 2.5 })), TEAM_A))
       .toThrow("batting orders must be 1..11")
     expect(PLAYING_XI_SIZE).toBe(11)
+  })
+
+  describe("wicketkeeper designation (PUB-03/COMP-06)", () => {
+    it("accepts zero or one designated keeper and refuses a second", () => {
+      const withKeeper = declared(100).map((e, i) => (i === 0 ? { ...e, wicketkeeper: true } : e))
+      expect(() => validateDeclaredXi(withKeeper, TEAM_A)).not.toThrow()
+      expect(() => validateDeclaredXi(declared(100), TEAM_A)).not.toThrow()
+
+      const twoKeepers = declared(100).map((e, i) => (i === 0 || i === 1 ? { ...e, wicketkeeper: true } : e))
+      expect(() => validateDeclaredXi(twoKeepers, TEAM_A)).toThrow("cannot designate more than one wicketkeeper")
+    })
+
+    it("treats anything but an explicit true as non-keeper (fail-safe legacy rows)", () => {
+      expect(entryIsWicketkeeper({ wicketkeeper: true })).toBe(true)
+      expect(entryIsWicketkeeper({})).toBe(false)
+      expect(entryIsWicketkeeper({ wicketkeeper: false })).toBe(false)
+      expect(entryIsWicketkeeper({ wicketkeeper: undefined })).toBe(false)
+    })
   })
 
   it("enforcement is legacy-safe: off unless the requirement is armed", () => {

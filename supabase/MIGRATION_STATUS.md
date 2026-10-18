@@ -3,6 +3,31 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 124) - LOCAL-ONLY chain backfilled + applied
+> remotely (the Batch 123 discovery generalized):** a full local-vs-remote
+> migration diff found production FIVE migrations behind, all previously
+> recorded "local-only" and now applied in dependency order with original
+> version stamps + history rows: `20261017090000_playing_xi_declaration`
+> (Batch 80 - match_playing_xis, matches.xi_required/xi_approved_at; the
+> Batch 123 live suite's own success had masked this - no live match-eager
+> reader exercised the table), `20261017093925_scoring_revisions` (Batch
+> 85), `20261017140000_tournament_awards` (Batch 88 - the B121 live pass
+> was VACUOUSLY green here because zero published tournaments meant the
+> awards reader never executed), `20261018090000_scorer_handover_epoch`
+> (Batch 83; file carried a UTF-8 BOM that must be stripped before
+> sql.unsafe - recorded as a gotcha), and
+> `20261018150000_wicketkeeper_designation` (this batch: per-XI-row
+> `wicketkeeper boolean NOT NULL DEFAULT false` + partial unique
+> `match_playing_xis_active_keeper_key (match_id, team_id) WHERE
+> wicketkeeper AND superseded_at IS NULL` = at most one designated keeper
+> per active side; legacy rows read false - no keeper invented for
+> history). Verified remotely: keeper unique present, XI RLS
+> enable/force=t/t, all four matches columns present, zero
+> anon/authenticated/PUBLIC grants on both tables. NOT applied:
+> `20261017130000_league_applications.sql` - Session B's (REG group, the
+> reg01-league-application branch owns REG/COMP); recorded here so nobody
+> mistakes it for drift under A's chain.
+
 > **18 October 2026 (Batch 123) - `hub_listing` applied remotely via the
 > `DATABASE_URL` fallback — applying the ORIGINAL file
 > `supabase/migrations/20261017103000_hub_listing.sql` (Batch 86 slice,

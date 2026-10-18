@@ -5,6 +5,7 @@ import { matchPlayingXis } from "../schema/match-playing-xis"
 import { matches } from "../schema/matches"
 
 const migration = readFileSync(new URL("../../../../supabase/migrations/20261017090000_playing_xi_declaration.sql", import.meta.url), "utf8")
+const keeperMigration = readFileSync(new URL("../../../../supabase/migrations/20261018150000_wicketkeeper_designation.sql", import.meta.url), "utf8")
 
 describe("Playing-XI migration and schema contracts (not real SQL execution)", () => {
   it("stores one immutable declared row per match side and player with a batting order", () => {
@@ -62,5 +63,28 @@ describe("Playing-XI migration and schema contracts (not real SQL execution)", (
     expect(migration).not.toMatch(/DROP TABLE|DELETE FROM|TRUNCATE/i)
     expect(migration).toContain("IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ssl')")
     expect(migration).toContain("IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role')")
+  })
+
+  describe("wicketkeeper designation migration (20261018150000)", () => {
+    it("adds the flag with a legacy-safe default and refuses a second active keeper in the DB", () => {
+      expect(matchPlayingXis.wicketkeeper.name).toBe("wicketkeeper")
+      expect(matchPlayingXis.wicketkeeper.default).toBe(false)
+      expect(matchPlayingXis.wicketkeeper.notNull).toBe(true)
+      expect(keeperMigration).toContain("ADD COLUMN IF NOT EXISTS wicketkeeper boolean NOT NULL DEFAULT false")
+      expect(keeperMigration).toContain("CREATE UNIQUE INDEX IF NOT EXISTS match_playing_xis_active_keeper_key")
+      expect(keeperMigration).toContain("WHERE wicketkeeper AND superseded_at IS NULL")
+      // No keeper is invented for history: legacy rows read false, no backfill.
+      const statements = keeperMigration.replace(/^--.*$/gm, "")
+      expect(statements).not.toMatch(/UPDATE|BACKFILL/i)
+     })
+
+    it("re-asserts forced RLS and leaves the public tier with nothing", () => {
+      expect(keeperMigration).toContain("ENABLE ROW LEVEL SECURITY")
+      expect(keeperMigration).toContain("FORCE ROW LEVEL SECURITY")
+      expect(keeperMigration).toContain("BEGIN;")
+      expect(keeperMigration.trim()).toMatch(/COMMIT;$/)
+      expect(keeperMigration).not.toMatch(/GRANT/)
+      expect(keeperMigration).not.toMatch(/DROP TABLE|DELETE FROM|TRUNCATE/i)
+    })
   })
 })

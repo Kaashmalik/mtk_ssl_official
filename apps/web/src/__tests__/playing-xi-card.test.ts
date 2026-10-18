@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { xiCanDeclare, xiCanSubstitute, xiDeclarationFromSlots, xiGateStatus, xiInitialSlots, xiStatusLabel,
-  xiSubstitutionSelection, type ActiveXiPlayer } from "@/lib/xi-card"
+import { xiAttachKeeper, xiCanDeclare, xiCanSubstitute, xiDeclarationFromSlots, xiGateStatus,
+  xiInitialKeeper, xiInitialSlots, xiStatusLabel, xiSubstitutionSelection, type ActiveXiPlayer } from "@/lib/xi-card"
 
 const T = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const P = (start: number) => Array.from({ length: 11 }, (_, i) => T(start + i))
@@ -36,6 +36,31 @@ describe("Playing-XI card derivations (COMP-06 slice)", () => {
       .toBe("Team A needs all 11 players selected")
     expect(xiDeclarationFromSlots(players.map((p, i) => (i === 3 ? players[5] : p)), "Team A").error)
       .toBe("Team A cannot select the same player twice")
+  })
+
+  describe("wicketkeeper designation derivations (PUB-03/COMP-06)", () => {
+    const declared: ActiveXiPlayer[] = P(100).map((playerId, i) => ({
+      playerId, battingOrder: i + 1, name: `P${i}`, wicketkeeper: i === 2,
+    }))
+
+    it("attaches the flag to exactly the designated slot and fails closed on an outsider", () => {
+      const base = xiDeclarationFromSlots(P(100), "Team A").entries
+      const attached = xiAttachKeeper(base, T(102))
+      expect(attached.error).toBeNull()
+      expect(attached.entries.filter(entry => entry.wicketkeeper === true)).toEqual([
+        { playerId: T(102), battingOrder: 3, wicketkeeper: true },
+      ])
+      expect(attached.entries).toHaveLength(11)
+
+      expect(xiAttachKeeper(base, null)).toEqual({ entries: base, error: null })
+      expect(xiAttachKeeper(base, T(150)).error).toBe("The designated wicketkeeper must be in the declared XI")
+    })
+
+    it("prefills the keeper from the declared side and reads no-designation as none", () => {
+      expect(xiInitialKeeper(declared)).toBe(T(102))
+      expect(xiInitialKeeper(declared.map(p => ({ ...p, wicketkeeper: false })))).toBeNull()
+      expect(xiInitialKeeper()).toBeNull()
+    })
   })
 
   it("declaration is competition-only and pre-match only", () => {

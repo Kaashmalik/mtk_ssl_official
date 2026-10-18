@@ -9,8 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { CheckCircle2, ListOrdered } from "lucide-react"
 import { declarePlayingXis, approveXis, substituteInXi } from "@/app/actions/matches"
-import { xiCanDeclare, xiCanSubstitute, xiDeclarationFromSlots, xiGateStatus, xiInitialSlots,
-  xiStatusLabel, xiSubstitutionSelection, type ActiveXiPlayer, type UiPlayer, type XiGateState } from "@/lib/xi-card"
+import { xiAttachKeeper, xiCanDeclare, xiCanSubstitute, xiDeclarationFromSlots, xiGateStatus,
+  xiInitialKeeper, xiInitialSlots, xiStatusLabel, xiSubstitutionSelection,
+  type ActiveXiPlayer, type UiPlayer, type XiGateState } from "@/lib/xi-card"
 
 const NONE = "__unselected__"
 
@@ -45,23 +46,29 @@ export function PlayingXiCard({
   const gate: XiGateState = xiGateStatus({ xiRequired, xiApprovedAt })
   const [slotsA, setSlotsA] = useState<(string | null)[]>(() => xiInitialSlots(activeXi.teamA))
   const [slotsB, setSlotsB] = useState<(string | null)[]>(() => xiInitialSlots(activeXi.teamB))
+  const [keeperA, setKeeperA] = useState<string | null>(() => xiInitialKeeper(activeXi.teamA))
+  const [keeperB, setKeeperB] = useState<string | null>(() => xiInitialKeeper(activeXi.teamB))
   const [isPending, startTransition] = useTransition()
   const declareAllowed = xiCanDeclare({ status: matchStatus, tournamentId })
   const initialA = xiInitialSlots(activeXi.teamA)
   const initialB = xiInitialSlots(activeXi.teamB)
   const aXi = xiDeclarationFromSlots(slotsA.map(v => (v === NONE ? null : v)), teamAName)
   const bXi = xiDeclarationFromSlots(slotsB.map(v => (v === NONE ? null : v)), teamBName)
-  const validationError = aXi.error ?? bXi.error
+  const attachedA = xiAttachKeeper(aXi.entries, keeperA)
+  const attachedB = xiAttachKeeper(bXi.entries, keeperB)
+  const validationError = aXi.error ?? bXi.error ?? attachedA.error ?? attachedB.error
   const dirty = slotsA.some((slot, i) => (slot ?? null) !== (initialA[i] ?? null))
     || slotsB.some((slot, i) => (slot ?? null) !== (initialB[i] ?? null))
+    || keeperA !== xiInitialKeeper(activeXi.teamA)
+    || keeperB !== xiInitialKeeper(activeXi.teamB)
 
   const declare = () => startTransition(async () => {
-    if (validationError || !aXi.entries.length || !bXi.entries.length) {
+    if (validationError || !attachedA.entries.length || !attachedB.entries.length) {
       toast.error(validationError ?? "Select both teams' playing XIs first")
       return
     }
     try {
-      await declarePlayingXis(matchId, aXi.entries, bXi.entries)
+      await declarePlayingXis(matchId, attachedA.entries, attachedB.entries)
       toast.success("Playing XIs declared. An official must approve them before play.")
       router.refresh()
     } catch (e) {
@@ -138,6 +145,7 @@ export function PlayingXiCard({
 
   const sidePanel = (teamId: string, teamName: string, slots: (string | null)[], players: UiPlayer[],
     setSlots: (next: (string | null)[]) => void, declared: ActiveXiPlayer[],
+    keeper: string | null, setKeeper: (v: string | null) => void,
     subOut: string | null, subIn: string | null, setOut: (v: string | null) => void, setIn: (v: string | null) => void) => (
     <div className="space-y-2">
       <p className="text-sm font-semibold">{teamName}</p>
@@ -147,8 +155,15 @@ export function PlayingXiCard({
             <li key={player.playerId} className="flex items-center gap-2">
               <ListOrdered className="h-3.5 w-3.5 text-muted-foreground" />
               <span>{player.battingOrder}. {player.name}</span>
+              {player.wicketkeeper === true && (
+                <Badge variant="outline" className="text-[10px] px-1 py-0">WK</Badge>
+              )}
             </li>
           ))}
+          <li className="text-xs text-muted-foreground">
+            {declared.some(player => player.wicketkeeper === true)
+              ? "The designated wicketkeeper is recorded with the XI."
+              : "No wicketkeeper designated for this side (earlier declarations predate the record)."}</li>
         </ol>
       ) : canDeclare && declareAllowed ? (
         <div className="grid gap-1.5">
@@ -162,6 +177,19 @@ export function PlayingXiCard({
               </SelectContent>
             </Select>
           ))}
+          <p className="text-xs text-muted-foreground">Designated wicketkeeper (optional, one per side):</p>
+          <Select value={keeper && slots.includes(keeper) ? keeper : NONE}
+            onValueChange={v => setKeeper(v === NONE ? null : v)}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Wicketkeeper" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>— none —</SelectItem>
+              {slots.filter((slot): slot is string => Boolean(slot)).map(playerId => (
+                <SelectItem key={playerId} value={playerId}>
+                  {players.find(player => player.id === playerId)?.name ?? playerId}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No XI declared for this side yet.</p>
@@ -187,8 +215,8 @@ export function PlayingXiCard({
           </p>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
-          {sidePanel(teamAId, teamAName, slotsA, eligible.teamA, setSlotsA, activeXi.teamA, subOutA, subInA, setSubOutA, setSubInA)}
-          {sidePanel(teamBId, teamBName, slotsB, eligible.teamB, setSlotsB, activeXi.teamB, subOutB, subInB, setSubOutB, setSubInB)}
+          {sidePanel(teamAId, teamAName, slotsA, eligible.teamA, setSlotsA, activeXi.teamA, keeperA, setKeeperA, subOutA, subInA, setSubOutA, setSubInA)}
+          {sidePanel(teamBId, teamBName, slotsB, eligible.teamB, setSlotsB, activeXi.teamB, keeperB, setKeeperB, subOutB, subInB, setSubOutB, setSubInB)}
         </div>
         {validationError && canDeclare && declareAllowed && (
           <p className="text-xs text-destructive">{validationError}</p>

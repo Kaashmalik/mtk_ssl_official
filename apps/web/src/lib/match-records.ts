@@ -7,7 +7,7 @@ import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm
 import { scorerMembership } from "@/lib/scorer-membership"
 import { matchRegistrationMap, registrationAllowsPlayer,
   type SquadRegistration } from "@mtk/database/lib/registered-squad-eligibility"
-import { validateDeclaredXi, xiSubstitutionOrder, PLAYING_XI_SIZE,
+import { entryIsWicketkeeper, validateDeclaredXi, xiSubstitutionOrder, PLAYING_XI_SIZE,
   type XiDeclarationEntry } from "@mtk/database/lib/playing-xi-policy"
 
 /**
@@ -500,6 +500,7 @@ export async function setPlayingXis(input: {
         isNull(matchPlayingXis.supersededAt)))
     await tx.insert(matchPlayingXis).values(entries.map(([teamId, entry]) => ({
       matchId, tenantId, teamId, playerId: entry.playerId, battingOrder: entry.battingOrder,
+      wicketkeeper: entryIsWicketkeeper(entry),
       declaredBy: actor.id, declaredAt,
     })))
     const [updated] = await tx.update(matches)
@@ -634,13 +635,18 @@ export async function substituteInPlayingXi(input: {
       throw new Error("Forbidden: league unavailable")
     }
     // Active declared rows for BOTH sides, then the shared policy decision.
+    // The keeper flag reads with the slot: substitution is a handover of the
+    // whole slot, designation included (the DB partial unique stays satisfied
+    // by supersede-then-insert).
     const activeRows = await tx.query.matchPlayingXis.findMany({
       where: and(eq(matchPlayingXis.matchId, matchId), eq(matchPlayingXis.tenantId, tenantId),
         isNull(matchPlayingXis.supersededAt)),
-      columns: { teamId: true, playerId: true, battingOrder: true },
+      columns: { teamId: true, playerId: true, battingOrder: true, wicketkeeper: true },
       orderBy: [asc(matchPlayingXis.battingOrder)],
     })
     const battingOrder = xiSubstitutionOrder({ activeRows, teamId, outgoingPlayerId, incomingPlayerId })
+    const outgoingIsKeeper = activeRows.find(row =>
+      row.teamId === teamId && row.playerId === outgoingPlayerId && row.wicketkeeper)?.wicketkeeper === true
     // Ordered team locks before any roster reads.
     const teamIds = [match.teamAId, match.teamBId].sort()
     await tx.execute(sql`SELECT ${teams.id} FROM ${teams}
@@ -680,12 +686,16 @@ export async function substituteInPlayingXi(input: {
         isNull(matchPlayingXis.supersededAt)))
     await tx.insert(matchPlayingXis).values({
       matchId, tenantId, teamId, playerId: incomingPlayerId, battingOrder,
+      // The designation travels with the slot: if the outgoing player was the
+      // side's keeper, the incoming player takes over that exact designation.
+      wicketkeeper: outgoingIsKeeper,
       declaredBy: actor.id, declaredAt: substitutedAt,
     })
     await tx.insert(auditLogs).values({
       requestId: randomUUID(), tenantId, actorId: actor.id,
       method: "XI_SUBSTITUTE", path: `/dashboard/matches/${matchId}`, statusCode: "200",
       payload: { matchId, teamId, outgoingPlayerId, incomingPlayerId, battingOrder,
+        keeperHandover: outgoingIsKeeper,
         substitutedAt: substitutedAt.toISOString(),
         substitutedAs: actorMember.role === "league_owner" ? "owner" : "umpire" },
     })

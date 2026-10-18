@@ -144,6 +144,7 @@ let viewerIsLeagueOwner = false
     teamId: matchPlayingXis.teamId,
     playerId: matchPlayingXis.playerId,
     battingOrder: matchPlayingXis.battingOrder,
+    wicketkeeper: matchPlayingXis.wicketkeeper,
   }).from(matchPlayingXis)
     .where(and(eq(matchPlayingXis.matchId, match.id), eq(matchPlayingXis.tenantId, match.tenantId),
       isNull(matchPlayingXis.supersededAt)))
@@ -151,10 +152,10 @@ let viewerIsLeagueOwner = false
   const playerNameById = new Map(matchPlayers.map(player => [player.id, player.name]))
   const teamAXi = activeXiRows
     .filter(row => row.teamId === teamA.id)
-    .map(row => ({ playerId: row.playerId, battingOrder: row.battingOrder, name: playerNameById.get(row.playerId) ?? "Unknown Player" }))
+    .map(row => ({ playerId: row.playerId, battingOrder: row.battingOrder, wicketkeeper: row.wicketkeeper, name: playerNameById.get(row.playerId) ?? "Unknown Player" }))
   const teamBXi = activeXiRows
     .filter(row => row.teamId === teamB.id)
-    .map(row => ({ playerId: row.playerId, battingOrder: row.battingOrder, name: playerNameById.get(row.playerId) ?? "Unknown Player" }))
+    .map(row => ({ playerId: row.playerId, battingOrder: row.battingOrder, wicketkeeper: row.wicketkeeper, name: playerNameById.get(row.playerId) ?? "Unknown Player" }))
 
   // Fetch Innings details
   const inningsRaw = await db.select().from(matchInnings)

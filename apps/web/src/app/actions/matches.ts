@@ -264,6 +264,9 @@ export const approveUmpireAssignment = withAuth("match:read", async (matchId: st
 const declaredXiEntrySchema = z.object({
   playerId: z.string().uuid(),
   battingOrder: z.number().int().min(1).max(11),
+  // PUB-03/COMP-06: the designated wicketkeeper slot. The shared policy
+  // re-validates (at most one per side) in the locked writer - the authority.
+  wicketkeeper: z.boolean().optional(),
 }).strict()
 
 /**
@@ -274,8 +277,8 @@ const declaredXiEntrySchema = z.object({
  */
 export const declarePlayingXis = withAuth("match:update", async (
   matchId: string,
-  teamAXi: { playerId: string; battingOrder: number }[],
-  teamBXi: { playerId: string; battingOrder: number }[],
+  teamAXi: { playerId: string; battingOrder: number; wicketkeeper?: boolean }[],
+  teamBXi: { playerId: string; battingOrder: number; wicketkeeper?: boolean }[],
 ) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")

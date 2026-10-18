@@ -1,4 +1,4 @@
-import { pgTable, uuid, smallint, timestamp, check, uniqueIndex, index, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, uuid, smallint, boolean, timestamp, check, uniqueIndex, index, foreignKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { matches } from "./matches";
 import { teams } from "./teams";
@@ -25,6 +25,12 @@ export const matchPlayingXis = pgTable("match_playing_xis", {
   declaredAt: timestamp("declared_at", { withTimezone: true }).defaultNow().notNull(),
   /** Set by a later re-declaration; superseded rows are history, never deleted. */
   supersededAt: timestamp("superseded_at", { withTimezone: true }),
+  /**
+   * PUB-03/COMP-06: this slot is the side's designated wicketkeeper. At most
+   * one per active side (partial unique); legacy pre-migration rows read
+   * false - no keeper is invented for history.
+   */
+  wicketkeeper: boolean("wicketkeeper").default(false).notNull(),
 }, table => [
   foreignKey({ name: "match_playing_xis_match_tenant_fk", columns: [table.matchId, table.tenantId],
     foreignColumns: [matches.id, matches.tenantId] }).onDelete("cascade"),

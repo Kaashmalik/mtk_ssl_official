@@ -6169,6 +6169,52 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 124 - Authoritative wicketkeeper designation + production schema catch-up
+
+The PUB-03 register's own refusal ("a wicketkeeping board is NOT invented:
+no authoritative keeper marker exists… declaring the keeper with the XI
+remains future work") is now resolved at the point the register named: the
+declared playing XI (Batch 80) is the authority for "who fields where", so
+the keeper designation lives there.
+
+- REMOTE SCHEMA CATCH-UP (discovered by staged acceptance): production was
+  FIVE migrations behind — 20261017090000 (playing XI), 20261017093925
+  (scoring revisions), 20261017140000 (tournament awards — which made the
+  B121 awards pass vacuously green: zero published tournaments meant the
+  reader never executed), 20261018090000 (scorer handover epoch), applied
+  in dependency order with original stamps + history rows (BOM gotcha
+  recorded: 20261018090000 carried a UTF-8 BOM that must be stripped
+  before `sql.unsafe`). NOTHING is applied for B's
+  20261017130000_league_applications (REG group owns it).
+- New migration `20261018150000_wicketkeeper_designation.sql` applied
+  remotely: `match_playing_xis.wicketkeeper boolean NOT NULL DEFAULT
+  false` + partial unique `(match_id, team_id) WHERE wicketkeeper AND
+  superseded_at IS NULL` = at most ONE designated keeper per active side,
+  enforced by the DB. Legacy rows read false - no keeper is invented for
+  history, exactly as the register demanded.
+- Policy: `validateDeclaredXi` fails closed on two keepers;
+  `entryIsWicketkeeper` reads a non-flag as non-keeper.
+- Writers: `setPlayingXis` stores the flag; `substituteInPlayingXi` hands
+  the designation to the incoming player with the slot (supersede-then-
+  insert keeps the unique satisfied) and audits `keeperHandover`; the
+  action tier's strict zod schema accepts the optional flag.
+- UI: the XI card declares a per-side, optional keeper select over the
+  filled slots, badges the declared keeper (WK), and discloses honestly
+  when "no wicketkeeper designated (earlier declarations predate the
+  record)".
+- Boundary: the canonical delivery boundary keeps reading XI membership
+  only - keeper status never gates scoring writes. Wicketkeeping board =
+  Batch 125 (attribution only for matches WITH a designated keeper).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| Remote apply script (5 migrations, dependency order) | applied + history rows; keeper unique present; XI RLS forced; 0 public grants |
+| `npx vitest run` playing-xi-schema + policy (database) | 16 PASS (keeper contracts incl. no-backfill + forced RLS) |
+| web playing-xis + card suites | 16 + 9 PASS (flag stored on exactly one slot; keeper handover audited; attach/init derivations) |
+| `tsc --noEmit` x4 + `git diff --check` + full battery | PASS (totals in the SAAS register) |
+
 ## Batch 121 - PUB-05/PUB-06 live staged-acceptance evidence (read-only)
 
 With the access token verified, the acceptance family now proves the PUB

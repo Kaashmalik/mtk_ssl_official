@@ -21,6 +21,8 @@ export const PLAYING_XI_SIZE = 11
 export interface XiDeclarationEntry {
   playerId: string
   battingOrder: number
+  /** PUB-03/COMP-06: designate this slot as the side's wicketkeeper. */
+  wicketkeeper?: boolean
 }
 
 /** Validates one side's declared XI shape: exactly 11 distinct players, orders 1..11. */
@@ -30,6 +32,7 @@ export function validateDeclaredXi(entries: XiDeclarationEntry[], teamId: string
   }
   const playerIds = new Set<string>()
   const orders = new Set<number>()
+  let keepers = 0
   for (const entry of entries) {
     if (!entry || typeof entry.playerId !== "string" || entry.playerId.length === 0) {
       throw new Error(`Team ${teamId} declared an invalid player entry`)
@@ -40,9 +43,18 @@ export function validateDeclaredXi(entries: XiDeclarationEntry[], teamId: string
       throw new Error(`Team ${teamId} batting orders must be 1..${PLAYING_XI_SIZE}`)
     }
     if (orders.has(entry.battingOrder)) throw new Error(`Team ${teamId} declared a batting order twice`)
+    if (entry.wicketkeeper === true) keepers++
     playerIds.add(entry.playerId)
     orders.add(entry.battingOrder)
   }
+  if (keepers > 1) {
+    throw new Error(`Team ${teamId} cannot designate more than one wicketkeeper`)
+  }
+}
+
+/** A designated keeper is one honest fact on one XI slot; the DB unique enforces it. */
+export function entryIsWicketkeeper(entry: Pick<XiDeclarationEntry, "wicketkeeper">): boolean {
+  return entry.wicketkeeper === true
 }
 
 export type XiEnforcement = "off" | "pendingApproval" | "enforced"

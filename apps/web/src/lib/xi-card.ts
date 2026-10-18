@@ -9,6 +9,8 @@ import { xiIsApproved } from "@mtk/database/lib/playing-xi-policy"
 export interface XiEntry {
   playerId: string
   battingOrder: number
+  /** PUB-03/COMP-06: the designated wicketkeeper slot. */
+  wicketkeeper?: boolean
 }
 
 export interface ActiveXiPlayer extends XiEntry {
@@ -67,6 +69,36 @@ export function xiInitialSlots(active?: ActiveXiPlayer[]): (string | null)[] {
   const sorted = [...(active ?? [])].sort((a, b) => a.battingOrder - b.battingOrder)
   if (sorted.length === 11) return sorted.map(player => player.playerId)
   return Array.from({ length: 11 }, () => null)
+}
+
+export interface KeeperAttached {
+  entries: XiEntry[]
+  error: string | null
+}
+
+/**
+ * PUB-03/COMP-06: attaches the keeper designation to exactly one declared
+ * slot. A chosen keeper who is not in the declared XI fails closed; no
+ * keeper chosen keeps every flag false (legitimate - the designation is
+ * optional, the DB partial unique caps it at one).
+ */
+export function xiAttachKeeper(
+  entries: XiEntry[],
+  keeperPlayerId: string | null,
+): KeeperAttached {
+  if (!keeperPlayerId) return { entries, error: null }
+  if (!entries.some(entry => entry.playerId === keeperPlayerId)) {
+    return { entries: [], error: "The designated wicketkeeper must be in the declared XI" }
+  }
+  return {
+    entries: entries.map(entry => ({ ...entry, wicketkeeper: entry.playerId === keeperPlayerId })),
+    error: null,
+  }
+}
+
+/** The keeper designation to prefill from the currently declared side. */
+export function xiInitialKeeper(active?: ActiveXiPlayer[]): string | null {
+  return active?.find(player => player.wicketkeeper === true)?.playerId ?? null
 }
 
 /** Substitutions are official in-match acts on armed competition XIs. */
