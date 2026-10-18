@@ -28,6 +28,12 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  // COMP-03 (Batch 136): one idempotency key per intended creation. A
+  // retried submit (network failure, timeout) reuses it, so the server
+  // replays the first tournament instead of duplicating it. The key rides
+  // inside the durable draft, so even refresh-close-reopen keeps the same
+  // intent; a restored draft's key wins over the freshly minted one.
+  const [requestKey, setRequestKey] = useState(() => globalThis.crypto?.randomUUID?.() ?? `tk-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -46,6 +52,7 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
   useEffect(() => {
     if (restoredDraft) {
       setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      if (typeof restoredDraft.requestKey === "string" && restoredDraft.requestKey) setRequestKey(restoredDraft.requestKey)
       setDraftRestored(true)
     }
   }, [restoredDraft])
@@ -53,7 +60,7 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
   const updateField = (key: string, value: string) => {
     const next = { ...formData, [key]: value }
     setFormData(next)
-    saveDraft(next)
+    saveDraft({ ...next, requestKey })
   }
 
   const handleDiscardDraft = () => {
@@ -76,6 +83,7 @@ export function NewTournamentForm(_props: NewTournamentFormProps) {
           endDate: formData.endDate || null,
           registrationDeadline: formData.registrationDeadline || null,
           maxTeams: formData.maxTeams ? Number(formData.maxTeams) : null,
+          requestKey,
         })
         clearDraft()
         router.push("/dashboard/tournaments")

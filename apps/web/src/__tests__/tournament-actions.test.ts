@@ -313,6 +313,56 @@ describe("Tournament action tenant and author boundaries", () => {
     await expect(getTournamentCopyOptions()).rejects.toThrow("Forbidden")
     expect(mocks.list).not.toHaveBeenCalled()
   })
+
+  // COMP-03 (Batch 136): creation recovery. A retried create carrying the
+  // same client request key replays the first tournament instead of
+  // duplicating it - pre-checked under the lock, the DB partial unique
+  // covers the lost race, and a replay is a pure read (no second audit).
+  it("threads a valid request key into the creation insert", async () => {
+    const key = "c0ffee00-0000-4000-8000-000000000137"
+    mocks.txTournament.mockResolvedValueOnce(null).mockResolvedValueOnce(null) // replay pre-check, slug clash
+    await createTournament({ ...input, requestKey: key })
+    expect(mocks.txValues.mock.calls[0][0]).toMatchObject({ creationRequestKey: key })
+  })
+
+  it("a repeated request key replays the first tournament without inserting or auditing", async () => {
+    const key = "c0ffee00-0000-4000-8000-000000000137"
+    mocks.txTournament.mockResolvedValueOnce({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, slug: "premium-league" })
+    const result = await createTournament({ ...input, requestKey: key })
+    expect(result).toEqual({ success: true, tournament: { id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, slug: "premium-league" } })
+    expect(mocks.txInsert).not.toHaveBeenCalled() // no insert, no audit - pure read
+  })
+
+  it("a lost creation race on the request key returns the concurrent winner, not a slug error", async () => {
+    const key = "c0ffee00-0000-4000-8000-000000000138"
+    mocks.txTournament
+      .mockResolvedValueOnce(null).mockResolvedValueOnce(null) // replay pre-check, slug clash
+      .mockResolvedValueOnce({ id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, slug: "premium-league" }) // winner re-read
+    // The DB rejects the insert with 23505 naming the creation-key index -
+    // exactly what a concurrent identical create winning the race produces.
+    const raceError = Object.assign(new Error(
+      'duplicate key value violates unique constraint "tournaments_tenant_creation_key_uq"'), { code: "23505" })
+    mocks.txInsert.mockReturnValue({
+      values: () => ({ returning: () => Promise.reject(raceError) }),
+    } as never)
+    const result = await createTournament({ ...input, requestKey: key })
+    expect(result).toEqual({ success: true, tournament: { id: TOURNAMENT_ID, tenantId: ACTIVE_TENANT, slug: "premium-league" } })
+  })
+
+  it("a slug-fight unique violation still refuses with the duplicate-slug error", async () => {
+    mocks.txTournament.mockResolvedValueOnce(null).mockResolvedValueOnce(null)
+    mocks.txInsert.mockReturnValue({
+      values: () => ({ returning: () => Promise.reject(Object.assign(new Error(
+        'duplicate key value violates unique constraint "tournaments_slug_unique"'), { code: "23505" })) }),
+    } as never)
+    await expect(createTournament({ ...input, requestKey: "c0ffee00-0000-4000-8000-000000000139" }))
+      .rejects.toThrow("already exists")
+  })
+
+  it("a malformed request key refuses before any transaction", async () => {
+    await expect(createTournament({ ...input, requestKey: "not-a-uuid" })).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
 })
 
 describe("Tournament archival replaces destructive delete", () => {

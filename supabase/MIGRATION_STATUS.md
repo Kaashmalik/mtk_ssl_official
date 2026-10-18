@@ -3,6 +3,13 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 136) - `creation_request_keys` applied remotely**
+> (same proven path: original file, original stamp `20261018200000`,
+> applied with the comment-strip-BEFORE-chunking splitter, column and
+> partial-unique index verified in the same session). tournaments.
+> creation_request_key + per-tenant partial unique for COMP-03 idempotent
+> creation recovery; additive, no data/grant changes.
+
 > **18 October 2026 (Batch 135) - `brand_studio` applied remotely**
 > (same proven path: original file, original stamp `20261018190000`,
 > applied with the comment-strip-BEFORE-chunking splitter, columns and

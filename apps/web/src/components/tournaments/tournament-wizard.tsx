@@ -48,6 +48,11 @@ export function TournamentWizard() {
   const [createdTournamentId, setCreatedTournamentId] = useState<string | null>(null)
   const [savedFormData, setSavedFormData] = useState<TournamentFormData | null>(null)
   const submitting = useRef(false)
+  // COMP-03 (Batch 136): one idempotency key per intended creation - a
+  // retried submit after a network failure replays the first tournament
+  // instead of duplicating it. Boundary (recorded): the wizard has no
+  // durable draft, so the key is session-stable, not refresh-stable.
+  const requestKey = useRef<string>(globalThis.crypto?.randomUUID?.() ?? `tk-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const { language, toggleLanguage, t } = useLanguage()
 
   const form = useForm<TournamentFormData>({
@@ -100,7 +105,7 @@ export function TournamentWizard() {
       if (isValid) {
         const data = tournamentWizardSchema.parse(form.getValues())
         setIsPending(true)
-        const result = await createTournament(tournamentWizardToInput(data))
+        const result = await createTournament({ ...tournamentWizardToInput(data), requestKey: requestKey.current })
         setCreatedTournamentId(result.tournament.id)
         setSavedFormData(data)
         toast.success("Tournament created successfully!")

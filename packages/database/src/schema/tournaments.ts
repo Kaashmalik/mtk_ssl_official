@@ -48,6 +48,10 @@ export const tournaments = pgTable("tournaments", {
   // read champion-less rather than guess which fixture was the final. The
   // teams FK is migration-owned (see the note at the top of this file).
   championTeamId: uuid("champion_team_id"),
+  // COMP-03 (Batch 136): client-supplied idempotency key for creation
+  // recovery (partial unique per tenant in the DB; the writer replays the
+  // first tournament for a repeated key instead of duplicating).
+  creationRequestKey: uuid("creation_request_key"),
   // COMP-07 competition lock: engagement is EXPLICIT ONLY (audited
   // setCompetitionLock by a league owner) — status transitions never set
   // or clear these. See packages/database/src/lib/competition-locks.ts

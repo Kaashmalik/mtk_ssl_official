@@ -6171,6 +6171,45 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 136 - COMP-03 slice: idempotent tournament creation recovery (migration applied remotely)
+
+- DELIVERED: tournament creation is now recoverable - a retried submit
+  carrying the SAME client request key replays the first tournament
+  instead of silently duplicating it. This closes COMP-03's genuine
+  server-side gap (the durable client drafts B101/106/112 already existed;
+  "authenticated reload/copy" exists as copy-from-previous).
+- Migration `20261018200000_creation_request_keys` APPLIED remotely and
+  verified: tournaments.creation_request_key uuid + PARTIAL unique index
+  (tenant_id, creation_request_key) WHERE NOT NULL + honest COMMENTs.
+- Writer (createTournamentRecord): 4th optional arg - uuid-validated,
+  replay pre-check under the owner lock BEFORE the slug clash check
+  (a replay is a pure read: no insert, no second audit), lost-race
+  recovery when the DB 23505 names the creation-key index (the concurrent
+  identical create won; its tournament is the honest answer), and the
+  slug-fight 23505 still refuses with the unchanged DUPLICATE_SLUG error.
+  Key absent = behavior byte-identical to before.
+- Action (createTournament): requestKey accepted, strict zod (a malformed
+  key refuses before any transaction rather than silently losing the
+  recovery guarantee); passed through as the writer's 4th arg.
+- Client: NewTournamentForm (dashboard, durable draft) mints ONE key per
+  creation intent - a restored draft's key wins over the freshly minted
+  one and the key is SAVED INTO THE DRAFT, so refresh-close-reopen keeps
+  the same intent (true COMP-03 recovery); on success the draft clears.
+  TournamentWizard (public) uses a session-stable key - recorded boundary:
+  the wizard has no durable draft, so the key is session-stable, not
+  refresh-stable (a refresh mid-submit there loses the draft anyway).
+- DIST GOTCHA (recorded): @mtk/database resolves to packages/database/dist
+  - schema edits need `npx tsc` rebuild before runtime/tests see new
+  columns; B134's 'captain' enum had ALSO not reached dist until this
+  rebuild (its tests passed only because fakes never touched real drizzle
+  column objects). Rebuild now part of the batch cadence after schema
+  edits.
+- Tests: tournament-actions.test.ts +5 (63 total) - key threaded into
+  insert values, replay without insert/audit, lost-race returns the
+  concurrent winner, slug-fight still refuses, malformed key refuses
+  pre-transaction. tsc web+db 0.
+
+
 ## Batch 135 - PREM-02 slice: Brand Studio draft/publish/rollback (migration applied remotely)
 
 - DELIVERED: branding is no longer a live-write surface - edits save as a

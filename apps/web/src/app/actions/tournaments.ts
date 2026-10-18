@@ -28,6 +28,11 @@ const createTournamentSchema = z.object({
   registrationFee: moneySchema.optional(),
   prizeAmount: moneySchema.optional(),
   configuration: tournamentConfigurationSchema.optional(),
+  // COMP-03 (Batch 136): creation-recovery idempotency key from the
+  // client wizard's durable draft. Strict schema: unknown junk still
+  // refuses, and a malformed key refuses rather than silently losing the
+  // recovery guarantee.
+  requestKey: z.string().uuid().optional().nullable(),
 }).strict()
 
 // Configuration is persisted at creation. Ordinary edits must not replace rules.
@@ -95,11 +100,12 @@ export async function createTournament(input: CreateTournamentInput) {
   const slug = validated.slug || generateSlug(validated.name)
 
   // Clerk's string ID is not the UUID referenced by tournaments.created_by; the
-  // writer resolves the active account under its lock.
+  // writer resolves the active account under its lock. The recovery key rides
+  // along so a retried submit (same durable draft) replays, never duplicates.
   const tournament = await createTournamentRecord(userId, tenantId, {
     ...persistenceValues(validated),
     slug,
-  })
+  }, validated.requestKey ?? null)
 
   revalidatePath("/dashboard/tournaments")
   revalidatePath("/dashboard")

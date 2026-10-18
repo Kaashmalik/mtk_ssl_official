@@ -14,6 +14,16 @@ export function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "23505"
 }
 
+/**
+ * True when the 23505 came from the creation-request-key index (the DB
+ * names the constraint in the error message) rather than the slug unique.
+ * A lost race on the key is a recovery, not a duplicate-slug refusal.
+ */
+export function isCreationKeyViolation(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  return message.includes("tournaments_tenant_creation_key_uq")
+}
+
 const DUPLICATE_SLUG = "A tournament with that web address already exists in this league"
 
 /**
@@ -26,9 +36,25 @@ export async function createTournamentRecord(
   clerkId: string,
   tenantId: string,
   values: Omit<NewTournament, "id" | "tenantId" | "createdBy" | "createdAt" | "updatedAt">,
+  /**
+   * COMP-03 (Batch 136): client-supplied idempotency key for creation
+   * recovery. A retried create carrying the SAME key (the wizard persists
+   * it inside its durable draft) replays the first tournament instead of
+   * duplicating it - pre-checked under the owner lock, and the DB partial
+   * unique covers the lost race where a concurrent identical create wins.
+   */
+  creationRequestKey: string | null = null,
 ): Promise<Tournament> {
+  if (creationRequestKey !== null) z.string().uuid().parse(creationRequestKey)
   return db.transaction(async (tx) => {
     const context = await lockOwnerContext(tx, clerkId, tenantId)
+
+    if (creationRequestKey) {
+      const replayed = await tx.query.tournaments.findFirst({ where: and(
+        eq(tournaments.tenantId, tenantId), eq(tournaments.creationRequestKey, creationRequestKey)) })
+      // Replay is a pure read: no duplicate audit, no slug fight.
+      if (replayed) return replayed as Tournament
+    }
 
     const clash = await tx.query.tournaments.findFirst({ where: and(
       eq(tournaments.tenantId, tenantId), eq(tournaments.slug, values.slug)) })
@@ -36,14 +62,25 @@ export async function createTournamentRecord(
 
     try {
       const [created] = await tx.insert(tournaments)
-        .values({ ...values, tenantId, createdBy: context.actor.id }).returning()
+        .values({ ...values, tenantId, createdBy: context.actor.id, ...(creationRequestKey ? { creationRequestKey } : {}) })
+        .returning()
       if (!created) throw new Error("Tournament could not be created. Please try again.")
       await tx.insert(auditLogs).values({ requestId: randomUUID(), tenantId, actorId: context.actor.id,
         actorRole: context.member.role, method: "TOURNAMENT_CREATE", path: "/dashboard/tournaments",
         statusCode: "200", payload: { resourceId: created.id, changedFields: Object.keys(values) } })
       return created as Tournament
     } catch (error) {
-      if (isUniqueViolation(error)) throw new Error(DUPLICATE_SLUG)
+      if (isUniqueViolation(error)) {
+        // A lost creation race on the request key is a successful recovery:
+        // the concurrent create with the same key won, so its tournament is
+        // the honest answer. Only a foreign key index means a slug fight.
+        if (creationRequestKey && isCreationKeyViolation(error)) {
+          const winner = await tx.query.tournaments.findFirst({ where: and(
+            eq(tournaments.tenantId, tenantId), eq(tournaments.creationRequestKey, creationRequestKey)) })
+          if (winner) return winner as Tournament
+        }
+        throw new Error(DUPLICATE_SLUG)
+      }
       throw error
     }
   }, { isolationLevel: "read committed" })
