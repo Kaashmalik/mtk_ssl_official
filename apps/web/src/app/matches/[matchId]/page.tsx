@@ -418,8 +418,8 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b text-muted-foreground text-xs">
-                          <th className="py-2 text-left font-medium">Batter</th>
-                          <th className="py-2 text-left font-medium">Dismissal</th>
+                          <th className="py-2 text-start font-medium">Batter</th>
+                          <th className="py-2 text-start font-medium">Dismissal</th>
                           <th className="py-2 text-center font-medium">R</th>
                           <th className="py-2 text-center font-medium">B</th>
                           <th className="py-2 text-center font-medium">4s</th>
@@ -467,7 +467,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b text-muted-foreground text-xs">
-                          <th className="py-2 text-left font-medium">Bowler</th>
+                          <th className="py-2 text-start font-medium">Bowler</th>
                           <th className="py-2 text-center font-medium">O</th>
                           <th className="py-2 text-center font-medium">M</th>
                           <th className="py-2 text-center font-medium">R</th>

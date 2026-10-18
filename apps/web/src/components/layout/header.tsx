@@ -187,19 +187,19 @@ export function Header({ userRole }: { userRole?: UserRole }) {
                 key={item.href}
                 onSelect={() => runCommand(() => router.push(item.href))}
               >
-                <item.icon className="mr-2 h-4 w-4" />
+                <item.icon className="me-2 h-4 w-4" />
                 <span>{item.name}</span>
               </CommandItem>
             ))}
           </CommandGroup>
           <CommandGroup heading="Actions">
             <CommandItem onSelect={() => runCommand(() => router.push("/dashboard/teams/new"))}>
-              <Users className="mr-2 h-4 w-4" />
+              <Users className="me-2 h-4 w-4" />
               <span>Create Team</span>
               <CommandShortcut>⌘T</CommandShortcut>
             </CommandItem>
             <CommandItem onSelect={() => runCommand(() => router.push("/dashboard/matches/new"))}>
-              <Users className="mr-2 h-4 w-4" />
+              <Users className="me-2 h-4 w-4" />
               <span>Schedule Match</span>
               <CommandShortcut>⌘M</CommandShortcut>
             </CommandItem>

@@ -6171,6 +6171,29 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 145 - UX-03 slice: RTL mirror discipline on the localized surfaces (the last Phase-1 build target)
+
+- DELIVERED: UX-03's "full mirror polish" scoped HONESTLY. A full census
+  found 193 directional utilities across the app, but only the surfaces a
+  localized (Arabic, dir=rtl) user actually renders today were in scope:
+  1. FLIPPED: the public match page's scorecard table headers
+     (text-left -> text-start, x3) and the dashboard header's icon
+     spacers (mr-2 -> me-2, x3 command-palette items).
+  2. ALREADY CLEAN (verified): the B138/B139/B141-localized cards
+     (AvailabilityCard, CorrectionRequestCard) contain ZERO directional
+     utilities - they were built logical-first.
+  3. PINNED: a new public-page-hygiene test asserts the localized RTL
+     surfaces (public match page + header) stay free of ml/mr/pl/pr-<n>,
+     text-left/right, and single-letter border-l/r/rounded-l/r - word-
+     boundary guarded so border-live and rounded-lg can never trip it.
+  The remaining ~190 hits across UN-localized pages are RECORDED OPEN
+  SCOPE in the registers - a blind 190-file replace is exactly the kind
+  of unreviewed mechanical churn the plan avoids; those pages render for
+  users who chose English today, and each becomes a small deliberate
+  flip when its localization lands (the i18n deep-parity suite already
+  blocks any surface from rendering Arabic without its translations).
+- VERIFIED: hygiene + dashboard-layout suites 31 passing, web tsc 0.
+
 ## Batch 144 - UX-03 slice: localized transactional emails (templates in the pure package; provider unchanged)
 
 - DELIVERED: the UX-03 clause left open since B140 ("localized emails").

@@ -114,4 +114,22 @@ describe("PUB-06 (Batch 133): official-record public surfaces gate minor NAMES",
     const policy = read("../../../packages/database/src/lib/match-recap.ts")
     expect(policy).toContain("derivedNotice:")
   })
+
+  // UX-03 (Batch 145): RTL mirror discipline on the LOCALIZED surfaces.
+  // The public match page and the dashboard header render in Arabic
+  // (dir=rtl since Batch 139). Directional utilities (mr-2, text-left,
+  // border-l...) do NOT mirror under RTL, so those files must use logical
+  // utilities only (me-2, text-start...). The wider 190+-hit census across
+  // un-localized pages is RECORDED OPEN SCOPE - this pin deliberately
+  // covers only the surfaces a localized user actually renders.
+  it("the localized RTL surfaces use logical utilities only", () => {
+    for (const file of ["app/matches/[matchId]/page.tsx", "components/layout/header.tsx"]) {
+      const source = read(file)
+      // Word-boundary guard: border-l matches, but border-live, rounded-lg
+      // etc. cannot (the single letter must end at a word boundary).
+      expect(source).not.toMatch(/\b(ml|mr|pl|pr)-\d/)
+      expect(source).not.toMatch(/\btext-(left|right)\b/)
+      expect(source).not.toMatch(/\b(border|rounded)-[lr]\b/)
+    }
+  })
 })
