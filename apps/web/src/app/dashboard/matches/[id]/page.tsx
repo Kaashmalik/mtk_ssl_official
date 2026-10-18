@@ -16,6 +16,7 @@ import { UmpireAssign } from "@/components/matches/umpire-assign"
 import { UmpireApprovalButton } from "@/components/matches/umpire-approval-button"
 import { PlayingXiCard } from "@/components/matches/playing-xi-card"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
+import { MatchControlCard } from "@/components/matches/match-control-card"
 import { ReactionModerationCard } from "@/components/matches/reaction-moderation-card"
 import { readMatchReactionsForModeration } from "@/lib/fan-reaction-moderation"
 import { readOpenReactionReports } from "@/lib/fan-report-records"
@@ -502,6 +503,15 @@ let viewerIsLeagueOwner = false
       {viewerIsLeagueOwner && (
         <MotionWrapper variant="fadeInUp" delay={0.18}>
           <ReactionModerationCard matchId={id} initialReactions={moderatableReactions} initialReports={openReactionReports} initialBlocks={activeFanBlocks} />
+        </MotionWrapper>
+      )}
+
+      {/* COMP-07 (Batch 153): owner-only competition controls - forfeit,
+          postpone, reschedule. The writer is the gate; the card only sizes
+          the buttons from the row it was rendered with. */}
+      {viewerIsLeagueOwner && (
+        <MotionWrapper variant="fadeInUp" delay={0.19}>
+          <MatchControlCard matchId={id} matchStatus={match.status ?? null} />
         </MotionWrapper>
       )}
 

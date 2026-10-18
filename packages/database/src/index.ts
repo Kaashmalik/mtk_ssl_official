@@ -98,5 +98,7 @@ export * from "./lib/email-templates";
 export * from "./lib/tournament-application-policy";
 export * from "./lib/registration-eligibility-policy";
 export * from "./lib/squad-rules-policy";
+export * from "./lib/outbox-policy";
+export * from "./lib/competition-control-policy";
 
 

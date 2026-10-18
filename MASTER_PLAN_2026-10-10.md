@@ -6173,6 +6173,88 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 153 - COMP-07 slice: forfeit, postponement, rescheduling (migration applied remotely)
+
+- DELIVERED: competition controls end-to-end, the owner's last missing
+  fixture levers, in the B147 pattern (migration + policy + writer +
+  actions + owner-only card + wiring pins).
+  - MIGRATION `20261019010000_match_forfeit_postponed` APPLIED remotely
+    + verified same-session (6 statements; `match_status` gains
+    `forfeited` and `postponed`; nullable `forfeit_reason` and
+    `postponement_reason` on matches; additive, RLS unchanged). Schema
+    TS + app `MatchStatus`/`LiveMatchState` unions widened to match.
+  - POLICY (competition-control-policy.ts, 5 tests): forfeit and
+    postpone are legal ONLY from open states (scheduled/toss/live/
+    innings_break); terminal results (completed/abandoned/cancelled/
+    no_result) can NEVER be rewritten into a forfeit - corrections use
+    the audited correction path; rescheduling is only possible while a
+    date is meaningful (scheduled/postponed).
+  - WRITER (competition-control.ts, 10 journey tests): owner-only
+    authority under lock, required named reason (empty refused before
+    any write), honest audit rows with `from` status provenance,
+    idempotent replay = pure read (no second write, no audit),
+    reschedule of a postponed match returns it to `scheduled` and
+    clears the postponement reason.
+  - SURFACE: zod-strict server actions revalidating /dashboard/matches;
+    MatchControlCard (owner-only, after FAN-01 moderation) on the match
+    detail page; 5 wiring pins; the card sizes buttons from the row it
+    was rendered with and the writer is the gate.
+- VERIFIED: policy 5 + journey 10 + wiring 5 = 20 new tests; db build +
+  web/scoring tsc 0; scoring-service exhaustive `_Drift extends never`
+  status-drift guard still compiles over the widened union.
+
+## Batch 152 - SCORE-12 slice: dispatcher alignment to the shared outbox policy (dead-letter, no migration)
+
+- DELIVERED: closes the SCORE-12 honesty gap left open by B151. The
+  scoring-service dispatcher (scoring-outbox-dispatcher.service.ts) had
+  its OWN inline backoff (LEAST(300, POWER(2, LEAST(attempts, 9))) and
+  NO terminal dead-letter state - it would retry forever with a capped
+  backoff. It now shares the policy's contract:
+  - Backoff schedule aligned to outbox-policy (5s / 30s / 2m / 10m /
+    30m / 1h, computed from the NEW attempt count via a CASE expression,
+    matching backoffMs(attempts) in packages/database).
+  - Dead-letter at 8 attempts: candidate rows with attempts >= 8 are
+    excluded from the dispatch query (candidate.attempts < 8), so a
+    dead-lettered row is never retried and never deleted; its last_error
+    survives for operator inspection. This matches isDeadLettered in the
+    policy.
+  - Kafka idempotency header (idempotency-key = eventId) was already
+    sent by the publisher; consumers dedupe on it (unchanged).
+- VERIFIED: dispatcher spec 13/13 (331 total) with the backoff + dead-
+  letter exclusion assertions updated to the new contract; tsc 0.
+
+## Batch 151 - SCORE-12 slice: transactional outbox policy and producer helper (no migration - schema already existed)
+
+- DELIVERED: the SCORE-12 policy + producer half (the schema,
+  scoring_outbox, existed since the hardening pass; no code used it).
+  - POLICY (outbox-policy.ts, 7 tests): idempotency key is the canonical
+    topic:eventId pair (parse + round-trip, malformed refusal); retry uses
+    bounded exponential backoff with a hard 8-attempt cap; past the cap the
+    row is DEAD-LETTERED (never silently retried forever); deliverability
+    is decided by STATE (not-delivered AND nextAttemptAt <= now AND not
+    dead-lettered), never by wall-clock hope; markDelivered clears the
+    error and stamps the time but preserves attempt history; markFailed
+    never erases the last error and never erases attempt count; state
+    descriptions report delivered/dead-lettered/pending honestly.
+  - PRODUCER (apps/web/src/lib/scoring-outbox.ts, tsc-clean):
+    enqueueScoringEvent(tx, input) inserts in the caller's transaction
+    (so a crash between "score saved" and "fan-out" never loses the
+    event) and returns the canonical idempotency key; zod-bounded input.
+    processOutboxBatch: an idempotent consumer skeleton - delivered rows
+    skipped, dead-lettered rows skipped, deliverable rows handed to the
+    handler and marked delivered on success or marked failed with backoff
+    on error, returning honest counts (delivered/retried/deadLettered/
+    skipped).
+  - HONESTY: the scoring-service dispatcher (scoring-outbox-dispatcher.
+    service.ts) already exists with retry/backoff and Kafka idempotency
+    headers, but it uses its OWN inline backoff (LEAST(300, POWER(2,...)))
+    and has NO terminal dead-letter state. Aligning it to the shared
+    policy's 8-attempt cap + dead-letter is recorded as the NEXT slice
+    (B152), not pretended here. The producer helper is not yet wired into
+    every scoring write path; that incremental wiring is recorded as
+    follow-up (B153), not faked.
+- VERIFIED: policy 7 tests; db build + web tsc 0; glue scan clean.
+
 ## Batch 150 - COMP-05 slice: group-aware standings (migration applied remotely)
 
 - DELIVERED: the COMP-05 group sub-clause. Rule version bumped 1 -> 2.

@@ -3,6 +3,20 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 153) - `match_status` widening + reason columns applied remotely**
+> (same proven path: original file, original stamp `20261019010000`,
+> applied with the comment-strip-BEFORE-chunking splitter + 6-statement
+> shape assertion, enum labels and columns verified in the same session).
+> COMP-07: `match_status` gains `forfeited` and `postponed`;
+> `matches` gains nullable `forfeit_reason` and `postponement_reason`.
+> Additive; no data/grant changes; RLS unchanged.
+
+> **19 October 2026 (Batch 150) - `match_group_label` applied remotely**
+> (same proven path: original file, original stamp `20261019000000`,
+> shape-asserted and verified in the same session). COMP-05: nullable
+> `matches.group_label` + partial index for group-aware standings.
+> Additive; no data/grant changes; RLS unchanged.
+
 > **18 October 2026 (Batch 147) - `tournament_applications` applied remotely**
 > (same proven path: original file, original stamp `20261018230000`,
 > applied with the comment-strip-BEFORE-chunking splitter + 12-statement

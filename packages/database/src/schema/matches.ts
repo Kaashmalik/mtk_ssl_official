@@ -37,6 +37,8 @@ export const matchStatusEnum = pgEnum("match_status", [
   "abandoned",
   "cancelled",
   "no_result",
+  "forfeited",
+  "postponed",
 ]);
 
 /**
@@ -79,6 +81,8 @@ export const matches = pgTable("matches", {
   groupLabel: text("group_label"),
   totalOvers: integer("total_overs").default(20),
   status: matchStatusEnum("status").notNull().default("scheduled"),
+  forfeitReason: text("forfeit_reason"),
+  postponementReason: text("postponement_reason"),
 
   // Toss
   tossWinnerId: uuid("toss_winner_id").references(() => teams.id),

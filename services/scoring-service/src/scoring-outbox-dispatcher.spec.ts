@@ -40,6 +40,7 @@ describe('Durable scoring outbox worker (transaction/transport doubles, not real
     expect(query.sql).toContain('predecessor.match_id = candidate.match_id');
     expect(query.sql).toContain('predecessor.delivered_at IS NULL AND predecessor.id < candidate.id');
     expect(query.sql).toContain('candidate.next_attempt_at <= now()');
+expect(query.sql).toContain('candidate.attempts < 8');
     expect(query.sql).toContain('ORDER BY candidate.id LIMIT 1');
     expect(query.sql).not.toContain('public.matches');
     expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'read committed' });
@@ -68,7 +69,7 @@ describe('Durable scoring outbox worker (transaction/transport doubles, not real
     await expect(worker.dispatchOne()).resolves.toBe(true);
     const update = dialect.sqlToQuery(tx.execute.mock.calls[1][0]);
     expect(update.params).toEqual(['broker_delivery_failed', '42', TENANT, MATCH]);
-    expect(update.sql).toContain('LEAST(300, POWER(2, LEAST(attempts, 9)))');
+    expect(update.sql).toContain("interval '3600 seconds'");
     expect(update.sql).not.toContain('delivered_at = now()');
     expect(JSON.stringify(update)).not.toContain('secret-value');
     expect(update.sql).not.toContain('DELETE');

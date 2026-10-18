@@ -25,7 +25,7 @@ export const liveInningsSchema = z.object({
 export const liveMatchStateSchema = z.object({
   version: z.literal(2),
   matchId: z.string().uuid(),
-  status: z.enum(["scheduled", "toss", "live", "innings_break", "completed", "abandoned", "cancelled", "no_result"]),
+  status: z.enum(["scheduled", "toss", "live", "innings_break", "completed", "abandoned", "cancelled", "no_result", "forfeited", "postponed"]),
   currentInnings: z.number().int().min(1).max(3),
   updatedAt: z.string().datetime(),
   innings1: liveInningsSchema.optional(),

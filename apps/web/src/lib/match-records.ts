@@ -24,6 +24,7 @@ type Match = typeof matches.$inferSelect
 export type MatchStatus =
   | "scheduled" | "toss" | "live" | "innings_break"
   | "completed" | "abandoned" | "cancelled" | "no_result"
+  | "forfeited" | "postponed"
 
 export interface MatchListFilters {
   tournamentId?: string

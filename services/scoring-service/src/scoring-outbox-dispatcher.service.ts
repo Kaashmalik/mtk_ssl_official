@@ -52,6 +52,7 @@ export class ScoringOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
         candidate.event_id AS "eventId", candidate.topic, candidate.payload
         FROM public.scoring_outbox AS candidate
         WHERE candidate.delivered_at IS NULL AND candidate.next_attempt_at <= now()
+AND candidate.attempts < 8
           AND NOT EXISTS (SELECT 1 FROM public.scoring_outbox AS predecessor
             WHERE predecessor.tenant_id = candidate.tenant_id AND predecessor.match_id = candidate.match_id
               AND predecessor.delivered_at IS NULL AND predecessor.id < candidate.id)
@@ -71,7 +72,14 @@ export class ScoringOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
       if (failure) {
         await tx.execute(sql`UPDATE public.scoring_outbox SET
           attempts = LEAST(attempts::bigint + 1, 2147483647)::integer,
-          next_attempt_at = now() + LEAST(300, POWER(2, LEAST(attempts, 9))) * interval '1 second',
+          next_attempt_at = now() + CASE
+WHEN attempts >= 5 THEN interval '3600 seconds'
+WHEN attempts = 4 THEN interval '1800 seconds'
+WHEN attempts = 3 THEN interval '600 seconds'
+WHEN attempts = 2 THEN interval '120 seconds'
+WHEN attempts = 1 THEN interval '30 seconds'
+ELSE interval '5 seconds'
+END,
           last_error = ${failure}
           WHERE id = ${row.id}::bigint AND tenant_id = ${row.tenantId}::uuid AND match_id = ${row.matchId}::uuid AND delivered_at IS NULL`);
         this.logger.warn(`Scoring outbox retry scheduled for row ${row.id} (${failure})`);
