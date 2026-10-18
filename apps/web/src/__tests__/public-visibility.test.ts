@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards } from "@mtk/database"
+import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards, fieldingScorecards, matchPlayingXis, tournamentAwards } from "@mtk/database"
 import { AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT } from "@mtk/database/lib/award-policy"
 import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
 import {
   isTournamentPublished, isMatchPublished, readPublishedTournament, readPublishedMatch,
   readPublishedMatchTeams, matchHasInnings, readPublicBattingLeaderboard,
   readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions,
-  readPublishedTournamentAwards, PUBLIC_LEADERBOARD_LIMIT,
+  readPublishedTournamentAwards, readPublicWicketkeepingLeaderboard, PUBLIC_LEADERBOARD_LIMIT,
 } from "@/lib/public-visibility"
 
 const mocks = vi.hoisted(() => ({ select: vi.fn(), queries: [] as any[], state: {} as any }))
@@ -300,6 +300,48 @@ describe("Public fielding leaderboard (PUB-03 remainder: matches-based qualifica
   it("does not hide a fielding query failure as an empty ranking", async () => {
     mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
     await expect(readPublicFieldingLeaderboard(TENANT)).rejects.toThrow("Database unavailable")
+  })
+})
+
+describe("Public wicketkeeping leaderboard (PUB-03 keeper clause: designated-keeper attribution)", () => {
+  it("attributes dismissals ONLY through the active designated-keeper XI row, inside the publication gate", async () => {
+    for (const [label, input] of [["combined", {}], ["format-qualified", { format: "t20", tournamentId: TOURNAMENT, minimumMatches: 2 }]] as const) {
+      await readPublicWicketkeepingLeaderboard(TENANT, input)
+      const query = mocks.queries.at(-1)!
+      expect(query.table, label).toBe(fieldingScorecards)
+      // First join IS the attribution: the recorded keeper of that match+side.
+      expect(query.joins[0], label).toBe(matchPlayingXis)
+      expect(query.joins.slice(1), label).toEqual([players, users, matches, tournaments])
+      // tenant appears in the XI attribution join + players + matches + tournaments + where.
+      expect(query.params.filter((p: unknown) => p === TENANT), label).toHaveLength(5)
+      // The designation gate is a real join condition: wicketkeeper must be true.
+      expect(query.params.filter((p: unknown) => p === true), label).toHaveLength(1)
+      // Publication gate params: the exact PUBLISHED status values never their negations.
+      expect(query.params.filter((p: unknown) => p === "registration"), label).toHaveLength(1)
+      expect(query.params.filter((p: unknown) => p === "completed"), label).toHaveLength(1)
+      expect(query.params.filter((p: unknown) => p === "draft"), label).toHaveLength(0)
+      if ("format" in input) expect(query.params, label).toContain("t20")
+      if ("tournamentId" in input) expect(query.params, label).toContain(TOURNAMENT)
+      expect(query.having.sql).toContain("count(")
+      expect(query.limit, label).toBe(PUBLIC_LEADERBOARD_LIMIT)
+    }
+  })
+
+  it("keeps verification provenance derivation on the keeper path", async () => {
+    mocks.state.scorecards = [
+      { playerId: "p1", playerName: "Linked Active", total: 7, playerUserId: "u1", linkedUserActive: true },
+      { playerId: "p2", playerName: "Name Only", total: 5, playerUserId: null, linkedUserActive: null },
+    ]
+    expect((await readPublicWicketkeepingLeaderboard(TENANT)).map((r) => [r.playerName, r.playerVerified, r.total]))
+      .toEqual([["Linked Active", true, 7], ["Name Only", false, 5]])
+  })
+
+  it("rejects invalid qualification before issuing a query and never hides a failure", async () => {
+    await expect(readPublicWicketkeepingLeaderboard(TENANT, { minimumMatches: -1 } as never)).rejects.toThrow()
+    expect(mocks.select).not.toHaveBeenCalled()
+
+    mocks.select.mockImplementation(() => { throw new Error("Database unavailable") })
+    await expect(readPublicWicketkeepingLeaderboard(TENANT)).rejects.toThrow("Database unavailable")
   })
 })
 

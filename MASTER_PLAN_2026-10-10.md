@@ -6169,6 +6169,41 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 125 - Public wicketkeeping board (PUB-03 keeper clause complete)
+
+The PUB-03 register's last open clause closes honestly: the board exists,
+and it NEVER attributes a dismissal the record does not support.
+
+- `readPublicWicketkeepingLeaderboard` (public-visibility.ts): a fielding
+  scorecard row counts only when its (match, team, player) is an ACTIVE
+  DESIGNATED keeper - inner join on `match_playing_xis` with
+  `wicketkeeper = true AND superseded_at IS NULL` (at most one per side by
+  the DB partial unique, so the join cannot fan out). Same publication
+  boundary (published tournaments only), matches-based qualification via
+  HAVING, 4-field disclosed projection with the boolean verified
+  provenance, deterministic tie-breaks, top-10 bound.
+- One query serves both paths: player_season_stats carries no keeper
+  marker, so the combined path aggregates the same per-match rows and the
+  format filter switches in the WHERE clause - disclosed in the reader
+  contract.
+- `/leaderboards` gains a fourth board ("Top Wicketkeepers") with the
+  honest copy: matches declared before the designation existed count for
+  nothing - the board never guesses who kept wicket.
+- Fake-db regressions: the attribution join is pinned as joins[0]; the
+  designation must be a real condition (params contain `true`); tenant
+  appears in exactly 5 pinned positions; publication params exact
+  (no draft); provenance derivation and failure-not-hidden on the path.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| web tsc + public-visibility suite (63 tests) | PASS (keeper board contracts) |
+| full battery | totals in the SAAS register |
+
+With this, PUB-03's recorded open items are delivered end to end (keeper
+designation Batch 124 + this board). Tick decision = the user's.
+
 ## Batch 124 - Authoritative wicketkeeper designation + production schema catch-up
 
 The PUB-03 register's own refusal ("a wicketkeeping board is NOT invented:

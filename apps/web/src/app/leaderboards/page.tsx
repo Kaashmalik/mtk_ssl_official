@@ -2,7 +2,7 @@ import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { unstable_noStore as noStore } from "next/cache"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublicBattingLeaderboard, readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions, type PublicTournamentOption } from "@/lib/public-visibility"
+import { readPublicBattingLeaderboard, readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions, readPublicWicketkeepingLeaderboard, type PublicTournamentOption } from "@/lib/public-visibility"
 import { parsePublicLeaderboardSearch, PUBLIC_LEADERBOARD_MAX_MINIMUM, PUBLIC_LEADERBOARD_FORMATS, publicLeaderboardFormatLabel, type PublicLeaderboardSearch } from "@/lib/leaderboard-filters"
 
 export default async function LeaderboardsPage({ searchParams }: { searchParams?: Promise<PublicLeaderboardSearch> }) {
@@ -14,11 +14,12 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
   const tenantId = await requirePublicTenantId()
   const parsed = parsePublicLeaderboardSearch(await searchParams ?? {})
   // Invalid input is visible, not silently reset to a broader unqualified list.
-  const [topRuns, topWickets, topFielders] = parsed.success ? await Promise.all([
+  const [topRuns, topWickets, topFielders, topKeepers] = parsed.success ? await Promise.all([
     readPublicBattingLeaderboard(tenantId, parsed.data),
     readPublicBowlingLeaderboard(tenantId, parsed.data),
     readPublicFieldingLeaderboard(tenantId, parsed.data),
-  ]) : [[], [], []]
+    readPublicWicketkeepingLeaderboard(tenantId, parsed.data),
+  ]) : [[], [], [], []]
 
   // Records-by-competition dimension (PUB-03): published same-league tournaments
   // only, so the selector can never offer an unpublished competition.
@@ -69,8 +70,9 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
         <a href="/leaderboards" className="inline-flex min-h-11 items-center underline">Reset filters</a>
       </form>
       <p className="text-sm text-muted-foreground">Minimums apply to innings batted / balls faced for batting, and innings bowled / balls bowled for bowling. Fielding is qualified on matches played with a recorded fielding scorecard, ranked by dismissals (catches + run-outs + stumpings); minimum balls and innings do not apply to it. Zero means no minimum. Tied values are ordered deterministically by the earliest player record — the display never breaks ties by hidden criteria. User-selected filters do not set league award eligibility.</p>
+      <p className="text-sm text-muted-foreground">Wicketkeeping counts only matches where the player was recorded as that side's DECLARED wicketkeeper in the officially approved playing XI. Matches declared before wicketkeeper designation existed count for nothing here — the board never guesses who kept wicket, so earlier matches are honestly absent rather than attributed.</p>
       {!parsed.success ? <p role="alert" className="text-destructive">Enter whole-number minimums from 0 to 10,000 and a valid match format. Repeated or invalid filter values are not accepted.</p> : <>
-      <p className="text-sm">Qualification{formatLabel ? ` (${formatLabel})` : ""}: at least {parsed.data.minimumInnings} innings and {parsed.data.minimumBalls} balls for batting/bowling, and {parsed.data.minimumMatches} matches for fielding. Top 10 per category.</p>
+      <p className="text-sm">Qualification{formatLabel ? ` (${formatLabel})` : ""}: at least {parsed.data.minimumInnings} innings and {parsed.data.minimumBalls} balls for batting/bowling, and {parsed.data.minimumMatches} matches for fielding and wicketkeeping. Top 10 per category.</p>
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
           <CardHeader><CardTitle>Top Run Scorers{formatLabel ? ` — ${formatLabel}` : ""}</CardTitle></CardHeader>
@@ -132,6 +134,27 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
                 </tr>
               ))}
               {topFielders.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-muted-foreground">No published stats meet these minimums.</td></tr>}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>Top Wicketkeepers{formatLabel ? ` — ${formatLabel}` : ""}</CardTitle></CardHeader>
+        <CardContent>
+          <table className="w-full text-sm">
+            <caption className="sr-only">Wicketkeeper-recorded dismissals from officially declared XIs{formatLabel ? `, ${formatLabel} format only` : ""}</caption>
+            <thead><tr><th scope="col" className="text-left">Rank</th><th scope="col" className="text-left">Player</th><th scope="col" className="text-right">Wicketkeeping</th></tr></thead>
+            <tbody>
+              {topKeepers.map((r, i) => (
+                <tr key={r.playerId} className="border-b last:border-0">
+                  <td className="py-2 w-6 text-muted-foreground">{i + 1}</td>
+                  <td className="py-2 font-medium">{r.playerName}{r.playerVerified && (
+                    <span className="ml-1 text-primary" aria-label="(verified account)" title="Roster entry linked to an active player account">✓</span>
+                  )}</td>
+                  <td className="py-2 text-right font-semibold tabular-nums">{r.total}</td>
+                </tr>
+              ))}
+              {topKeepers.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-muted-foreground">No matches with a declared wicketkeeper meet these minimums yet.</td></tr>}
             </tbody>
           </table>
         </CardContent>

@@ -1,5 +1,5 @@
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, sql, sum } from "drizzle-orm"
-import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards, tournamentAwards, tournamentPrizes } from "@mtk/database"
+import { db, matches, tournaments, teams, matchInnings, players, users, playerSeasonStats, battingScorecards, bowlingScorecards, fieldingScorecards, matchPlayingXis, tournamentAwards, tournamentPrizes } from "@mtk/database"
 import { publicLeaderboardFilters, type PublicLeaderboardFilterInput, type PublicLeaderboardFilters } from "./leaderboard-filters"
 import { isVerifiedPlayerRecord } from "@mtk/database/lib/career-records"
 import { isAwardVisible, AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT, type AwardCategory } from "@mtk/database/lib/award-policy"
@@ -502,8 +502,64 @@ export async function readPublicFieldingLeaderboard(
   return toPublicLeaderboardRows(rows)
 }
 
-/** A single award gallery row with resolvable winner names (or nulls). */
-export type PublicTournamentAward = {
+/**
+ * Public wicketkeeping leaderboard (PUB-03 keeper clause, Batch 125).
+ *
+ * Attribution is HONEST BY CONSTRUCTION: a fielding scorecard row only ever
+ * counts when its (match, team, player) is an ACTIVE DESIGNATED keeper
+ * (`match_playing_xis.wicketkeeper = true AND superseded_at IS NULL`, one per
+ * side by the DB partial unique). Matches declared before the designation
+ * existed, and players who merely acted as keeper without being recorded,
+ * contribute nothing - the page states this rather than fabricating history.
+ * The combined path aggregates the same per-match rows (there is no keeper
+ * marker in player_season_stats to trust), so both paths share one query with
+ * the format filter switching in the WHERE clause. Same publication boundary,
+ * qualification, bound and deterministic tie-break as the other boards.
+ */
+export async function readPublicWicketkeepingLeaderboard(
+  tenantId: string,
+  input: PublicLeaderboardFilterInput = {},
+): Promise<PublicLeaderboardRow[]> {
+  const filters = publicLeaderboardFilters.parse(input)
+  const dismissals = sql<number>`COALESCE(sum(${fieldingScorecards.catches} + ${fieldingScorecards.runOuts} + ${fieldingScorecards.stumpings}), 0)`.mapWith(Number)
+  const rows = await db
+    .select({
+      playerId: fieldingScorecards.playerId,
+      playerName: players.name,
+      total: dismissals,
+      playerUserId: players.userId,
+      linkedUserActive: users.isActive,
+    })
+    .from(fieldingScorecards)
+    // The attribution join: the recorded keeper of THAT match and side. The
+    // DB partial unique guarantees at most one active designation row, so
+    // this cannot fan out.
+    .innerJoin(matchPlayingXis, and(
+      eq(matchPlayingXis.matchId, fieldingScorecards.matchId),
+      eq(matchPlayingXis.teamId, fieldingScorecards.teamId),
+      eq(matchPlayingXis.playerId, fieldingScorecards.playerId),
+      eq(matchPlayingXis.tenantId, tenantId),
+      eq(matchPlayingXis.wicketkeeper, true),
+      isNull(matchPlayingXis.supersededAt),
+    ))
+    .innerJoin(players, and(eq(players.id, fieldingScorecards.playerId), eq(players.tenantId, tenantId)))
+    .leftJoin(users, eq(users.id, players.userId))
+    .innerJoin(matches, and(eq(matches.id, fieldingScorecards.matchId), eq(matches.tenantId, tenantId)))
+    .innerJoin(tournaments, and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, tenantId)))
+    .where(and(
+      eq(fieldingScorecards.tenantId, tenantId),
+      filters.format ? eq(matches.matchFormat, filters.format) : undefined,
+      filters.tournamentId ? eq(matches.tournamentId, filters.tournamentId) : undefined,
+      inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
+    ))
+    .groupBy(fieldingScorecards.playerId, players.name, players.userId, users.isActive)
+    .having(gte(count(fieldingScorecards.id), filters.minimumMatches))
+    .orderBy(desc(dismissals), asc(fieldingScorecards.playerId))
+    .limit(PUBLIC_LEADERBOARD_LIMIT)
+  return toPublicLeaderboardRows(rows)
+}
+
+/** A single award gallery row with resolvable winner names (or nulls). */export type PublicTournamentAward = {
   id: string
   category: string
   categoryLabel: string
