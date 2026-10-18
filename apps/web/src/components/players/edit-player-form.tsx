@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -13,6 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2 } from "lucide-react"
 import { updatePlayer } from "@/app/actions/players"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 import type { EditableRosterPlayer } from "@/lib/roster-reads"
 
 interface EditPlayerFormProps {
@@ -24,7 +26,11 @@ export function EditPlayerForm({ player, teams }: EditPlayerFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
+
+  // UX-03: per-RECORD draft (keyed by player id) over values seeded from
+  // server truth - a restored draft only overlays the member's edits and
+  // server truth always wins on submit.
+  const recordDraft = {
     name: player.name ?? "",
     email: player.email ?? "",
     phone: player.phone ?? "",
@@ -40,10 +46,29 @@ export function EditPlayerForm({ player, teams }: EditPlayerFormProps) {
     biography: player.biography ?? "",
     teamId: player.teamId ?? "",
     status: player.status ?? "active",
-  })
+  }
+  const [formData, setFormData] = useState(recordDraft)
+
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>(`edit-player:${player.id}`, 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
 
   const updateField = (key: string, value: string) => {
-    setFormData(prev => ({ ...prev, [key]: value }))
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData(recordDraft)
+    setDraftRestored(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,6 +100,7 @@ export function EditPlayerForm({ player, teams }: EditPlayerFormProps) {
             | "active" | "injured" | "retired" | "suspended" | "inactive",
         })
         toast.success("Player updated successfully!")
+        clearDraft()
         router.push(`/dashboard/players/${player.id}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to update player"
@@ -97,6 +123,9 @@ export function EditPlayerForm({ player, teams }: EditPlayerFormProps) {
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

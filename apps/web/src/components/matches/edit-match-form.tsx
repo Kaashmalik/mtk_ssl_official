@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2 } from "lucide-react"
 import { updateMatch } from "@/app/actions/matches"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 
 interface EditMatchFormProps {
   match: {
@@ -45,7 +47,10 @@ export function EditMatchForm({ match, teams }: EditMatchFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
+
+  // UX-03: per-RECORD draft (keyed by match id) over values seeded from
+  // server truth; a restored draft only overlays the member's edits.
+  const recordDraft = {
     teamAId: match.teamAId,
     teamBId: match.teamBId,
     matchFormat: match.matchFormat,
@@ -54,9 +59,30 @@ export function EditMatchForm({ match, teams }: EditMatchFormProps) {
     scheduledDate: formatForDateTimeLocal(match.scheduledDate),
     umpire1: match.umpire1 || "",
     umpire2: match.umpire2 || "",
-  })
+  }
+  const [formData, setFormData] = useState(recordDraft)
 
-  const updateField = (key: string, value: string) => setFormData(prev => ({ ...prev, [key]: value }))
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>(`edit-match:${match.id}`, 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
+
+  const updateField = (key: string, value: string) => {
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData(recordDraft)
+    setDraftRestored(false)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -82,6 +108,7 @@ export function EditMatchForm({ match, teams }: EditMatchFormProps) {
           umpire2: formData.umpire2.trim() || null,
         })
         toast.success("Match updated successfully!")
+        clearDraft()
         router.push(`/dashboard/matches/${match.id}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to update match"
@@ -107,6 +134,9 @@ export function EditMatchForm({ match, teams }: EditMatchFormProps) {
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

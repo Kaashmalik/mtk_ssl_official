@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -13,6 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2, Trophy } from "lucide-react"
 import { updateTournament } from "@/app/actions/tournaments"
+import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
+import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 import type { Tournament } from "@mtk/database"
 
 interface EditTournamentFormProps {
@@ -23,7 +25,11 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
+
+  // UX-03: per-RECORD draft (keyed by tournament id) over values seeded from
+  // server truth; every field here is a PersistableValue string, and the
+  // restore is banner-visible - server truth always wins on submit.
+  const recordDraft = {
     name: tournament.name ?? "",
     description: tournament.description ?? "",
     format: (tournament.format ?? "league") as string,
@@ -32,9 +38,30 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
     registrationDeadline: tournament.registrationDeadline ?? "",
     maxTeams: tournament.maxTeams?.toString() ?? "8",
     status: (tournament.status ?? "draft") as string,
-  })
+  }
+  const [formData, setFormData] = useState(recordDraft)
 
-  const updateField = (key: string, value: string) => setFormData(prev => ({ ...prev, [key]: value }))
+  const { draft: restoredDraft, restoredAt, saveDraft, clearDraft, dismissRestored } =
+    useDurableFormDraft<Record<string, string>>(`edit-tournament:${tournament.id}`, 1)
+  const [draftRestored, setDraftRestored] = useState(false)
+  useEffect(() => {
+    if (restoredDraft) {
+      setFormData(prev => ({ ...prev, ...restoredDraft }) as typeof prev)
+      setDraftRestored(true)
+    }
+  }, [restoredDraft])
+
+  const updateField = (key: string, value: string) => {
+    const next = { ...formData, [key]: value }
+    setFormData(next)
+    saveDraft(next)
+  }
+
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setFormData(recordDraft)
+    setDraftRestored(false)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,6 +80,7 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
           status: formData.status as "draft" | "registration" | "live" | "completed" | "cancelled",
         })
         toast.success("Tournament updated successfully!")
+        clearDraft()
         router.push(`/dashboard/tournaments/${tournament.id}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to update tournament"
@@ -75,6 +103,9 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
           </div>
         </div>
       </MotionWrapper>
+      {draftRestored && restoredAt !== null && (
+        <DraftRestoreBanner restoredAt={restoredAt} onDiscard={handleDiscardDraft} onDismiss={dismissRestored} />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <MotionWrapper variant="fadeInUp" delay={0.1}>

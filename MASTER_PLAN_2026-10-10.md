@@ -5848,6 +5848,41 @@ officiating (coach/captain surfaces) still need product definition.
 | `git diff --check` | Clean |
 | Migration | none this batch (read/label change only) |
 
+## Batch 112 - UX-03 durable forms slice 3 (edit forms)
+
+Batch 106 wired durable drafts into the six CREATE forms; the four EDIT
+forms still lost work on a refresh or accidental close. This slice closes
+that asymmetry with the identical pattern, adapted to per-RECORD identity.
+
+- edit-team, edit-player, edit-match and edit-tournament now persist a
+  versioned per-browser draft keyed by the record's own id
+  (`edit-team:<id>` etc. - two records can never cross-talk), seeded from
+  server truth so a restored draft only overlays the member's edits.
+- Same contract as Batch 106 everywhere: restoration is banner-visible
+  (exact save time + Keep/Discard), every drafted field is a
+  PersistableValue string, `clearDraft()` runs on submit success before
+  navigation, and discard returns the form to the exact server-seeded
+  values, never blanks.
+- edit-match drafts the free-text umpire names (the COMP-06 member slots
+  stay assignment-writer territory); edit-tournament drafts the visible
+  fields its action actually accepts.
+
+- Boundary: UX-03 remains open - localized/RTL (no i18n infrastructure or
+  supported-locale decision exists), the timezone display preference
+  (`formatDashboardDate` is explicitly UTC-labelled), and the remaining
+  role journeys (coach/captain surfaces need product definition).
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - new edit-form-drafts guards (9); form-stack and page suites unbroken |
+| `npx vitest run` (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (client wiring only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
