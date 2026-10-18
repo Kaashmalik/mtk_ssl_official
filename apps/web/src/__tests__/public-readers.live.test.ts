@@ -114,4 +114,39 @@ describe.skipIf(!optedIn)("PUB-03 record surfaces staged acceptance (live, READ-
     expect(await readers.readPublicBowlingLeaderboard(foreignTenant)).toEqual([])
     expect(await readers.readPublicFieldingLeaderboard(foreignTenant)).toEqual([])
   })
+
+  it("serves the wicketkeeping board from REAL declared-keeper records (or honestly nothing)", { timeout: 60_000 }, async () => {
+    const readers = await import("@/lib/public-visibility")
+    const admin = postgres(liveUrl as string, { max: 1, idle_timeout: 5 })
+    try {
+      const [tenant] = await admin`SELECT id FROM public.tenants ORDER BY created_at LIMIT 1`
+      const tenantId = tenant.id as string
+
+      const [counted] = await admin`
+        SELECT count(*)::int AS designations FROM public.match_playing_xis WHERE wicketkeeper`
+      const designations = counted.designations as number
+
+      const rows = await readers.readPublicWicketkeepingLeaderboard(tenantId)
+      // The board can only show players who ARE designated keepers of a real
+      // ACTIVE XI row: never more than the designation count supports.
+      expect(rows.length).toBeLessThanOrEqual(designations)
+      for (const row of rows) {
+        expect(Object.keys(row).sort()).toEqual([
+          "playerId", "playerName", "playerVerified", "total",
+        ])
+        const [backed] = await admin`
+          SELECT count(*)::int AS n FROM public.match_playing_xis
+          WHERE wicketkeeper AND superseded_at IS NULL
+            AND player_id = ${row.playerId}`
+        expect(Number(backed.n)).toBeGreaterThan(0)
+      }
+      // Zero designations = honestly empty board (the live league's state).
+      if (designations === 0) expect(rows).toEqual([])
+      // Foreign league stays empty regardless of anything.
+      expect(await readers.readPublicWicketkeepingLeaderboard(
+        "00000000-0000-4000-8000-999999999999")).toEqual([])
+    } finally {
+      await admin.end()
+    }
+  })
 })

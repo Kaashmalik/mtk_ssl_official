@@ -6169,6 +6169,27 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 126 - Wicketkeeping board live evidence (PUB-03 acceptance complete)
+
+The gated live family gains the keeper board (public-readers.live.test.ts,
+now 4 tests, 4/4 PASS live, read-only):
+
+- The board reads from REAL declared-keeper records only: every row is
+  back-checked against `match_playing_xis WHERE wicketkeeper AND
+  superseded_at IS NULL` row-by-row, and rows <= the designations count.
+- Zero designations = zero rows: the live league's actual state renders an
+  honestly empty board (the schema existing at all - the reader executing
+  against production without a 42703 - additionally re-proves the Batch
+  124 migration chain landed remotely).
+- Foreign league: empty, no cross-league leak.
+
+PUB-03 is therefore delivered AND staged-accepted end to end: verified
+records, three boards, keeper designation (B124), wicketkeeping board
+(B125), live evidence (B121/122/126). Tick remains the product owner's
+decision, with the disclosed caveat that the live league has not yet
+declared any keeper, so the positive case is structurally verified
+against real schema and only representatively thin.
+
 ## Batch 125 - Public wicketkeeping board (PUB-03 keeper clause complete)
 
 The PUB-03 register's last open clause closes honestly: the board exists,
