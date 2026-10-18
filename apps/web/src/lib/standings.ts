@@ -17,7 +17,7 @@
  *    exist yet; computation is tournament-wide.
  */
 
-export const STANDINGS_RULE_VERSION = 1
+export const STANDINGS_RULE_VERSION = 2
 
 export type StandingsTeamInput = {
   id: string
@@ -31,6 +31,8 @@ export type StandingsMatchInput = {
   teamBId: string
   status: string | null
   winnerId: string | null
+  /** Group label for hybrid group stages ("A", "B", ...); null/undefined for knockout or single-group tournaments. */
+  groupLabel?: string | null
   /** Innings rows for the fixture; only runs/balls matter here. */
   innings: { teamId: string; runs: number; balls: number }[]
 }
@@ -62,6 +64,8 @@ function isPlayedFixture(status: string | null): boolean {
 export function computeStandings(input: {
   teams: StandingsTeamInput[]
   matches: StandingsMatchInput[]
+  /** When set, only fixtures carrying this group label are counted (hybrid group stages). */
+  group?: string | null
 }): StandingsRow[] {
   const rows = new Map<string, StandingsRow>()
   for (const team of input.teams) {
@@ -77,7 +81,8 @@ export function computeStandings(input: {
   }
 
   for (const match of input.matches) {
-    if (match.teamAId === match.teamBId) continue // never a valid fixture
+    if (input.group != null && match.groupLabel !== input.group) continue
+  if (match.teamAId === match.teamBId) continue // never a valid fixture
     const teamA = rows.get(match.teamAId)
     const teamB = rows.get(match.teamBId)
     if (!teamA || !teamB) continue // ignore cross-tenant/legacy pairings

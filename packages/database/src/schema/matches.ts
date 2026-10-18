@@ -76,6 +76,7 @@ export const matches = pgTable("matches", {
   // Match Config
   matchFormat: matchFormatEnum("match_format").notNull().default("t20"),
   matchType: matchTypeEnum("match_type").notNull().default("group"),
+  groupLabel: text("group_label"),
   totalOvers: integer("total_overs").default(20),
   status: matchStatusEnum("status").notNull().default("scheduled"),
 

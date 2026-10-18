@@ -139,4 +139,20 @@ describe("formatNetRunRate (broadcast convention)", () => {
     expect(formatNetRunRate(-0)).toBe("0.000")
     expect(formatNetRunRate(0.4567)).toBe("+0.457")
   })
+  it("group filter counts only fixtures carrying that group label (hybrid stages)", () => {
+    const teams = [
+      { id: "t1", name: "Alpha", shortName: "ALP" },
+      { id: "t2", name: "Beta", shortName: "BET" },
+      { id: "t3", name: "Gamma", shortName: "GAM" },
+    ]
+    const matches = [
+      { matchId: "m1", teamAId: "t1", teamBId: "t2", status: "completed", winnerId: "t1", groupLabel: "A", innings: [] },
+      { matchId: "m2", teamAId: "t2", teamBId: "t3", status: "completed", winnerId: "t2", groupLabel: "B", innings: [] },
+    ]
+    const groupA = computeStandings({ teams, matches, group: "A" })
+    expect(groupA.find((r) => r.teamId === "t1")?.points).toBe(2)
+    expect(groupA.find((r) => r.teamId === "t3")?.played).toBe(0)
+    const all = computeStandings({ teams, matches })
+    expect(all.filter((r) => r.played > 0)).toHaveLength(3)
+  })
 })

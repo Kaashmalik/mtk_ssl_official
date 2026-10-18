@@ -6173,6 +6173,24 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 150 - COMP-05 slice: group-aware standings (migration applied remotely)
+
+- DELIVERED: the COMP-05 group sub-clause. Rule version bumped 1 -> 2.
+  - MIGRATION 20261019000000_match_group_label APPLIED remotely + verified
+    (nullable group_label on matches, partial index on
+    (tournament_id, group_label) WHERE group_label IS NOT NULL). Additive;
+    no RLS change (matches already has RLS forced + grants).
+  - SCHEMA: matches.groupLabel (text nullable).
+  - STANDINGS FOLD: StandingsMatchInput.groupLabel (optional), compute
+    Standings gains an optional `group` filter - only fixtures carrying
+    that label count. Reviewed result corrections need no special path:
+    standings are a pure fold over match results, so re-running
+    computeStandings after a corrected result reflects it.
+  - TEST: standings suite 12 (was 11) - group filter counts only the
+    fixtures carrying that group label; teams with no matches in the group
+    show 0 played.
+- VERIFIED: db build + web tsc 0; glue scan clean.
+
 ## Batch 149 - REG-06 slice: squad composition, transfer eligibility and account-less players (no migration - players.userId already nullable)
 
 - DELIVERED: the third Phase-2 build line. REG-06's core as a pure
