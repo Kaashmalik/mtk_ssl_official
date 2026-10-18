@@ -110,6 +110,33 @@ export async function readPublishedTournament(tenantId: string, id: string): Pro
 }
 
 /**
+ * Reads the league's published tournaments for the public index page: the
+ * exact PUB-06 allowlist of `readPublishedTournament`, gated IN THE QUERY via
+ * the published-status values (the same single source of truth as the single
+ * read's `isTournamentPublished`). Newest-started first; the id breaks ties
+ * deterministically; a draft or cancelled competition never reaches the list.
+ */
+export async function readPublishedTournaments(tenantId: string): Promise<PublicTournament[]> {
+  return db
+    .select({
+      id: tournaments.id,
+      name: tournaments.name,
+      description: tournaments.description,
+      format: tournaments.format,
+      status: tournaments.status,
+      startDate: tournaments.startDate,
+      endDate: tournaments.endDate,
+      championTeamId: tournaments.championTeamId,
+    })
+    .from(tournaments)
+    .where(and(
+      eq(tournaments.tenantId, tenantId),
+      inArray(tournaments.status, PUBLISHED_TOURNAMENT_STATUS_VALUES),
+    ))
+    .orderBy(desc(tournaments.startDate), asc(tournaments.id))
+}
+
+/**
  * Reads a single match scoped to the tenant and gated on publication. A match
  * is hidden when it is cancelled, or when it belongs to a tournament that is
  * itself unpublished — a fixture cannot be public while its competition is a

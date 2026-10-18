@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  readPublishedTournament, readPublishedMatch, readPublishedMatchTeams,
+  readPublishedTournament, readPublishedTournaments, readPublishedMatch, readPublishedMatchTeams,
 } from "@/lib/public-visibility"
 
 /**
@@ -30,14 +30,20 @@ vi.mock("@mtk/database", async (importOriginal) => ({
     // row flows through - exactly the behavior this suite must catch.
     select: (cols?: Record<string, unknown>) => ({
       from: () => ({
-        where: () => ({
-          limit: async () => {
+        where: () => {
+          const take = async () => {
             const rows = queue.shift() ?? []
             if (!cols) return rows
             const aliases = Object.keys(cols)
             return rows.map(row => Object.fromEntries(aliases.map(alias => [alias, row[alias] ?? null])))
-          },
-        }),
+          }
+          return {
+            limit: take,
+            // The list-shaped readers end in orderBy instead of limit; the
+            // same projection discipline applies (tournament index).
+            orderBy: take,
+          }
+        },
       }),
     }),
   },
@@ -88,6 +94,29 @@ describe("PUB-06: tournament allowlist", () => {
     ])
     expect(JSON.stringify(row)).not.toContain("createdBy")
     expect(JSON.stringify(row)).not.toContain("competitionLocked")
+  })
+
+  it("index reader: every listed row carries exactly the disclosed fields - planted secrets are dropped by the projection", async () => {
+    // A full row (as a careless select() would return it) with provenance,
+    // tenant plumbing and locks planted for this regression.
+    queue.push([{
+      ...fullTournamentRow,
+      tenantId: TENANT,
+      slug: "autumn-cup",
+      registrationOpen: true,
+      competitionLockedAt: new Date(),
+      competitionLockedBy: TEAM_B,
+      createdBy: "00000000-0000-4000-8000-0000000000ee",
+    }])
+    const rows = await readPublishedTournaments(TENANT)
+    expect(rows).toHaveLength(1)
+    expect(Object.keys(rows[0]).sort()).toEqual([
+      "championTeamId", "description", "endDate", "format", "id", "name",
+      "startDate", "status",
+    ])
+    expect(JSON.stringify(rows)).not.toContain("createdBy")
+    expect(JSON.stringify(rows)).not.toContain("competitionLocked")
+    expect(JSON.stringify(rows)).not.toContain("tenantId")
   })
 })
 

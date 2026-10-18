@@ -5883,6 +5883,46 @@ that asymmetry with the identical pattern, adapted to per-RECORD identity.
 | `git diff --check` | Clean |
 | Migration | none this batch (client wiring only) |
 
+## Batch 113 - PUB-03/PUB-06 public tournaments index page
+
+The published tournament detail page (`/tournaments/[id]`) has been public
+since Batch 105, but an unauthenticated visitor had no way to DISCOVER it -
+there was no `/tournaments` index listing a league's published competitions
+(the surface FAN-03's hall-of-fame work builds on).
+
+- New `readPublishedTournaments(tenantId)` in `public-visibility.ts`: the
+  exact PUB-06 allowlist of `readPublishedTournament` (id, name, description,
+  format, status, startDate, endDate, championTeamId), gated IN THE QUERY via
+  `inArray(status, PUBLISHED_TOURNAMENT_STATUS_VALUES)` - the same single
+  source of truth as the single read's `isTournamentPublished` - ordered
+  newest-started first with deterministic id tie-break. Drafts and cancelled
+  competitions never reach the list.
+- New public `/tournaments` page: `force-dynamic` + `noStore()`, tenant-scoped
+  via `requirePublicTenantId()`, honest empty state ("no published
+  competition yet"), cards linking to the existing detail pages.
+- Tests: `public-allowlist.test.ts` grows an index-reader regression using the
+  planted-secrets fake db (projection drops provenance/locks/tenant plumbing;
+  the fake db learned an `orderBy` projection branch for list-shaped reads);
+  the reader's SQL-level publication gate is asserted structurally; a suite
+  guards the page itself (no raw `db.select().from(`, allowlist reader only,
+  honest empty state, no private keys rendered); the static hygiene guard
+  now covers the new page file.
+
+- Boundary: the public shell has no global nav (homepage links to
+  dashboard/sign-in only; `/leaderboards` and match pages are linked
+  contextually). Adding `/tournaments` to homepage copy is a product
+  decision, recorded here rather than made silently. Roadmap checkbox
+  (FAN-03 chain) still waits on staged acceptance with the real DB.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - new index guards + projection regression; hygiene and allowlist suites unbroken |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (read path only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
