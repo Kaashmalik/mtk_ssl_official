@@ -4,7 +4,6 @@ import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-server"
-import { requireVenueReadContext, readVenue, readVenueList, readVenueOptions } from "@/lib/venue-reads"
 import { createVenueRecord, updateVenueRecord, setVenueActive, venueInput } from "@/lib/venue-writes"
 
 /** Resolve the exact active league and re-check the venue write permission. */
@@ -57,22 +56,4 @@ export async function restoreVenue(id: string) {
   revalidatePath("/dashboard/venues")
   revalidatePath(`/dashboard/venues/${id}/edit`)
   return { success: true, venue }
-}
-
-/** Read a single venue, scoped to the exact active league. */
-export async function getVenue(id: string) {
-  const { tenantId } = await requireVenueReadContext("venue:read")
-  return readVenue(tenantId, id)
-}
-
-/** List venues, scoped to the exact active league. */
-export async function getVenues() {
-  const { tenantId } = await requireVenueReadContext("venue:read")
-  return readVenueList(tenantId)
-}
-
-/** Active-venue picker options for the exact active league. */
-export async function getVenueOptions() {
-  const { tenantId } = await requireVenueReadContext("venue:read")
-  return readVenueOptions(tenantId)
 }

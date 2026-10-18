@@ -64,7 +64,6 @@ describe("FAN-01 reports slice wiring", () => {
     expect(actions).not.toMatch(/from "@mtk\/database"|from "drizzle-orm"/)
     for (const delegate of [
       "reportMatchReactionFeedAction",
-      "getOpenReactionReports",
       "decideReactionReportAction",
     ]) {
       expect(actions).toContain(delegate)

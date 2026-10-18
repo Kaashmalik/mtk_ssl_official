@@ -11,16 +11,19 @@ const mocks = vi.hoisted(() => ({
 const components = vi.hoisted(() => ({
   DeleteButton: vi.fn(() => null), FollowButton: vi.fn(() => null),
   RegistrationToggle: vi.fn(() => null), TournamentSettingsSummary: vi.fn(() => null),
+  AdvanceTournamentButton: vi.fn(() => null), GenerateFixturesButton: vi.fn(() => null),
 }))
 
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound") } }))
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }))
 vi.mock("@/lib/league-reads", () => ({ requireActiveLeagueContext: mocks.context }))
-vi.mock("@/app/actions/tournaments", () => ({ getTournament: mocks.getTournament, deleteTournament: mocks.remove }))
+vi.mock("@/app/actions/tournaments", () => ({ getTournament: mocks.getTournament, deleteTournament: mocks.remove, generateFixtures: vi.fn() }))
 vi.mock("@/app/actions/follows", () => ({ isFollowing: mocks.following, getFollowerCount: mocks.followerCount }))
 vi.mock("@/components/shared/delete-button", () => ({ DeleteButton: components.DeleteButton }))
 vi.mock("@/components/shared/follow-button", () => ({ FollowButton: components.FollowButton }))
 vi.mock("@/components/tournaments/registration-toggle", () => ({ RegistrationToggle: components.RegistrationToggle }))
+vi.mock("@/components/tournaments/advance-tournament-button", () => ({ AdvanceTournamentButton: components.AdvanceTournamentButton }))
+vi.mock("@/components/tournaments/generate-fixtures-button", () => ({ GenerateFixturesButton: components.GenerateFixturesButton }))
 vi.mock("@/components/tournaments/tournament-settings-summary", () => ({ TournamentSettingsSummary: components.TournamentSettingsSummary }))
 // PUB-04 disputes: the owner queue read is mocked at the module boundary.
 vi.mock("@/lib/award-dispute-records", () => ({ readOpenAwardDisputes: mocks.disputes }))
@@ -76,6 +79,9 @@ describe("Tournament detail page gates mutation controls by the viewer's exact-l
     expect(links(tree)).toContain(`/dashboard/registrations/new?tournamentId=${TOURNAMENT}`)
     expect(elements(tree).some(element => element.type === components.RegistrationToggle)).toBe(true)
     expect(elements(tree).some(element => element.type === components.DeleteButton)).toBe(true)
+    // Registration-stage tournament: fixture generation (Batch 49) is offered
+    // to the match:create holder - the page wiring for the orphaned action.
+    expect(elements(tree).some(element => element.type === components.GenerateFixturesButton)).toBe(true)
   })
   it("shows a team manager the registration CTA but no administration controls", async () => {
     mocks.context.mockResolvedValue(roleContext("team_manager"))
@@ -84,6 +90,7 @@ describe("Tournament detail page gates mutation controls by the viewer's exact-l
     expect(links(tree)).not.toContain(`/dashboard/tournaments/${TOURNAMENT}/edit`)
     expect(elements(tree).some(element => element.type === components.RegistrationToggle)).toBe(false)
     expect(elements(tree).some(element => element.type === components.DeleteButton)).toBe(false)
+    expect(elements(tree).some(element => element.type === components.GenerateFixturesButton)).toBe(false)
   })
   it.each(["scorer", "coach", "player", "fan"])("hides every mutation control from a %s", async (role) => {
     mocks.context.mockResolvedValue(roleContext(role))
@@ -92,6 +99,7 @@ describe("Tournament detail page gates mutation controls by the viewer's exact-l
     expect(links(tree)).not.toContain(`/dashboard/registrations/new?tournamentId=${TOURNAMENT}`)
     expect(elements(tree).some(element => element.type === components.RegistrationToggle)).toBe(false)
     expect(elements(tree).some(element => element.type === components.DeleteButton)).toBe(false)
+    expect(elements(tree).some(element => element.type === components.GenerateFixturesButton)).toBe(false)
   })
   it("propagates a denied or failed context before reading the tournament", async () => {
     mocks.context.mockRejectedValue(new Error("Forbidden"))

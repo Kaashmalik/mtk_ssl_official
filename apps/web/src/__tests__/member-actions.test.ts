@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { userTenantRoles, auditLogs } from "@mtk/database"
-import { getUsers, toggleUserStatus, updateUserRole, removeMember } from "@/app/actions/users"
+import { getMemberDirectory, toggleUserStatus, updateUserRole, removeMember } from "@/app/actions/users"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), transaction: vi.fn(),
   member: vi.fn(), user: vi.fn(), league: vi.fn(), execute: vi.fn(),
@@ -100,24 +100,24 @@ describe("League-only member administration", () => {
   })
   it.each(["team_manager", "scorer", "fan", "super_admin"])("denies private membership listing/management to %s", async role => {
     mocks.context.mockResolvedValue({ status: "ready", context: { role, tenantId: A, actorId: OWNER } })
-    await expect(getUsers()).rejects.toThrow("Forbidden")
+    await expect(getMemberDirectory({ tenantId: A })).rejects.toThrow("Forbidden")
     await expect(toggleUserStatus({ ...key, status: "suspended" })).rejects.toThrow("Forbidden")
     expect(mocks.transaction).not.toHaveBeenCalled()
     expect(mocks.select).not.toHaveBeenCalled()
   })
   it.each(["denied", "no-tenant"])("denies context %s", async status => {
     mocks.context.mockResolvedValue({ status })
-    await expect(getUsers()).rejects.toThrow("Forbidden")
+    await expect(getMemberDirectory({ tenantId: A })).rejects.toThrow("Forbidden")
     expect(mocks.select).not.toHaveBeenCalled()
   })
   it("surfaces an unavailable member-management context", async () => {
     mocks.context.mockResolvedValue({ status: "unavailable" })
-    await expect(getUsers()).rejects.toThrow("League member access is unavailable")
+    await expect(getMemberDirectory({ tenantId: A })).rejects.toThrow("League member access is unavailable")
     expect(mocks.select).not.toHaveBeenCalled()
   })
   it("requires a current authenticated session", async () => {
     mocks.auth.mockResolvedValue({ userId: null })
-    await expect(getUsers()).rejects.toThrow("Unauthorized")
+    await expect(getMemberDirectory({ tenantId: A })).rejects.toThrow("Unauthorized")
     expect(mocks.context).not.toHaveBeenCalled()
   })
   it.each([undefined, { ...target, tenantId: B }, { ...target, id: B }])("rejects foreign/missing membership %s", async member => {
@@ -178,16 +178,8 @@ describe("League-only member administration", () => {
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.insert).not.toHaveBeenCalled()
   })
-  it("lists explicit memberships in the authorized league with a bounded field allowlist", async () => {
-    await getUsers()
-    expect(mocks.from).toHaveBeenCalledWith(userTenantRoles)
-    expect(dialect.sqlToQuery(mocks.listWhere.mock.calls[0][0]).params).toEqual([A])
-    expect(mocks.limit).toHaveBeenCalledWith(100)
-    expect(Object.keys(mocks.select.mock.calls[0][0])).not.toContain("tenantIds")
-    expect(Object.keys(mocks.select.mock.calls[0][0])).not.toContain("clerkId")
-  })
-  it("rejects a stale league assertion on the list rather than returning another league", async () => {
-    await expect(getUsers(B)).rejects.toThrow("Workspace changed")
+  it("rejects a stale league assertion on the directory rather than returning another league", async () => {
+    await expect(getMemberDirectory({ tenantId: B })).rejects.toThrow("Workspace changed. Reload members before viewing.")
     expect(mocks.select).not.toHaveBeenCalled()
   })
 })

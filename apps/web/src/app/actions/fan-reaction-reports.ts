@@ -2,7 +2,6 @@
 
 import {
   reportMatchReactionFeed,
-  readOpenReactionReports,
   decideReactionReport,
 } from "@/lib/fan-report-records"
 
@@ -15,10 +14,6 @@ import {
 
 export async function reportMatchReactionFeedAction(input: unknown) {
   return reportMatchReactionFeed(input)
-}
-
-export async function getOpenReactionReports(matchId: unknown) {
-  return readOpenReactionReports(matchId)
 }
 
 export async function decideReactionReportAction(input: unknown) {

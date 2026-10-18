@@ -9,7 +9,6 @@ import {
   generateFixtures,
   getTournament,
   getTournamentCopyOptions,
-  getTournaments,
   openRegistration,
   setCompetitionLock,
   updateTournament,
@@ -172,7 +171,6 @@ describe("Tournament action tenant and author boundaries", () => {
 
   const operations = [
     { name: "read", permission: "tournament:read", repo: mocks.find, run: () => getTournament(TOURNAMENT_ID) },
-    { name: "list", permission: "tournament:read", repo: mocks.list, run: () => getTournaments({ page: 1, pageSize: 20, sortBy: "createdAt", sortOrder: "desc" }) },
   ]
 
   it.each(operations)("$name authorizes the exact tenant passed to the repository", async ({ permission, repo, run }) => {

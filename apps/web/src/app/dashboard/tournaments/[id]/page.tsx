@@ -17,6 +17,7 @@ import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { TournamentSettingsSummary } from "@/components/tournaments/tournament-settings-summary"
 import { AdvanceTournamentButton } from "@/components/tournaments/advance-tournament-button"
+import { GenerateFixturesButton } from "@/components/tournaments/generate-fixtures-button"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { hasPermission } from "@/lib/rbac"
 import { readAwardDeclarationContext } from "@/lib/award-records"
@@ -241,6 +242,10 @@ export default async function TournamentDetailPage({ params }: { params: Promise
                     tournamentId={id}
                     registrationOpen={Boolean(tournament.registrationOpen)}
                   />
+                )}
+                {tournament.status === "registration"
+                  && hasPermission(context.role, "match:create") && (
+                  <GenerateFixturesButton tournamentId={id} />
                 )}
                 {tournament.format === "knockout" && tournament.status === "live"
                   && (hasPermission(context.role, "match:create")) && (

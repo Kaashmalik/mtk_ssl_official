@@ -61,18 +61,8 @@ function persistenceValues<T extends PersistenceInput>(input: T) {
   }
 }
 
-const tournamentFiltersSchema = z.object({
-  status: z.enum(["draft", "registration", "live", "completed", "cancelled"]).optional(),
-  search: z.string().optional(),
-  page: z.number().int().min(1).default(1),
-  pageSize: z.number().int().min(1).max(100).default(20),
-  sortBy: z.enum(["name", "createdAt", "startDate"]).default("createdAt"),
-  sortOrder: z.enum(["asc", "desc"]).default("desc"),
-})
-
 export type CreateTournamentInput = z.input<typeof createTournamentSchema>
 export type UpdateTournamentInput = z.infer<typeof updateTournamentSchema>
-export type TournamentFilters = z.infer<typeof tournamentFiltersSchema>
 
 function generateSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
@@ -183,20 +173,6 @@ export async function getTournament(id: string) {
 
   return withTenantContext({ userId, tenantId }, () =>
     tournamentRepo.findById<Tournament>(id)
-  )
-}
-
-/**
- * List tournaments with pagination and filters.
- * The repo's findFiltered() auto-scopes to the current tenant.
- */
-export async function getTournaments(filters: TournamentFilters) {
-  const { userId, tenantId } = await requireTournamentContext("tournament:read")
-
-  const validated = tournamentFiltersSchema.parse(filters)
-
-  return withTenantContext({ userId, tenantId }, () =>
-    tournamentRepo.findFiltered(validated)
   )
 }
 

@@ -6169,6 +6169,37 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 130 - Dead-surface audit + fixture-generation wiring (decision-free)
+
+- AUDIT: every exported action in `app/actions/*.ts` was swept for
+  consumers outside tests. A "use server" export is reachable over HTTP the
+  moment it exists, whether or not any UI consumes it. Nine dead surfaces
+  removed with their imports: venues `getVenue`/`getVenues`/`getVenueOptions`
+  (pages read `lib/venue-reads` directly), tournaments `getTournaments`
+  (+ its inline filters schema; superseded by `getTournament`/directory
+  readers), users `getUsers` (superseded by `getMemberDirectory`) and
+  `setUserMembershipExpiry` (writer `setMemberExpiry` stays lib-tested;
+  the HTTP surface never had a caller), fan reads
+  `getOpenReactionReports`/`getActiveFanBlocks`/
+  `getMatchReactionsForModeration` (moderation lists read the lib
+  server-side; all write delegates kept - they ARE consumed).
+- REAL FINDING (anti-delete): `generateFixtures` (Batch 49's locked
+  writer + action, fully tested) had ZERO callers - organizers could not
+  generate fixtures from the dashboard at all. Kept and WIRED: new owner-
+  visible `GenerateFixturesButton` on the dashboard tournament page,
+  offered at `registration` status to the `match:create` holder; the
+  writer stays the authority (capacity/active-teams/existing-fixture/
+  competition-lock refusals surface as honest toasts; output toasts the
+  truthful fixture count as the tournament goes live).
+- Regressions: new src-grep pin `dead-surface-audit.test.ts` (removals
+  stay removed; `setMemberExpiry` proven alive in the lib; wiring present);
+  member-actions tests re-pointed at `getMemberDirectory` (same denial
+  matrix); tournament-actions list-op dropped; detail-page test upgraded to
+  the six-mock set (B125 lesson applied PROACTIVELY this time) with
+  per-role render assertions for the new button.
+- Gates: web tsc 0; targeted suites 164/164 green (incl. venue-actions);
+  full battery per batch record. No schema change; no migration.
+
 ## Batch 129 - Fan-surface interlinking + dead action cleanup (decision-free pair)
 
 - /tournaments <-> /hall-of-fame interlinking: the tournaments index header
