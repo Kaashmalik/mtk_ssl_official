@@ -98,4 +98,27 @@ describe("FAN-01 reports slice wiring", () => {
     expect(actions.startsWith('"use server"')).toBe(true)
     expect(actions).not.toMatch(/from "@mtk\/database"|from "drizzle-orm"/)
   })
+
+  it("gives the loop one reviewable home: the league-wide settings queue", () => {
+    const page = source("app/dashboard/settings/fan-interactions/page.tsx")
+    // Owner-gated with the moderation authority, not settings:manage, and
+    // both queues fail closed to empty - a read failure is never a page
+    // failure.
+    expect(page).toMatch(/await requireActiveLeagueContext\("match:update"\)/)
+    expect(page).toMatch(/try \{[\s\S]*?readLeagueOpenReports[\s\S]*?\} catch/)
+    expect(page).toMatch(/try \{[\s\S]*?readActiveFanBlocks[\s\S]*?\} catch/)
+    // Visibility only: no direct db import on the page - every mutation
+    // flows through the writer actions.
+    expect(page).not.toMatch(/from "@mtk\/database"|from "drizzle-orm"/)
+    // Discoverable from the settings home (the Quick Links pattern).
+    const settingsHome = source("app/dashboard/settings/page.tsx")
+    expect(settingsHome).toContain('href="/dashboard/settings/fan-interactions"')
+    // The manager interacts ONLY through the same locked-writer actions the
+    // per-match card uses - no second, parallel decision path.
+    const manager = source("components/settings/fan-interactions-manager.tsx")
+    expect(manager).toContain("decideReactionReportAction")
+    expect(manager).toContain("liftFanBlockAction")
+    expect(manager).not.toMatch(/from "@mtk\/database"|from "drizzle-orm"/)
+    expect(manager).toContain("`/dashboard/matches/${report.matchId}`")
+  })
 })

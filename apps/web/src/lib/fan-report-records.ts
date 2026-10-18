@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
-import { db, fanReactionReports, users, matches, tournaments, auditLogs } from "@mtk/database"
-import { and, eq, desc, count, gte } from "drizzle-orm"
+import { db, fanReactionReports, users, matches, tournaments, teams, auditLogs } from "@mtk/database"
+import { and, eq, desc, asc, count, gte } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import {
   isReactionReportReason,
@@ -215,5 +216,58 @@ export async function decideReactionReport(input: unknown): Promise<DecideReport
       payload: { reportId: report.id, matchId: report.matchId, decision: parsed.decision },
     })
     return { decided: true } as const
+  })
+}
+
+export type LeagueOpenReport = {
+  id: string
+  matchId: string
+  matchLabel: string
+  reason: string
+  reporterName: string | null
+  createdAt: string
+}
+
+/**
+ * The league-wide open-report queue: every match's open reports in one
+ * bounded, oldest-first list (fairness - the longest-waiting report is the
+ * queue head). Tenant is pinned in the WHERE clause; the match label joins
+ * both registered team names through the match row, and a report whose
+ * teams cannot resolve still surfaces with an honest id-only label.
+ * Reports are the same engagement-bound signals as before: deciding a
+ * record here goes through the identical locked decide path.
+ */
+export async function readLeagueOpenReports(): Promise<LeagueOpenReport[]> {
+  const { tenantId } = await requireActiveLeagueContext("match:update")
+  const teamA = alias(teams, "report_team_a")
+  const teamB = alias(teams, "report_team_b")
+  const rows = await db
+    .select({
+      id: fanReactionReports.id,
+      matchId: fanReactionReports.matchId,
+      teamAName: teamA.name,
+      teamBName: teamB.name,
+      reason: fanReactionReports.reason,
+      reporterName: users.displayName,
+      createdAt: fanReactionReports.createdAt,
+    })
+    .from(fanReactionReports)
+    .innerJoin(matches, and(eq(matches.id, fanReactionReports.matchId), eq(matches.tenantId, tenantId)))
+    .innerJoin(users, and(eq(users.id, fanReactionReports.reportedBy), eq(users.isActive, true)))
+    .leftJoin(teamA, and(eq(teamA.id, matches.teamAId), eq(teamA.tenantId, tenantId)))
+    .leftJoin(teamB, and(eq(teamB.id, matches.teamBId), eq(teamB.tenantId, tenantId)))
+    .where(and(eq(fanReactionReports.tenantId, tenantId), eq(fanReactionReports.status, "open")))
+    .orderBy(asc(fanReactionReports.createdAt))
+    .limit(50)
+  return rows.map(row => {
+    const pair = [row.teamAName, row.teamBName].filter(Boolean).join(" vs ")
+    return {
+      id: row.id,
+      matchId: row.matchId,
+      matchLabel: pair || `Match ${row.matchId.slice(0, 8)}`,
+      reason: row.reason,
+      reporterName: row.reporterName ?? null,
+      createdAt: row.createdAt.toISOString(),
+    }
   })
 }

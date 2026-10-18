@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   reportMatchReactionFeed, readOpenReactionReports, decideReactionReport,
+  readLeagueOpenReports,
 } from "@/lib/fan-report-records"
 
 const mocks = vi.hoisted(() => ({
@@ -202,6 +203,59 @@ describe("FAN-01 open-report queue (owner read)", () => {
     expect(rows).toEqual([
       { id: REPORT, reason: "spam", reporterName: "Hamza", createdAt: createdAt.toISOString() },
     ])
+  })
+
+  it("joins both team names per report; a team-less fixture falls back to an honest id label", async () => {
+    const createdAt = new Date("2026-10-18T09:30:00.000Z")
+    mocks.select.mockImplementation(() => ({
+      from: () => ({
+        innerJoin: () => ({
+          innerJoin: () => ({
+            leftJoin: () => ({
+              leftJoin: () => ({
+                where: () => ({
+                  orderBy: () => ({
+                    limit: async () => [
+                      {
+                        id: REPORT,
+                        matchId: MATCH,
+                        teamAName: "United",
+                        teamBName: "City",
+                        reason: "abusive",
+                        reporterName: null,
+                        createdAt,
+                      },
+                      {
+                        id: "00000000-0000-4000-8000-0000000000c2",
+                        matchId: MATCH,
+                        teamAName: null,
+                        teamBName: null,
+                        reason: "spam",
+                        reporterName: "Ada",
+                        createdAt,
+                      },
+                    ],
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }))
+    const rows = await readLeagueOpenReports()
+    expect(rows).toHaveLength(2)
+    // Exact disclosed projection - nothing else travels.
+    expect(rows[0]).toEqual({
+      id: REPORT,
+      matchId: MATCH,
+      matchLabel: "United vs City",
+      reason: "abusive",
+      reporterName: null,
+      createdAt: createdAt.toISOString(),
+    })
+    // Unresolvable teams still surface, with an honest fallback label.
+    expect(rows[1].matchLabel).toBe(`Match ${MATCH.slice(0, 8)}`)
   })
 
   it("refuses non-uuid match ids before the owner gate", async () => {
