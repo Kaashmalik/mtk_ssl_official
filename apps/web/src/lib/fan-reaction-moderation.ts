@@ -18,7 +18,7 @@ import { requireActiveLeagueContext } from "@/lib/league-reads"
  * aggregate counts simply fall when the row goes.
  */
 
-export const REACTION_MODERATION_LIMIT = 100
+const REACTION_MODERATION_LIMIT = 100
 
 const removeInputSchema = z.object({
   matchId: z.string().uuid(),

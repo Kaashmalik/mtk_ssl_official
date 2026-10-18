@@ -91,14 +91,3 @@ export async function incrementAttempts(clientOpId: string): Promise<void> {
 export async function countQueuedBalls(matchId?: string): Promise<number> {
   return (await getQueuedBalls(matchId)).length;
 }
-
-export async function clearQueue(): Promise<void> {
-  const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
-}

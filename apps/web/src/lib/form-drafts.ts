@@ -14,7 +14,7 @@
  */
 
 export const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-export const DRAFT_KEY_PREFIX = "mtk-form-draft"
+const DRAFT_KEY_PREFIX = "mtk-form-draft"
 
 export type PersistableValue = string | number | boolean | null
 

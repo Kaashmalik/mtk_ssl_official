@@ -6169,6 +6169,39 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 131 - Dead-surface tier 2: lib export audit (decision-free)
+
+- Sweep of every exported `const`/function across `apps/web/src/lib/` for
+  consumers outside the defining file (tests included in the count). The
+  lib tier is not HTTP-reachable, but a needless `export` invites drift:
+  something CAN import it, so something eventually WILL.
+- Un-exported 28 in-file-only names (implementation kept, surface lost):
+  dispute schemas/bounds + the non-Safe affordance reader (the Safe
+  wrapper is the wired surface), award schemas + manager bound, fan
+  follow schema, moderation limit, draft-key prefix, resend cooldown,
+  branding columns, umpire membership, directory expiry states, member
+  editable-roles/expiry-schema/league-limit, preferences input schema,
+  prize manager bound, career-profile league limit, tournament-options +
+  hall-of-fame bounds, role hierarchy, roster performance scope + player
+  column sets, subscription deriver, `isConfigured`.
+- Removed fully dead code: `lib/api-client.ts` (entire module with
+  `APIError` - zero references anywhere), env.ts's unused readiness
+  extras (`isFeatureReady`/`requireFeature`/`FeatureNotConfiguredError`/
+  `allFeatureReadiness`/`isDevelopment` + its zod schema + dead `z`
+  import; `featureReadiness` STAY - a live route consumes it),
+  `clearQueue`, `OTP_MAX_ATTEMPTS`, `requirePublicTenant`,
+  `getUserRoleAndTenantIds` (B76 legacy fallback leftover),
+  `getPermissions`, `registrationPageNumber`,
+  `isScoringRevisionConflict`, `disconnectScoringSocket`, and B127's
+  never-wired `readMyAwardDisputes` (+ its row type, bound and the
+  orphaned `disputeStatusLabels` import).
+- Pin extended: tier-2 describe in `dead-surface-audit.test.ts` (28
+  per-name it.each assertions + the fully-dead list; first version's
+  regex wrongly banned legitimate `export type X = ...<typeof deadName>`
+  lines and was tightened to the declaration form).
+- Gates: web tsc 0; targeted suites green; full battery per batch record.
+  No schema change; no migration.
+
 ## Batch 130 - Dead-surface audit + fixture-generation wiring (decision-free)
 
 - AUDIT: every exported action in `app/actions/*.ts` was swept for

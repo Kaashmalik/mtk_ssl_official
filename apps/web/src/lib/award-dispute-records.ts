@@ -6,7 +6,7 @@ import {
 } from "@mtk/database"
 import {
   AWARD_DISPUTE_REASONS, AWARD_DISPUTE_REASON_LABELS,
-  canResolveDispute, disputeStatusLabels,
+  canResolveDispute,
   type AwardDisputeReason,
 } from "@mtk/database/lib/award-dispute-policy"
 import { isUniqueViolation } from "./db-errors"
@@ -43,7 +43,7 @@ import { z } from "zod"
  * is the review surface, not in-app alerts (recorded boundary).
  */
 
-export const raiseAwardDisputeInputSchema = z.object({
+const raiseAwardDisputeInputSchema = z.object({
   tournamentId: z.string().uuid(),
   awardId: z.string().uuid(),
   reason: z.enum(AWARD_DISPUTE_REASONS),
@@ -174,7 +174,7 @@ export async function raiseAwardDispute(input: unknown): Promise<RaiseAwardDispu
   }
 }
 
-export const resolveAwardDisputeInputSchema = z.object({
+const resolveAwardDisputeInputSchema = z.object({
   disputeId: z.string().uuid(),
   decision: z.enum(["upheld", "dismissed"]),
 }).strict()
@@ -242,7 +242,7 @@ export async function resolveAwardDispute(input: unknown): Promise<ResolveAwardD
 }
 
 /** Bounded owner queue size (house bound; overflow is disclosed, not hidden). */
-export const AWARD_DISPUTE_QUEUE_BOUND = 200
+const AWARD_DISPUTE_QUEUE_BOUND = 200
 
 export type OpenAwardDisputeRow = {
   disputeId: string
@@ -283,49 +283,6 @@ export async function readOpenAwardDisputes(tenantId: string): Promise<OpenAward
   return rows.map((row) => ({ ...row, reasonLabel: AWARD_DISPUTE_REASON_LABELS[row.reason] }))
 }
 
-/** Bounded member history (house bound). */
-export const MY_DISPUTES_BOUND = 50
-
-export type MyAwardDisputeRow = {
-  disputeId: string
-  awardId: string
-  category: string
-  reasonLabel: string
-  status: "open" | "upheld" | "dismissed"
-  statusLabel: string
-  raisedAt: Date
-}
-
-/** The member's own dispute history in the league, newest first (bounded). */
-export async function readMyAwardDisputes(tenantId: string, actorId: string): Promise<MyAwardDisputeRow[]> {
-  const rows = await db
-    .select({
-      disputeId: tournamentAwardDisputes.id,
-      awardId: tournamentAwardDisputes.awardId,
-      category: tournamentAwards.category,
-      reason: tournamentAwardDisputes.reason,
-      status: tournamentAwardDisputes.status,
-      raisedAt: tournamentAwardDisputes.raisedAt,
-    })
-    .from(tournamentAwardDisputes)
-    .innerJoin(tournamentAwards, eq(tournamentAwards.id, tournamentAwardDisputes.awardId))
-    .where(and(
-      eq(tournamentAwardDisputes.tenantId, tenantId),
-      eq(tournamentAwardDisputes.raisedBy, actorId),
-    ))
-    .orderBy(desc(tournamentAwardDisputes.raisedAt))
-    .limit(MY_DISPUTES_BOUND)
-  return rows.map((row) => ({
-    disputeId: row.disputeId,
-    awardId: row.awardId,
-    category: row.category,
-    reasonLabel: AWARD_DISPUTE_REASON_LABELS[row.reason],
-    status: row.status,
-    statusLabel: disputeStatusLabels(row.status),
-    raisedAt: row.raisedAt,
-  }))
-}
-
 export type AwardDisputeAffordance = {
   /** Award ids the actor already has an OPEN dispute on (affordance is then dimmed). */
   myOpenDisputeAwardIds: string[]
@@ -340,7 +297,7 @@ export type AwardDisputeAffordance = {
  * write can never disagree about who may dispute. Read-only: anon-safe pages
  * unaffected; a signed-in non-member changes nothing.
  */
-export async function readAwardDisputeAffordance(
+async function readAwardDisputeAffordance(
   tenantId: string,
   tournamentId: string,
 ): Promise<AwardDisputeAffordance | null> {

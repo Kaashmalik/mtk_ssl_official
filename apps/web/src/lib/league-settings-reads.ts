@@ -14,7 +14,7 @@ import { z } from "zod"
 
 export type LeagueIdentity = { id: string; name: string; slug: string; plan: string }
 
-export const leagueBrandingColumns = {
+const leagueBrandingColumns = {
   appName: tenantBranding.appName,
   logoUrl: tenantBranding.logoUrl,
   faviconUrl: tenantBranding.faviconUrl,

@@ -105,10 +105,3 @@ export async function requirePublicTenantId(): Promise<string> {
   if (!ctx) throw new Error(NO_TENANT_MESSAGE);
   return ctx.tenantId;
 }
-
-/** Same as `requirePublicTenantId` but also returns the slug. */
-export async function requirePublicTenant(): Promise<PublicTenantContext> {
-  const ctx = await getPublicTenantContext();
-  if (!ctx) throw new Error(NO_TENANT_MESSAGE);
-  return ctx;
-}

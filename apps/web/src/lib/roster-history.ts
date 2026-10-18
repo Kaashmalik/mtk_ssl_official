@@ -22,7 +22,7 @@ export async function readRosterTeamHistory(tenantId: string, teamId: string) {
   return { fixtures, names, innings }
 }
 
-export function rosterPerformanceScope(table: typeof battingScorecards | typeof bowlingScorecards, tenantId: string, playerId: string) {
+function rosterPerformanceScope(table: typeof battingScorecards | typeof bowlingScorecards, tenantId: string, playerId: string) {
   return and(eq(table.playerId, playerId), eq(table.tenantId, tenantId),
     sql`exists (SELECT 1 FROM ${matches} WHERE ${matches.id} = ${table.matchId} AND ${matches.tenantId} = ${tenantId}
       AND (${table.teamId} = ${matches.teamAId} OR ${table.teamId} = ${matches.teamBId})

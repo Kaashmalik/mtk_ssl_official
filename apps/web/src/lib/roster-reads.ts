@@ -32,13 +32,13 @@ export function canManageRosterTeam(context: RosterReadContext, team: { isActive
 
 // Explicit projections: ordinary reads never fetch contact/DOB/physical/free-text
 // profile data, global identity links or creator metadata for client serialization.
-export const rosterPlayerColumns = {
+const rosterPlayerColumns = {
   id: players.id, tenantId: players.tenantId, teamId: players.teamId, name: players.name,
   role: players.role, battingStyle: players.battingStyle, bowlingStyle: players.bowlingStyle,
   jerseyNumber: players.jerseyNumber, photoUrl: players.photoUrl, nationality: players.nationality,
   city: players.city, status: players.status, isActive: players.isActive,
 }
-export const editablePlayerColumns = { ...rosterPlayerColumns, email: players.email, phone: players.phone,
+const editablePlayerColumns = { ...rosterPlayerColumns, email: players.email, phone: players.phone,
   dateOfBirth: players.dateOfBirth, heightCm: players.heightCm, weightKg: players.weightKg, biography: players.biography }
 export type EditableRosterPlayer = Pick<typeof players.$inferSelect, keyof typeof editablePlayerColumns>
 

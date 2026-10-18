@@ -36,7 +36,7 @@ import { and, asc, eq, inArray, sql, sum } from "drizzle-orm"
  * page surfaces that link to its owner once consent is granted. A future
  * identity-display slice would need its own explicit consent axis.
  */
-export const PUBLIC_CAREER_PROFILE_LEAGUE_LIMIT = 50
+const PUBLIC_CAREER_PROFILE_LEAGUE_LIMIT = 50
 
 export type PublicCareerLeague = {
   tenantId: string

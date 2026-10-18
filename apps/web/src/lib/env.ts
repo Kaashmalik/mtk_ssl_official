@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 /**
  * Runtime feature configuration for apps/web.
  *
@@ -16,12 +14,10 @@ import { z } from "zod";
 
 export type FeatureName = "paymentsUpload" | "email" | "streaming" | "commentary";
 
-const isDev = (process.env.NODE_ENV ?? "development") !== "production";
-
 const PLACEHOLDER_RE =
   /your_|replace_with|placeholder|changeme|example\.com|get from|<[^>]+>|\[[^\]]+\]/i;
 
-export function isConfigured(value: string | undefined): boolean {
+function isConfigured(value: string | undefined): boolean {
   if (!value) return false;
   const trimmed = value.trim();
   if (trimmed.length < 8) return false;
@@ -68,41 +64,3 @@ export function featureReadiness(feature: FeatureName): FeatureReadiness {
     missing: ready ? [] : spec.vars.filter((name) => !isConfigured(process.env[name])),
   };
 }
-
-export function isFeatureReady(feature: FeatureName): boolean {
-  return featureReadiness(feature).ready;
-}
-
-export class FeatureNotConfiguredError extends Error {
-  readonly feature: FeatureName;
-  readonly missing: string[];
-
-  constructor(feature: FeatureName, missing: string[]) {
-    super(
-      `Feature "${feature}" is not configured. Missing or placeholder values: ${missing.join(", ")}. ` +
-        `Set these in .env.production (see .env.example) before deploying.`,
-    );
-    this.name = "FeatureNotConfiguredError";
-    this.feature = feature;
-    this.missing = missing;
-  }
-}
-
-export function requireFeature(feature: FeatureName): void {
-  const { ready, missing } = featureReadiness(feature);
-  if (!ready) throw new FeatureNotConfiguredError(feature, missing);
-}
-
-const readinessSchema = z.record(z.enum(["paymentsUpload", "email", "streaming", "commentary"]), z.object({
-  ready: z.boolean(),
-  missing: z.array(z.string()),
-}));
-
-export function allFeatureReadiness() {
-  const result = Object.fromEntries(
-    (Object.keys(FEATURES) as FeatureName[]).map((name) => [name, featureReadiness(name)]),
-  );
-  return readinessSchema.parse(result);
-}
-
-export const isDevelopment = isDev;

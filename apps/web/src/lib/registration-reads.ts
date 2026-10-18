@@ -74,8 +74,6 @@ export const registrationReviewFilters = z.object({
   pageSize: z.number().int().min(1).max(100).default(50),
 }).strict()
 
-export function registrationPageNumber(value: unknown) { return z.coerce.number().int().min(1).max(1000000).parse(value ?? 1) }
-
 function page(page: number, pageSize: number, total: number) {
   return { page, pageSize, total, totalPages: Math.ceil(total / pageSize) }
 }

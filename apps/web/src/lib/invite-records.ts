@@ -31,7 +31,7 @@ export interface InviteAuthority {
 }
 
 /** Minimum delay between dispatch attempts for one invitation. */
-export const resendCooldownMs = 60 * 1000
+const resendCooldownMs = 60 * 1000
 
 /** Shared user -> league -> memberships order; no provider/network calls under locks. */
 async function lockInvitationAuthority(

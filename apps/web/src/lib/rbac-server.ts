@@ -37,23 +37,6 @@ export async function getUserRoleForTenant(
   return membership.role as UserRole;
 }
 
-/**
- * Get user role and tenant IDs by clerk ID (legacy — reads from users table).
- * Kept for backward compatibility during migration.
- */
-export async function getUserRoleAndTenantIds(clerkUserId: string) {
-  const user = await db.query.users.findFirst({
-    where: eq(users.clerkId, clerkUserId),
-  });
-  
-  if (!user || user.isActive !== true) return null;
-  
-  return {
-    role: user.role as UserRole,
-    tenantIds: (user.tenantIds || []) as string[],
-  };
-}
-
 export async function hasPermissionServer(permission: Permission, tenantId?: string): Promise<boolean> {
   const { userId: clerkUserId } = await auth();
   if (!clerkUserId) return false;

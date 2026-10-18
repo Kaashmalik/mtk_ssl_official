@@ -57,10 +57,3 @@ export function getScoringSocket(): Socket {
 
   return sharedSocket;
 }
-
-export function disconnectScoringSocket(): void {
-  if (!sharedSocket) return;
-  sharedSocket.removeAllListeners();
-  sharedSocket.disconnect();
-  sharedSocket = null;
-}

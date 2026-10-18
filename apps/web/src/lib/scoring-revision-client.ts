@@ -14,7 +14,3 @@ export class ScoringRevisionConflict extends Error {
     this.name = "ScoringRevisionConflict"
   }
 }
-
-export function isScoringRevisionConflict(error: unknown): error is ScoringRevisionConflict {
-  return error instanceof ScoringRevisionConflict
-}

@@ -63,3 +63,71 @@ describe("dead-surface audit pin (Batch 130)", () => {
     expect(moderation).toContain("removeModeratedReaction")
   })
 })
+
+describe("dead-surface audit tier 2: lib exports with no consumers (Batch 131)", () => {
+  /**
+   * The lib tier is not HTTP-reachable, but a needless `export` invites
+   * future drift (something CAN import it, so something eventually WILL).
+   * Everything below is used only inside its own module or was fully dead;
+   * each name keeps its implementation, loses the outward surface.
+   */
+  const UNEXPORTED: Array<[string, string]> = [
+    ["lib/award-dispute-records.ts", "raiseAwardDisputeInputSchema"],
+    ["lib/award-dispute-records.ts", "resolveAwardDisputeInputSchema"],
+    ["lib/award-dispute-records.ts", "AWARD_DISPUTE_QUEUE_BOUND"],
+    ["lib/award-dispute-records.ts", "readAwardDisputeAffordance"],
+    ["lib/award-records.ts", "declareAwardInputSchema"],
+    ["lib/award-records.ts", "AWARD_MANAGER_BOUND"],
+    ["lib/award-records.ts", "revokeAwardInputSchema"],
+    ["lib/fan-follows.ts", "fanFollowSchema"],
+    ["lib/fan-reaction-moderation.ts", "REACTION_MODERATION_LIMIT"],
+    ["lib/form-drafts.ts", "DRAFT_KEY_PREFIX"],
+    ["lib/invite-records.ts", "resendCooldownMs"],
+    ["lib/league-settings-reads.ts", "leagueBrandingColumns"],
+    ["lib/match-records.ts", "umpireMembership"],
+    ["lib/member-directory-filters.ts", "memberDirectoryExpiryStates"],
+    ["lib/member-management.ts", "memberEditableRoles"],
+    ["lib/member-management.ts", "memberExpiryChangeSchema"],
+    ["lib/member-management.ts", "leagueMemberLimit"],
+    ["lib/notification-dispatch.ts", "notificationPreferencesInputSchema"],
+    ["lib/prize-records.ts", "PRIZE_MANAGER_BOUND"],
+    ["lib/public-career-profile.ts", "PUBLIC_CAREER_PROFILE_LEAGUE_LIMIT"],
+    ["lib/public-visibility.ts", "PUBLIC_TOURNAMENT_OPTIONS_LIMIT"],
+    ["lib/public-visibility.ts", "PUBLIC_HALL_OF_FAME_LIMIT"],
+    ["lib/rbac.ts", "ROLE_HIERARCHY"],
+    ["lib/roster-history.ts", "rosterPerformanceScope"],
+    ["lib/roster-reads.ts", "rosterPlayerColumns"],
+    ["lib/roster-reads.ts", "editablePlayerColumns"],
+    ["lib/subscription-status.ts", "deriveSubscriptionStatus"],
+    ["lib/env.ts", "isConfigured"],
+  ]
+
+  it.each(UNEXPORTED)("%s no longer exports %s", (file, name) => {
+    const src = source(file)
+    expect(src).toMatch(new RegExp(`\\b${name}\\b`)) // still implemented
+    expect(src).not.toMatch(new RegExp(`export (const|async function|function) ${name}(?![A-Za-z0-9_])`))
+  })
+
+  it("fully dead lib code was removed, not just un-exported", () => {
+    expect(() => source("lib/api-client.ts")).toThrow()
+    const env = source("lib/env.ts")
+    for (const dead of ["isFeatureReady", "requireFeature", "allFeatureReadiness", "isDevelopment", "FeatureNotConfiguredError"]) {
+      expect(env).not.toContain(dead)
+    }
+    // featureReadiness survives: a live route consumes it.
+    expect(env).toContain("export function featureReadiness")
+    for (const [file, dead] of [
+      ["lib/offline-ball-queue.ts", "clearQueue"],
+      ["lib/otp.ts", "OTP_MAX_ATTEMPTS"],
+      ["lib/public-tenant.ts", "export async function requirePublicTenant("],
+      ["lib/rbac-server.ts", "getUserRoleAndTenantIds"],
+      ["lib/rbac.ts", "getPermissions"],
+      ["lib/registration-reads.ts", "registrationPageNumber"],
+      ["lib/scoring-revision-client.ts", "isScoringRevisionConflict"],
+      ["lib/scoring-socket.ts", "disconnectScoringSocket"],
+      ["lib/award-dispute-records.ts", "readMyAwardDisputes"],
+    ] as const) {
+      expect(source(file)).not.toContain(dead)
+    }
+  })
+})

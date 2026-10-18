@@ -370,7 +370,7 @@ export async function recordPrizePayout(input: unknown): Promise<PrizeWriteResul
 }
 
 /** Bounded management-list size (house bound; overflow is disclosed, not hidden). */
-export const PRIZE_MANAGER_BOUND = 200
+const PRIZE_MANAGER_BOUND = 200
 
 export type PrizeManagementRow = {
   id: string

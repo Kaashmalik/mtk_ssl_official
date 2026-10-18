@@ -8,7 +8,7 @@ import { hasPermission, type Permission, type UserRole } from "./rbac"
 export type FanFollowType = "team" | "player" | "tournament"
 export type FanContext = { tenantId: string; actorId: string; clerkId: string; role: UserRole }
 
-export const fanFollowSchema = z.object({
+const fanFollowSchema = z.object({
   followableType: z.enum(["team", "player", "tournament"]),
   followableId: z.string().uuid(),
 }).strict()

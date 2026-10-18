@@ -143,7 +143,7 @@ export async function dispatchNotificationToTournamentFollowers(input: {
   return { fanout: followers.length, written }
 }
 
-export const notificationPreferencesInputSchema = z.object({
+const notificationPreferencesInputSchema = z.object({
   inAppEnabled: z.boolean(),
   quietStartMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   quietEndMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),

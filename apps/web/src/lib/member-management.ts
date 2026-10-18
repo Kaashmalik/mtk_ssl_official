@@ -14,7 +14,7 @@ import { membershipGrantsAccess, parseMembershipExpiry } from "@mtk/database"
  */
 
 /** Roles an owner may assign here. Owner/platform roles are transfer-only. */
-export const memberEditableRoles = ["team_manager", "coach", "scorer", "player", "fan"] as const
+const memberEditableRoles = ["team_manager", "coach", "scorer", "player", "fan"] as const
 
 const memberKey = z.object({
   tenantId: z.string().uuid(),
@@ -29,7 +29,7 @@ export const memberRemovalSchema = memberKey.strict()
  * clears it, making the membership unbounded again. The instant must be in the
  * future at submission time; the DB CHECK additionally keeps it after creation.
  */
-export const memberExpiryChangeSchema = memberKey.extend({
+const memberExpiryChangeSchema = memberKey.extend({
   expiresAt: z.string().datetime({ offset: true }).nullable(),
 }).strict()
 export type MemberRoleChange = z.infer<typeof memberRoleChangeSchema>
@@ -41,7 +41,7 @@ export type MemberExpiryChange = z.infer<typeof memberExpiryChangeSchema>
 export type MemberManagementContext = { tenantId: string; actorId: string; clerkId: string }
 
 /** Bounded league roster read; no per-row follow-up lookups. */
-export const leagueMemberLimit = 100
+const leagueMemberLimit = 100
 
 /** Administrative contact details are owner-only, not team-manager user:read. */
 export async function readLeagueMembers(tenantId: string, expectedTenantId?: string) {

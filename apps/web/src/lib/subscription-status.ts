@@ -18,7 +18,7 @@ export interface SubscriptionStatusInfo {
   plan: string
 }
 
-export function deriveSubscriptionStatus(sub: {
+function deriveSubscriptionStatus(sub: {
   status: string
   currentPeriodEnd: Date | null
   trialEndsAt: Date | null

@@ -175,13 +175,6 @@ export function hasAnyPermission(role: UserRole, permissions: Permission[]): boo
 }
 
 /**
- * Get all permissions for a role
- */
-export function getPermissions(role: UserRole): Permission[] {
-  return ROLE_PERMISSIONS[role] ?? [];
-}
-
-/**
  * Role hierarchy for display purposes
  */
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -197,7 +190,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 /**
  * Role hierarchy level (higher = more permissions)
  */
-export const ROLE_HIERARCHY: Record<UserRole, number> = {
+const ROLE_HIERARCHY: Record<UserRole, number> = {
   super_admin: 100,
   league_owner: 80,
   team_manager: 60,

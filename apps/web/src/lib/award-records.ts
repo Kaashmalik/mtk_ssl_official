@@ -25,7 +25,7 @@ import { z } from "zod"
  * never becomes an official record. No fan-vote input is accepted anywhere.
  */
 
-export const declareAwardInputSchema = z.object({
+const declareAwardInputSchema = z.object({
   tournamentId: z.string().uuid(),
   category: z.enum(AWARD_CATEGORIES),
   playerId: z.string().uuid().nullable().optional(),
@@ -201,9 +201,9 @@ export async function declareTournamentAward(input: unknown): Promise<DeclareAwa
 }
 
 /** Bounded picker snapshot size (house bound; overflow is disclosed, not hidden). */
-export const AWARD_MANAGER_BOUND = 200
+const AWARD_MANAGER_BOUND = 200
 
-export const revokeAwardInputSchema = z.object({
+const revokeAwardInputSchema = z.object({
   tournamentId: z.string().uuid(),
   awardId: z.string().uuid(),
 }).strict()

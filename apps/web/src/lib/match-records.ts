@@ -90,7 +90,7 @@ export async function listTenantScorers(tenantId: string) {
  * active membership whose expiry bound, if any, still passes on the server
  * clock). The locked writer re-derives the same facts under lock.
  */
-export function umpireMembership(tenantId: string) {
+function umpireMembership(tenantId: string) {
   return sql`(
     ${users.isActive} = true AND EXISTS (SELECT 1 FROM ${userTenantRoles}
       WHERE ${userTenantRoles.userId} = ${users.id}

@@ -2,7 +2,7 @@ import { z } from "zod"
 
 export const MEMBER_DIRECTORY_PAGE_SIZE = 50
 export const memberDirectoryRoles = ["all", "league_owner", "team_manager", "coach", "scorer", "player", "fan", "super_admin"] as const
-export const memberDirectoryExpiryStates = ["all", "unbounded", "bounded", "expired"] as const
+const memberDirectoryExpiryStates = ["all", "unbounded", "bounded", "expired"] as const
 export const memberDirectoryFilters = z.object({
   q: z.string().trim().max(100).default(""),
   status: z.enum(["all", "active", "suspended"]).default("all"),

@@ -31,7 +31,7 @@ export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VA
 export const PUBLIC_LEADERBOARD_LIMIT = 10
 
 /** Competition selector entries are bounded (disclosed, never silently cut). */
-export const PUBLIC_TOURNAMENT_OPTIONS_LIMIT = 100
+const PUBLIC_TOURNAMENT_OPTIONS_LIMIT = 100
 
 /**
  * PUB-06 public field allowlists. The unauthenticated surface receives ONLY
@@ -677,7 +677,7 @@ export async function readPublishedTournamentPrizes(
 }
 
 /** Hall of fame rows are bounded, newest-completed-first and disclosed. */
-export const PUBLIC_HALL_OF_FAME_LIMIT = 20
+const PUBLIC_HALL_OF_FAME_LIMIT = 20
 
 export type HallOfFameEntry = {
   tournamentId: string
