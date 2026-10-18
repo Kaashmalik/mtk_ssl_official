@@ -19,6 +19,7 @@ const WEB_SRC = join(dirname(fileURLToPath(import.meta.url)), "..")
 const PUBLIC_FILES = [
   "app/tournaments/[id]/page.tsx",
   "app/tournaments/page.tsx",
+  "app/hall-of-fame/page.tsx",
   "app/matches/[matchId]/page.tsx",
   "app/matches/[matchId]/live/page.tsx",
   "app/api/scorecards/[matchId]/pdf/route.ts",

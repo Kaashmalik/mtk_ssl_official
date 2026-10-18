@@ -5974,6 +5974,39 @@ matrix, exactly like PUB-03 consent, because it belongs to the person.
 | `git diff --check` | Clean |
 | Migration | `20261018120000` applied remotely, verified column + history |
 
+## Batch 115 - FAN-03 public hall-of-fame page
+
+Batch 97's `readPublishedHallOfFame` reader was policy-complete but had NO
+calling page: the league's champions were recorded yet publicly invisible.
+This slice mounts the aggregate record surface.
+
+- New public `/hall-of-fame` page (`force-dynamic` + `noStore()`,
+  tenant-scoped): champion cards linking to the published tournament detail
+  pages, champion team NAME only (never internal team ids), the recorded
+  completion date, and an empty state that states the record-honesty rules -
+  champions are persisted at completion, legacy competitions without one are
+  intentionally absent, records are never re-derived or guessed.
+- Reader projection regression (previously untested): a planted full row of
+  the tournaments+teams join flows provenance (captainId/managerId), locks
+  and tenant plumbing through a careless `select()` - the projection must
+  pass exactly the five disclosed fields; the fake db learned `innerJoin`
+  pre-where and an orderBy().limit() terminal (thenable-with-limit) to
+  emulate both list shapes faithfully.
+- Hygiene guard list extended with the new page file.
+
+- Boundary: the aggregate surface carries no entrant-level detail by
+  reader contract; per-player hall-of-fame expansions are a product
+  decision, recorded not made. Roadmap checkbox waits on staged acceptance.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - new page guards + join projection regression |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none (existing persisted champion column only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

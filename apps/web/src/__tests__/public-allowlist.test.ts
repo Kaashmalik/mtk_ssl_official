@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  readPublishedTournament, readPublishedTournaments, readPublishedMatch, readPublishedMatchTeams,
+  readPublishedTournament, readPublishedTournaments, readPublishedHallOfFame,
+  readPublishedMatch, readPublishedMatchTeams,
 } from "@/lib/public-visibility"
 
 /**
@@ -29,22 +30,35 @@ vi.mock("@mtk/database", async (importOriginal) => ({
     // cols is present for allowlisted selects; WITHOUT it (select()) the full
     // row flows through - exactly the behavior this suite must catch.
     select: (cols?: Record<string, unknown>) => ({
-      from: () => ({
-        where: () => {
-          const take = async () => {
-            const rows = queue.shift() ?? []
-            if (!cols) return rows
-            const aliases = Object.keys(cols)
-            return rows.map(row => Object.fromEntries(aliases.map(alias => [alias, row[alias] ?? null])))
-          }
-          return {
-            limit: take,
-            // The list-shaped readers end in orderBy instead of limit; the
-            // same projection discipline applies (tournament index).
-            orderBy: take,
-          }
-        },
-      }),
+      from: () => {
+        // Terminal shapes served per read: limit-terminated single reads,
+        // orderBy-terminated list reads (tournament index) AND
+        // orderBy().limit() reads (hall of fame) - so orderBy returns a
+        // thenable that also carries limit, projecting identically at every
+        // terminal.
+        const project = async () => {
+          const rows = queue.shift() ?? []
+          if (!cols) return rows
+          const aliases = Object.keys(cols)
+          return rows.map(row => Object.fromEntries(aliases.map(alias => [alias, row[alias] ?? null])))
+        }
+        const terminals = () => ({
+          limit: project,
+          orderBy: () => ({
+            then: (onFulfilled?: (rows: Record<string, unknown>[]) => unknown, onRejected?: (err: unknown) => unknown) =>
+              project().then(onFulfilled, onRejected),
+            catch: (onRejected: (err: unknown) => unknown) => project().catch(onRejected),
+            limit: project,
+          }),
+        })
+        return {
+          // Join-shaped reads (hall of fame: tournaments INNER JOIN teams)
+          // resolve the ON clause in innerJoin, THEN hit where(); the
+          // projection discipline is identical at the terminal.
+          innerJoin: () => ({ where: terminals }),
+          where: terminals,
+        }
+      },
     }),
   },
 }))
@@ -117,6 +131,37 @@ describe("PUB-06: tournament allowlist", () => {
     expect(JSON.stringify(rows)).not.toContain("createdBy")
     expect(JSON.stringify(rows)).not.toContain("competitionLocked")
     expect(JSON.stringify(rows)).not.toContain("tenantId")
+  })
+
+  it("hall of fame: only the aggregate champion record is disclosed - planted team provenance is dropped", async () => {
+    // A careless select() on the tournaments+teams join would flow the full
+    // rows through: team captain/manager ids, provenance, tenant plumbing.
+    // The projection must pass exactly the five disclosed fields.
+    queue.push([{
+      tournamentId: TOURNAMENT,
+      name: "Champions Cup",
+      championTeamId: TEAM_A,
+      championTeamName: "Title Holders",
+      updatedAt: new Date("2026-10-18T00:00:00Z"),
+      tenantId: TENANT,
+      slug: "champions-cup",
+      competitionLockedBy: "00000000-0000-4000-8000-0000000000ee",
+      captainId: "00000000-0000-4000-8000-0000000000ca",
+      managerId: "00000000-0000-4000-8000-0000000000cb",
+    }])
+    const entries = await readPublishedHallOfFame(TENANT)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toEqual({
+      tournamentId: TOURNAMENT,
+      name: "Champions Cup",
+      championTeamId: TEAM_A,
+      championTeamName: "Title Holders",
+      completedAt: "2026-10-18T00:00:00.000Z",
+    })
+    expect(JSON.stringify(entries)).not.toContain("captainId")
+    expect(JSON.stringify(entries)).not.toContain("managerId")
+    expect(JSON.stringify(entries)).not.toContain("competitionLocked")
+    expect(JSON.stringify(entries)).not.toContain("tenantId")
   })
 })
 
