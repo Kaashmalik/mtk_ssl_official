@@ -6173,6 +6173,45 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 147 - REG-03 slice: the tournament application workflow (migration applied remotely)
+
+- DELIVERED: the first Phase-2 build line, complete. REG-03's team
+  applications to a tournament as a REVIEWED state machine:
+  - MIGRATION 20261018230000_tournament_applications APPLIED remotely +
+    verified in the same session (table, 2 enums with exact labels,
+    partial unique one-LIVE-per-team-per-tournament, live-first +
+    team-history indexes, resolution CHECK pinning provenance - decided
+    states require decider AND time; withdrawn resolves with a time and
+    NO decider, RLS FORCED, grants ssl/service_role ONLY). Additive; no
+    data/grant changes to existing objects.
+  - POLICY (tournament-application-policy.ts, 6 tests): the state
+    partition is exactly documented (live: submitted |
+    needs_information | waitlisted; terminal: approved | declined |
+    withdrawn - B141's "open" vocabulary verifiably does not leak in),
+    the member's ONLY move is withdrawal and only from live (no
+    self-approval exists), the owner's decision vocabulary is FIXED and
+    maps to exact states, terminal history is never re-decided, and
+    member-facing sentences state facts (needs_information names the
+    documented default answer path: withdraw and resubmit).
+  - WRITER (apps/web/src/lib/tournament-applications.ts, 15 journey
+    tests): submit = team's-current-manager + ACTIVE league membership +
+    open tournament, FOR UPDATE, identical replay = pure read, every
+    refusal honest (needs_information routes to withdraw+resubmit,
+    waitlisted waits, historical approval points at registration); a
+    declined application can never resubmit (declined is terminal);
+    withdraw = manager-only, leave time WITHOUT decider; decide =
+    LEAGUE-OWNER-only with provenance; terminal replays are pure reads
+    everywhere; audits on every real change.
+  - SURFACES: actions (zod-bounded, revalidate) + TournamentApplication
+    Card on the dashboard tournament detail page (owner facet: list with
+    the four decisions; manager facet: apply/withdraw) mirroring the
+    Poll/Prize card pattern; web tsc 0; the existing tournament-detail
+    suite untouched and green (13).
+- HONESTY: needs_information's "threaded reply" future is DOCUMENTED as
+  a default (withdraw+resubmit), not silently promised; declined-
+  forever is a stated rule the user may change later; the manager facet
+  deliberately shows only the caller's own managed team.
+
 ## Batch 146 - REL-07 + BASE-04 slice: release/rollback documentation and the migration inventory (no migration, no DB touched)
 
 - DELIVERED: the two Phase-3 items that need no user resources:

@@ -3,6 +3,16 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 147) - `tournament_applications` applied remotely**
+> (same proven path: original file, original stamp `20261018230000`,
+> applied with the comment-strip-BEFORE-chunking splitter + 12-statement
+> shape assertion, table/2 enums/3 indexes/resolution CHECK/RLS/grants
+> verified in the same session). REG-03 team applications to a
+> tournament: reviewed state machine, one LIVE application per team per
+> tournament (partial unique), owner decisions fixed-vocabulary with
+> provenance, member withdrawal resolves with a time and no decider;
+> additive, no data/grant changes to existing objects.
+
 > **19 October 2026 (Batch 141) - `scorecard_correction_requests` applied remotely**
 > (original file, original stamp `20261018220000`; same proven path; table
 > + 2 enums + 4 indexes + resolution CHECK + RLS verified in the same

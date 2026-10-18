@@ -28,6 +28,8 @@ import { readPrizeManagementContext } from "@/lib/prize-records"
 import { PrizeManagementCard } from "@/components/tournaments/prize-management-card"
 import { readTournamentPollManagement } from "@/lib/tournament-polls"
 import { PollManagementCard } from "@/components/tournaments/poll-management-card"
+import { readTournamentApplications, readTeamLiveApplication } from "@/lib/tournament-applications"
+import { TournamentApplicationCard } from "@/components/tournaments/tournament-application-card"
 import { computeStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -94,6 +96,18 @@ export default async function TournamentDetailPage({ params }: { params: Promise
   const pollManagement = canEdit
     ? await readTournamentPollManagement(context.tenantId, id)
     : []
+
+  // REG-03 (Batch 147): the application review surface. Owner sees the
+  // bounded list; a team manager of THIS league sees their own facet
+  // (apply/withdraw). Reads are tenant-column-safe and bounded.
+  const isLeagueOwner = context.role === "league_owner"
+  const applicationRows = isLeagueOwner ? await readTournamentApplications(id) : []
+  const [managedTeam] = await db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.tenantId, tournament.tenantId), eq(teams.managerId, context.actorId), eq(teams.isActive, true)))
+    .limit(1)
+  const liveApplication = managedTeam ? await readTeamLiveApplication(id, managedTeam.id) : null
 
   const followingState = await isFollowing("tournament", id)
   const followersCount = await getFollowerCount("tournament", id)
@@ -292,6 +306,17 @@ export default async function TournamentDetailPage({ params }: { params: Promise
             {canEdit && (
               <PollManagementCard tournamentId={id} polls={pollManagement} />
             )}
+            <TournamentApplicationCard
+              tournamentId={id}
+              isOwner={isLeagueOwner}
+              rows={applicationRows.map((row) => ({
+                id: row.id,
+                teamName: row.teamName,
+                status: row.status,
+                createdAt: row.createdAt.toISOString(),
+              }))}
+              managerFacet={managedTeam ? { teamId: managedTeam.id, live: liveApplication ? { id: liveApplication.id, status: liveApplication.status } : null } : null}
+            />
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Tournament Information</CardTitle>

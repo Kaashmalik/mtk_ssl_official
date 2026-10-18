@@ -90,9 +90,11 @@ export * from "./schema/waitlist";
 export * from "./schema/impersonation-sessions";
 export * from "./schema/match-availability";
 export * from "./schema/scorecard-correction-requests";
+export * from "./schema/tournament-applications";
 export * from "./lib/match-availability-policy";
 export * from "./lib/scorecard-correction-policy";
 export * from "./lib/profile-policy";
 export * from "./lib/email-templates";
+export * from "./lib/tournament-application-policy";
 
 

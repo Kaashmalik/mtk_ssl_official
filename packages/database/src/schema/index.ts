@@ -38,6 +38,7 @@ export * from "./tournament-polls";
 
 // League Management
 export * from "./league-registrations";
+export * from "./tournament-applications";
 
 // Content & Media
 export * from "./documents";
