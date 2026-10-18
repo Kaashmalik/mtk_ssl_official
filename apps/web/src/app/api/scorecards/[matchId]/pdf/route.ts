@@ -364,8 +364,12 @@ export async function GET(
   return new NextResponse(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      // Allow browsers to cache for 60 s so repeated opens don't re-query
-      "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+      // PUB-06: this export is publication-gated per request, so it must NOT
+      // be publicly cacheable. `public, max-age=60` previously let a shared or
+      // browser cache keep serving a withdrawn tournament's scorecard for up
+      // to 60 s (+ 300 s stale-while-revalidate) after unpublish. The extra
+      // query per open is the honest cost of failing closed.
+      "Cache-Control": "private, no-store",
     },
   })
 }

@@ -5768,6 +5768,48 @@ acceptance.
 | git diff --check | Clean |
 | Migration | none this batch (action wiring only) |
 
+## Batch 110 - PUB-06 unauthorized export access (scorecard PDF route)
+
+The scorecard PDF (`GET /api/scorecards/[matchId]/pdf`) is the only
+unauthenticated export on the platform. It was already tenant-scoped and
+publication-gated through the shared readers, but nothing proved it, and it
+advertised itself as publicly cacheable.
+
+- New route-level suite `scorecard-pdf-route.test.ts` (6) imports the real GET
+  handler and proves it is fail-closed: 404 with no database touch when no
+  public tenant resolves; 404 for an unpublished or foreign-tenant match
+  before any scorecard read; 404 when one match team is not in the request
+  tenant (only the two team lookups run); never consults Clerk auth (public by
+  design); a successful render projects explicit columns only; and every WHERE
+  pins the request tenant.
+- Cache hole closed: the response advertised `public, max-age=60,
+  stale-while-revalidate=300`, so a shared or browser cache could keep serving
+  a withdrawn tournament's export for up to 60 s (+300 s) after unpublish. It
+  is now `private, no-store` - the extra query per open is the honest cost of
+  failing closed (the PUB-06 withdrawal/cache-invalidation clause).
+- Socket access recorded as verified, not re-implemented: the public live view
+  never opens an unscoped channel - fan reactions are accepted only for the
+  exact (tenantId, matchId) pair via the public-scoring-events policy
+  (packages/database tests), and the scoring gateway keeps its bearer-token
+  gate.
+
+**Boundary (recorded honestly).** PUB-06 remains open: minor consent has no
+data model or product policy in the repo (no guardian/minor concept anywhere
+under apps/web or packages/database), so it is an honest gap rather than an
+implementation; staged acceptance still needs the user token. The checkbox
+stays unticked.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - new scorecard-pdf-route 6 |
+| `npx vitest run` (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (route + test change only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
