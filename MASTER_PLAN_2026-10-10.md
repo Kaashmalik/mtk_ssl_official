@@ -6171,6 +6171,42 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 139 - UX-03 slice: i18n/RTL minimal slice (next-intl, no URL routing)
+
+- DELIVERED: the platform's first localized slice. next-intl 4 (cookie +
+  Accept-Language resolution WITHOUT URL restructuring) with three
+  locales: English (default), Bengali (home + diaspora audience), and
+  Arabic (correct html dir=rtl via a pure direction map). Full layout
+  mirroring polish (CSS logical properties, icon flipping) stays
+  explicitly open scope - honesty over a cosmetic claim.
+- PLUMBING: next.config.js wraps the existing (possibly Sentry-wrapped)
+  export with next-intl's plugin; src/i18n/request.ts resolves the
+  request locale (cookie mtk-locale, then Accept-Language honoring q=
+  values, then en - an unsupported language NEVER becomes a wrong
+  language, it becomes honest English); the root layout is now async and
+  renders lang + dir + NextIntlClientProvider (recorded consequence:
+  cookies() in the layout shifts rendering toward dynamic - accepted,
+  this app is auth-heavy anyway).
+- FIRST TRANSLATED SURFACES are the centralized label sets from B137/B138:
+  the Match Center partnership/recent strip (public match page) and the
+  availability card (dashboard match page) - titles, statuses,
+  descriptions, state messages. The dictionary files (messages/en|bn|ar)
+  are drafted translations and NEED HUMAN REVIEW before a localized
+  launch (recorded honestly; translations were machine-drafted).
+- POLICY CHANGE: the overlay's partnershipBasis now returns a KEY
+  ("sinceLastWicket" | "ballOne"), not an English sentence - the page
+  renders it through the matchCenter dictionary; the English
+  OVERLAY_LABELS remain the canonical fallback record (policy stays
+  UI-independent while surfaces localize).
+- TESTS: i18n suite (6) - locale set/validation, rtl mapping, q-aware
+  Accept-Language negotiation incl. the unsupported-language refusal,
+  and deep KEY PARITY (bn and ar must carry every English leaf key, so
+  no fan ever sees a raw message id); overlay unit tests moved to the
+  basis keys; public-page pin now asserts the dictionary render.
+- COMPATIBILITY: the pnpm add re-hoisted the workspace and broke the
+  @sentry/nextjs junction for packages/observability - repaired with a
+  root pnpm install ( junction verified before trusting web tsc again).
+
 ## Batch 138 - REG-05 slice: member-recorded match availability (migration applied remotely)
 
 - DELIVERED: the availability journey - a league member records their own

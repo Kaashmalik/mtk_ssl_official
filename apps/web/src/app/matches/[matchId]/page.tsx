@@ -15,9 +15,10 @@ import type { FanReactionType } from "@mtk/database/lib/fan-reaction-policy"
 import { readFanReactionCounts, readMyFanReactions } from "@/lib/fan-reactions"
 import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
 import { ReactionFeedReport } from "@/components/shared/reaction-feed-report"
+import { getTranslations } from "next-intl/server"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
 import { deriveMatchRecap, RECAP_LABELS } from "@mtk/database/lib/match-recap"
-import { deriveInningsOverlay, OVERLAY_LABELS, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
+import { deriveInningsOverlay, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
@@ -257,6 +258,10 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
   // claims legality it cannot see), and innings with no rows render no
   // strip at all.
   const overlays = inningsRaw.map(inn => deriveInningsOverlay(ballsByInnings.get(inn.id) ?? []))
+  // UX-03 (Batch 139): the strip's labels render through the message
+  // dictionary (the policy's basis comes back as a KEY, not a sentence);
+  // the English policy labels remain the canonical fallback record.
+  const tMC = await getTranslations("matchCenter")
   const chipTone: Record<OverlayBallKind, string> = {
     dot: "bg-muted text-muted-foreground",
     run: "bg-muted text-foreground",
@@ -378,16 +383,16 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
                 <Card>
                   <CardContent className="py-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                     <span>
-                      <span className="font-semibold">{OVERLAY_LABELS.partnership}</span>{" "}
+                      <span className="font-semibold">{tMC("partnership")}</span>{" "}
                       {overlays[idx]!.partnershipRuns} ({overlays[idx]!.partnershipDeliveries}{" "}
-                      {OVERLAY_LABELS.recordedDeliveries}, {overlays[idx]!.partnershipBasis})
+                      {tMC("recordedDeliveries")}, {tMC(overlays[idx]!.partnershipBasis)})
                     </span>
                     {overlays[idx]!.lastWicketAt && (
                       <span className="text-muted-foreground text-xs">
-                        {OVERLAY_LABELS.lastWicket}: {overlays[idx]!.lastWicketAt}
+                        {tMC("lastWicket")}: {overlays[idx]!.lastWicketAt}
                       </span>
                     )}
-                    <span className="ml-auto flex gap-1" aria-label={OVERLAY_LABELS.recentBalls}>
+                    <span className="ml-auto flex gap-1" aria-label={tMC("recentBalls")}>
                       {overlays[idx]!.recent.map((chip, i) => (
                         <span
                           key={i}

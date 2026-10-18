@@ -126,11 +126,16 @@ const sentryEnabled =
   Boolean(process.env.SENTRY_AUTH_TOKEN) &&
   (process.env.CI === "true" || process.env.SENTRY_UPLOAD === "1");
 
+// UX-03 (Batch 139): next-intl's App Router plugin - wires i18n/request.ts
+// so Server Components resolve the request locale (cookie, else
+// Accept-Language negotiation, else en) without URL restructuring.
+const withNextIntl = require("next-intl/plugin");
+
 if (isDev || !sentryEnabled) {
-  module.exports = nextConfig;
+  module.exports = withNextIntl(nextConfig);
 } else {
   const { withSentryConfig } = require("@sentry/nextjs");
-  module.exports = withSentryConfig(nextConfig, {
+  module.exports = withSentryConfig(withNextIntl(nextConfig), {
     org: process.env.SENTRY_ORG || "shakir-super-league",
     project: process.env.SENTRY_PROJECT || "ssl-web",
     silent: !process.env.CI,

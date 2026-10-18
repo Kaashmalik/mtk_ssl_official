@@ -3,11 +3,10 @@
 import { useState, useTransition } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Button } from "@mtk/ui/components/ui/button"
+import { useTranslations } from "next-intl"
 import { setMatchAvailability } from "@/app/actions/match-availability"
 import {
-  AVAILABILITY_LABELS,
   AVAILABILITY_STATUSES,
-  AVAILABILITY_DESCRIPTIONS,
   availabilityLabel,
   type AvailabilityStatus,
 } from "@mtk/database/lib/match-availability-policy"
@@ -44,15 +43,16 @@ export function AvailabilityCard({
   const [status, setStatus] = useState<AvailabilityStatus | null>(initialStatus)
   const [message, setMessage] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
+  const t = useTranslations("availability")
 
   const record = (next: AvailabilityStatus) => {
     startTransition(async () => {
       try {
         const result = await setMatchAvailability({ matchId, status: next })
         setStatus(result.status)
-        setMessage(result.changed ? `Recorded: ${AVAILABILITY_LABELS[next]}` : "Already recorded - nothing changed")
+        setMessage(result.changed ? t("recordedMessage", { label: t(next) }) : t("unchangedMessage"))
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : "Could not record availability")
+        setMessage(err instanceof Error ? err.message : t(next))
       }
     })
   }
@@ -60,7 +60,7 @@ export function AvailabilityCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">My availability</CardTitle>
+        <CardTitle className="text-lg">{t("title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -71,17 +71,17 @@ export function AvailabilityCard({
               size="sm"
               variant={status === s ? "default" : "outline"}
               disabled={pending}
-              title={AVAILABILITY_DESCRIPTIONS[s]}
+              title={t(`${s}Description`)}
               onClick={() => record(s)}
             >
-              {AVAILABILITY_LABELS[s]}
+              {t(s)}
             </Button>
           ))}
         </div>
         {message && <p className="text-xs text-muted-foreground">{message}</p>}
         {answers.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-sm font-medium">Recorded answers</p>
+            <p className="text-sm font-medium">{t("answersTitle")}</p>
             <ul className="space-y-1">
               {answers.map((a) => (
                 <li key={a.userId} className="flex items-center gap-2 text-sm">
@@ -94,12 +94,12 @@ export function AvailabilityCard({
               ))}
             </ul>
             <p className="text-xs text-muted-foreground">
-              Answers are kept as recorded - a changed answer updates in place.
+              {t("answersNote")}
             </p>
           </div>
         )}
         {!currentUserId && (
-          <p className="text-xs text-muted-foreground">Sign in to record your availability.</p>
+          <p className="text-xs text-muted-foreground">{t("signInHint")}</p>
         )}
       </CardContent>
     </Card>

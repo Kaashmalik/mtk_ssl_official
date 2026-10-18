@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { deriveInningsOverlay, overlayBallChip, OVERLAY_LABELS } from "../lib/match-overlays"
+import { deriveInningsOverlay, overlayBallChip } from "../lib/match-overlays"
 
 const ball = (runs: number, isWicket = false, overNumber = 1, ballNumber = 1) =>
   ({ runs, isWicket, overNumber, ballNumber })
@@ -24,7 +24,7 @@ describe("deriveInningsOverlay folds over recorded ball rows (Batch 137, SCORE-1
     const overlay = deriveInningsOverlay([ball(1, false, 1, 1), ball(4, false, 1, 2), ball(0, false, 1, 3)])!
     expect(overlay.partnershipRuns).toBe(5)
     expect(overlay.partnershipDeliveries).toBe(3)
-    expect(overlay.partnershipBasis).toBe(OVERLAY_LABELS.ballOne)
+    expect(overlay.partnershipBasis).toBe("ballOne")
     expect(overlay.lastWicketAt).toBeNull()
   })
 
@@ -36,7 +36,7 @@ describe("deriveInningsOverlay folds over recorded ball rows (Batch 137, SCORE-1
     ])!
     expect(overlay.partnershipRuns).toBe(8)
     expect(overlay.partnershipDeliveries).toBe(2)
-    expect(overlay.partnershipBasis).toBe(OVERLAY_LABELS.sinceLastWicket)
+    expect(overlay.partnershipBasis).toBe("sinceLastWicket")
     expect(overlay.lastWicketAt).toBe("1.3")
   })
 

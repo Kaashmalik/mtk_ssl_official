@@ -80,9 +80,14 @@ describe("PUB-06 (Batch 133): official-record public surfaces gate minor NAMES",
   it("the Match Center partnership/recent strip folds the shared ball rows, never a new read", () => {
     const source = read("app/matches/[matchId]/page.tsx")
     expect(source).toContain("deriveInningsOverlay(ballsByInnings.get(inn.id) ?? [])")
-    expect(source).toContain("OVERLAY_LABELS.recordedDeliveries")
+    // UX-03 (Batch 139): strip labels render through the message dictionary,
+    // with the policy's partnership basis arriving as a KEY, not a sentence.
+    expect(source).toContain('tMC("recordedDeliveries")')
+    expect(source).toContain("deriveInningsOverlay(")
+    expect(source).toContain('getTranslations("matchCenter")')
     // The overlay build sits after the single ball-row read; the page keeps
     // exactly one matchBalls select (the wicketBalls read the FoW map uses).
+    expect(source).not.toContain("OVERLAY_LABELS.")
     expect(source.match(/from\(matchBalls\)/g)?.length).toBe(1)
   })
 })

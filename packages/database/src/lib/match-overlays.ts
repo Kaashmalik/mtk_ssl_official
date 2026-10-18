@@ -23,6 +23,11 @@ export const OVERLAY_LABELS = {
   lastWicket: "Last wicket",
 } as const
 
+/** The partnership basis as a KEY (UX-03, Batch 139): the surface renders it
+ * through the message dictionary (matchCenter.sinceLastWicket / .ballOne).
+ * The English labels above remain the canonical fallback record. */
+export type PartnershipBasisKey = "sinceLastWicket" | "ballOne"
+
 export type OverlayBallKind = "dot" | "run" | "four" | "six" | "wicket"
 
 export interface OverlayBallChip {
@@ -34,7 +39,7 @@ export interface OverlayBallChip {
 export interface InningsOverlay {
   partnershipRuns: number
   partnershipDeliveries: number
-  partnershipBasis: string
+  partnershipBasis: PartnershipBasisKey
   lastWicketAt: string | null
   recent: OverlayBallChip[]
 }
@@ -79,7 +84,7 @@ export function deriveInningsOverlay(
   return {
     partnershipRuns,
     partnershipDeliveries,
-    partnershipBasis: lastWicketAt ? OVERLAY_LABELS.sinceLastWicket : OVERLAY_LABELS.ballOne,
+    partnershipBasis: lastWicketAt ? "sinceLastWicket" : "ballOne",
     lastWicketAt,
     recent,
   }
