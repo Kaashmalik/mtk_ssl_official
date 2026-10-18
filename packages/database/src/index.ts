@@ -88,5 +88,7 @@ export * from "./schema/scoring-outbox";
 export * from "./schema/scorecard-projections";
 export * from "./schema/waitlist";
 export * from "./schema/impersonation-sessions";
+export * from "./schema/match-availability";
+export * from "./lib/match-availability-policy";
 
 

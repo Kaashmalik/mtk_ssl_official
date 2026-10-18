@@ -1,7 +1,7 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { teams, matches, matchInnings, venues, players, leagueRegistrations } from "@mtk/database"
+import { teams, matches, matchInnings, venues, players, leagueRegistrations, matchAvailability } from "@mtk/database"
 import type { SquadRegistration } from "@mtk/database/lib/registered-squad-eligibility"
 import { MatchReadinessCard } from "@/components/matches/readiness-card"
 import MatchesPage from "@/app/dashboard/matches/page"
@@ -55,24 +55,36 @@ beforeEach(() => {
   mocks.options.mockResolvedValue({ teams: [{ id: A, name: "A" }, { id: B, name: "B" }], tournaments: [] })
   mocks.scorecard.mockResolvedValue({ batting: [{ inningsId: "innings", playerId: PLAYER, bowlerId: B,
     fielderId: A, dismissalType: "caught" }], bowling: [{ inningsId: "innings", playerId: B }] })
-  mocks.select.mockImplementation(() => ({ from: (table: any) => ({ where: (where: any) => {
-    const query = dialect.sqlToQuery(where)
-    const record = { table, ...query, limit: undefined as number | undefined }
-    mocks.predicates.push(record)
+  mocks.select.mockImplementation(() => ({ from: (table: any) => {
     let rows: any[] = []
-    if (table === matches) rows = [fixture]
-    if (table === teams) rows = [{ id: query.params[0], name: query.params[0] === A ? "A" : "B" }]
-    if (table === venues) rows = [{ name: "Ground", city: "City" }]
-    if (table === players) rows = [{ id: PLAYER, name: "Player" }]
-    if (table === matchInnings) rows = [{ id: "innings", teamId: A, inningsNumber: 1, totalBalls: 0, totalRuns: 0, totalWickets: 0 }]
-    if (table === leagueRegistrations) rows = mocks.registrations
-    const chain: any = { limit: async (limit: number) => {
-      record.limit = limit
-      if (table === leagueRegistrations && mocks.registrationFailure) throw new Error("Registration read unavailable")
-      return rows
-    }, orderBy: () => chain, then: (resolve: any) => resolve(rows) }
+    let predicatesRecord: { limit?: number } | undefined
+    const chain: any = {
+      // REG-05 (Batch 138): the availability summary joins rows to users
+      // BEFORE where(); the chain must accept the join link transparently.
+      innerJoin: () => chain,
+      where: (where: any) => {
+        const query = dialect.sqlToQuery(where)
+        predicatesRecord = { table, ...query, limit: undefined as number | undefined } as any
+        mocks.predicates.push(predicatesRecord)
+        if (table === matches) rows = [fixture]
+        if (table === teams) rows = [{ id: query.params[0], name: query.params[0] === A ? "A" : "B" }]
+        if (table === venues) rows = [{ name: "Ground", city: "City" }]
+        if (table === players) rows = [{ id: PLAYER, name: "Player" }]
+        if (table === matchInnings) rows = [{ id: "innings", teamId: A, inningsNumber: 1, totalBalls: 0, totalRuns: 0, totalWickets: 0 }]
+        if (table === leagueRegistrations) rows = mocks.registrations
+        if (table === matchAvailability) rows = []
+        return chain
+      },
+      limit: async (limit: number) => {
+        if (predicatesRecord) predicatesRecord.limit = limit
+        if (table === leagueRegistrations && mocks.registrationFailure) throw new Error("Registration read unavailable")
+        return rows
+      },
+      orderBy: () => chain,
+      then: (resolve: any) => resolve(rows),
+    }
     return chain
-  } }) }))
+  } }))
 })
 
 describe("Match dashboard route boundaries", () => {
@@ -106,7 +118,14 @@ describe("Match dashboard route boundaries", () => {
     expect(mocks.match).toHaveBeenCalledWith(MATCH)
     expect(mocks.scorecard).toHaveBeenCalledWith(MATCH)
     expect(mocks.predicates.length).toBeGreaterThanOrEqual(10)
-    expect(mocks.predicates.every(q => q.params.includes(TENANT))).toBe(true)
+    // Every read is scoped to the authorized match's league, with exactly
+    // one documented exception class: the session's OWN identity
+    // resolution (Clerk-id account lookup), which is global by nature and
+    // reads nothing that belongs to a league (REG-05, Batch 138).
+    expect(mocks.predicates.every(q =>
+      q.params.includes(TENANT)
+      || q.params.includes("clerk"),
+    )).toBe(true)
     expect(tree.find(e => e.type === DeleteButton)!.props.operation).toBe("cancel")
   })
   it("does not request auxiliary detail data when match access is denied", async () => {

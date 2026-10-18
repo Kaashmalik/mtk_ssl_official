@@ -3,6 +3,14 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 138) - `match_availability` applied remotely**
+> (same proven path: original file, original stamp `20261018210000`,
+> applied with the comment-strip-BEFORE-chunking splitter, table/indexes/
+> RLS/grants verified in the same session). REG-05 member-recorded match
+> availability; one row per (match,user) updated in place, status CHECK,
+> RLS forced, grants to ssl/service_role only; additive, no data/grant
+> changes to existing objects.
+
 > **18 October 2026 (Batch 136) - `creation_request_keys` applied remotely**
 > (same proven path: original file, original stamp `20261018200000`,
 > applied with the comment-strip-BEFORE-chunking splitter, column and

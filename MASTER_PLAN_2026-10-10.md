@@ -6171,6 +6171,49 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 138 - REG-05 slice: member-recorded match availability (migration applied remotely)
+
+- DELIVERED: the availability journey - a league member records their own
+  availability (available|unavailable|maybe) for a match; captains and
+  managers plan squads from RECORDED answers instead of group-chat
+  guesses. This is REG-05's genuinely missing planning clause (invite
+  journeys landed B134; this closes the "will you play?" loop).
+- Migration `20261018210000_match_availability` APPLIED remotely and
+  verified: match_availability (tenant/match/user FKs cascade, status
+  CHECK in the three-value set, recorded_at + updated_at provenance,
+  UNIQUE (match_id, user_id), tenant index, RLS FORCED, grants to
+  ssl/service_role ONLY - zero anon/authenticated grants).
+- WRITER (setMyAvailability): the actor is exclusively the Clerk session
+  - the public API carries NO actor parameter, so an answer for someone
+  else is unrepresentable. The match row is fetched by primary key and
+  every write is gated by an ACTIVE membership (status + expiry-aware
+  via membershipGrantsAccess) in the match's OWN league; terminal
+  matches (completed|cancelled|abandoned) refuse - an availability
+  answer after the result is theatre, and the refusal is a member-facing
+  sentence, not a code. FOR UPDATE lock before the read-modify-write;
+  one row per match+person updated in place with fresh provenance; an
+  identical replay is a PURE READ (no insert, no update, no second
+  audit row), audited MATCH_AVAILABILITY_RECORDED otherwise.
+- ACTION (setMatchAvailability): strict zod (uuid matchId, enum status)
+  - malformed intents refuse BEFORE any transaction begins.
+- UI: AvailabilityCard on the dashboard match page - three honest
+  buttons (with descriptions), messages that distinguish "Recorded"
+  from "Already recorded - nothing changed", and the league's bounded
+  recorded-answers list (displayName only; email deliberately NOT
+  exposed on a member-wide surface; unknown status renders "Unknown"
+  rather than an invented label).
+- SCOPING DISCIPLINE: the self-answer read is TENANT-SCOPED (matchId +
+  tenantId + userId); the Clerk-id account lookup is the one documented
+  global read (session identity resolution, reads nothing league-owned),
+  and the dashboard page's every-read-is-league-scoped pin now encodes
+  exactly that exception class instead of quietly weakening.
+- TESTS: policy (4, in packages/database) + journey (9, apps/web) + the
+  page route-boundary suite extended (its fake select chain gained
+  innerJoin-before-where support; harness note: vi.mock factories are
+  hoisted ABOVE top-level consts, so mutable state must live in
+  vi.hoisted containers, and register edits with LITERAL \n sequences
+  corrupt files - always use real newlines).
+
 ## Batch 137 - SCORE-13 slice: Match Center partnership/recent-balls overlays (pure fold, zero new reads)
 
 - DELIVERED: the public match page renders a per-innings overlay strip

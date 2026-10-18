@@ -20,6 +20,8 @@ import { ReactionModerationCard } from "@/components/matches/reaction-moderation
 import { readMatchReactionsForModeration } from "@/lib/fan-reaction-moderation"
 import { readOpenReactionReports } from "@/lib/fan-report-records"
 import { readActiveFanBlocks } from "@/lib/fan-block-records"
+import { readMatchAvailabilitySummary, readMyAvailability } from "@/lib/match-availability"
+import { AvailabilityCard, type AvailabilityAnswer } from "@/components/matches/availability-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
 import { auth } from "@clerk/nextjs/server"
@@ -77,6 +79,13 @@ let viewerIsLeagueOwner = false
       }
     }
   }
+
+  // REG-05 (Batch 138): the availability journey state - the viewer's own
+  // recorded answer and the league's bounded answers list (last-recorded
+  // facts, updated in place). The WRITE re-verifies active membership in
+  // this match's league under a lock; these reads only size the card.
+  const availabilityView = await readMyAvailability(id, match.tenantId)
+  const availabilityAnswers: AvailabilityAnswer[] = await readMatchAvailabilitySummary(id, match.tenantId)
 
   // Fetch Team A details
   const [teamA] = await db.select().from(teams).where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, match.tenantId))).limit(1)
@@ -319,6 +328,14 @@ let viewerIsLeagueOwner = false
           </div>}
         </div>
       </MotionWrapper>
+
+      {/* REG-05 (Batch 138): member-recorded availability */}
+      <AvailabilityCard
+        matchId={match.id}
+        currentUserId={availabilityView.userId || null}
+        initialStatus={availabilityView.status}
+        answers={availabilityAnswers}
+      />
 
       {/* Match Header Hero */}
       <MotionWrapper variant="fadeInUp" delay={0.1}>
