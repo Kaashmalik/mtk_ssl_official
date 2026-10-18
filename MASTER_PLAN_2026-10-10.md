@@ -5636,6 +5636,54 @@ acceptance.
 | `git diff --check` | Clean |
 | Migration | none this batch (client-only wiring) |
 
+## Batch 107 - PUB-06 public field allowlists (tournament / match / team)
+
+**A real leak closed.** `readPublishedTournament`, `readPublishedMatch` and
+`readPublishedMatchTeams` previously returned the FULL drizzle rows to the
+unauthenticated surface - including `tournaments.createdBy`, the
+competition-lock provenance, `teams.captainId`/`managerId`/`createdBy`,
+banner assets and tenant plumbing - on the public match pages, live page
+and the scorecard PDF route. They now select explicit **public field
+allowlists** (`PublicTournament`, `PublicMatch`, `PublicTeam` types):
+
+- Tournament: id, name, description, format, status, startDate, endDate,
+  championTeamId.
+- Match: id, tournamentId, status, matchFormat, matchType, totalOvers,
+  scheduledDate, venueId, teamAId/teamBId, tossWinnerId/tossDecision,
+  winnerId, result, manOfMatchId, streamSource/streamStatus, liveStreamUrl
+  (everything the public pages and PDF legitimately render).
+- Team: id, name, shortName, city, logoUrl, primaryColor/secondaryColor,
+  homeGround, foundedYear - never captain/manager/author ids.
+
+The audit was field-by-field against every public consumer (match detail,
+live, PDF, tournament page): no legitimate use referenced an excluded
+field (`tsc` proves it), so nothing public changed visually - only what
+was never meant to be public stopped traveling. The publication-gate
+semantics are untouched (two-gate rule, fail-closed parent, friendlies
+status gate - all retested).
+
+**Regression guard.** New `public-allowlist.test.ts` feeds FULL rows with
+planted secrets through readers whose fake db faithfully PROJECTS onto the
+caller's selected columns, then asserts the returned key sets are EXACTLY
+the allowlists. A future `select()`-everything drift resolves to the
+planted secrets and fails here.
+
+**Boundary (recorded honestly).** PUB-06's other clauses (minor consent,
+withdrawal/cache invalidation, unauthorized export/socket access) remain
+unchecked pending staged acceptance on the user's token; checkbox stays
+unticked.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - 5 new allowlist regressions + 60 existing reader tests |
+| `npx vitest run` (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (read-shape change only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

@@ -33,8 +33,57 @@ export const PUBLIC_LEADERBOARD_LIMIT = 10
 /** Competition selector entries are bounded (disclosed, never silently cut). */
 export const PUBLIC_TOURNAMENT_OPTIONS_LIMIT = 100
 
-export type PublicTournament = typeof tournaments.$inferSelect
-export type PublicMatch = typeof matches.$inferSelect
+/**
+ * PUB-06 public field allowlists. The unauthenticated surface receives ONLY
+ * these fields - provenance (createdBy), authority (captainId/managerId,
+ * competition locks), tenant plumbing and internal config never leave the
+ * server, even when the row itself passed the publication gate. Widening an
+ * allowlist is a deliberate code change with its own review, not a side
+ * effect of a select.
+ */
+export type PublicTournament = {
+  id: string
+  name: string
+  description: string | null
+  format: typeof tournaments.$inferSelect.format
+  status: typeof tournaments.$inferSelect.status
+  startDate: typeof tournaments.$inferSelect.startDate
+  endDate: typeof tournaments.$inferSelect.endDate
+  championTeamId: string | null
+}
+
+export type PublicMatch = {
+  id: string
+  tournamentId: string | null
+  status: typeof matches.$inferSelect.status
+  matchFormat: typeof matches.$inferSelect.matchFormat
+  matchType: typeof matches.$inferSelect.matchType
+  totalOvers: typeof matches.$inferSelect.totalOvers
+  scheduledDate: typeof matches.$inferSelect.scheduledDate
+  venueId: string | null
+  teamAId: string
+  teamBId: string
+  tossWinnerId: string | null
+  tossDecision: typeof matches.$inferSelect.tossDecision
+  winnerId: string | null
+  result: string | null
+  manOfMatchId: string | null
+  streamSource: string | null
+  streamStatus: typeof matches.$inferSelect.streamStatus
+  liveStreamUrl: string | null
+}
+
+export type PublicTeam = {
+  id: string
+  name: string
+  shortName: string | null
+  city: string | null
+  logoUrl: string | null
+  primaryColor: string | null
+  secondaryColor: string | null
+  homeGround: string | null
+  foundedYear: number | null
+}
 
 /**
  * Reads a single tournament scoped to the tenant AND gated on publication. A
@@ -42,7 +91,18 @@ export type PublicMatch = typeof matches.$inferSelect
  * it would for a foreign or missing id (no signal that the row exists).
  */
 export async function readPublishedTournament(tenantId: string, id: string): Promise<PublicTournament | null> {
-  const [row] = await db.select().from(tournaments)
+  const [row] = await db
+    .select({
+      id: tournaments.id,
+      name: tournaments.name,
+      description: tournaments.description,
+      format: tournaments.format,
+      status: tournaments.status,
+      startDate: tournaments.startDate,
+      endDate: tournaments.endDate,
+      championTeamId: tournaments.championTeamId,
+    })
+    .from(tournaments)
     .where(and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId)))
     .limit(1)
   if (!row || !isTournamentPublished(row.status)) return null
@@ -54,10 +114,31 @@ export async function readPublishedTournament(tenantId: string, id: string): Pro
  * is hidden when it is cancelled, or when it belongs to a tournament that is
  * itself unpublished — a fixture cannot be public while its competition is a
  * draft. Matches without a tournament (friendlies) are governed by their own
- * status alone.
+ * status alone. The returned row carries the PUB-06 public allowlist only.
  */
 export async function readPublishedMatch(tenantId: string, id: string): Promise<PublicMatch | null> {
-  const [row] = await db.select().from(matches)
+  const [row] = await db
+    .select({
+      id: matches.id,
+      tournamentId: matches.tournamentId,
+      status: matches.status,
+      matchFormat: matches.matchFormat,
+      matchType: matches.matchType,
+      totalOvers: matches.totalOvers,
+      scheduledDate: matches.scheduledDate,
+      venueId: matches.venueId,
+      teamAId: matches.teamAId,
+      teamBId: matches.teamBId,
+      tossWinnerId: matches.tossWinnerId,
+      tossDecision: matches.tossDecision,
+      winnerId: matches.winnerId,
+      result: matches.result,
+      manOfMatchId: matches.manOfMatchId,
+      streamSource: matches.streamSource,
+      streamStatus: matches.streamStatus,
+      liveStreamUrl: matches.liveStreamUrl,
+    })
+    .from(matches)
     .where(and(eq(matches.id, id), eq(matches.tenantId, tenantId)))
     .limit(1)
   if (!row || !isMatchPublished(row.status)) return null
@@ -73,10 +154,23 @@ export async function readPublishedMatch(tenantId: string, id: string): Promise<
 }
 
 /** Same-league team name lookup used by the public match/live pages. */
-export async function readPublishedMatchTeams(tenantId: string, match: PublicMatch) {
-  const [teamA] = await db.select().from(teams)
+export async function readPublishedMatchTeams(tenantId: string, match: Pick<PublicMatch, "teamAId" | "teamBId">) {
+  const columns = {
+    id: teams.id,
+    name: teams.name,
+    shortName: teams.shortName,
+    city: teams.city,
+    logoUrl: teams.logoUrl,
+    primaryColor: teams.primaryColor,
+    secondaryColor: teams.secondaryColor,
+    homeGround: teams.homeGround,
+    foundedYear: teams.foundedYear,
+  }
+  const [teamA] = await db.select(columns)
+    .from(teams)
     .where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, tenantId))).limit(1)
-  const [teamB] = await db.select().from(teams)
+  const [teamB] = await db.select(columns)
+    .from(teams)
     .where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, tenantId))).limit(1)
   return { teamA: teamA ?? null, teamB: teamB ?? null }
 }
