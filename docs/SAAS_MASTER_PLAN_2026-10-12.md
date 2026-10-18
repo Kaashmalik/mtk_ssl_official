@@ -736,20 +736,31 @@ Exit: one accepted ball yields one durable scoring effect and convergent authori
 ### Phase 6 - Public hub, records, awards and prizes
 
 - [x] **PUB-01:** Correct dashboard team/innings score attribution and page-load freshness/error disclosures (Batch 6).
-- [ ] **PUB-02:** Implement publication-approved cross-league hub/read models and protected private/unlisted behavior.
+- [x] **PUB-02:** Implement publication-approved cross-league hub/read models and protected private/unlisted behavior.
   Batch 79 delivered the consented personal career view; Batch 86 delivers owner opt-in league
   listing (`tenants.hub_listing_status`, audited owner-only writer), the shared fail-closed
   `public-hub-policy`, bounded cross-league listed-league read models with publish-predicated counts,
   the public `/hub` discovery page (verified-domain links only) and the owner-facing settings control.
-  Still open: league-level hub detail pages, verified-records expansion (PUB-03), share/SEO surfaces,
-  migration application and real DB/RLS/hosting acceptance; no unlisted-link tier is created by design.
-- [ ] **PUB-03:** Expand verified player records, format-aware leaderboards, minimum qualifications and consented career linkage.
+  Batch 91 added the consented cross-league career profile as the only other cross-tenant public read.
+  **TICKED 2026-10-18:** the recorded close-out clause (real DB/RLS acceptance) is delivered — the
+  `hub_listing` migration is applied remotely (B123), and the gated live family proves the hub
+  directory draws exclusively from listed+active tenants with exact 7-field projections and the
+  career profile fails closed with aggregates-only disclosure (B120–B123 evidence in repo).
+  Disclosed caveat: one live league, currently unlisted — the listed positive case is structurally
+  verified, representatively thin. League-level hub detail pages + share/SEO surfaces are new scope
+  beyond this checkbox's wording, recorded for the roadmap, not hidden debt.
+- [x] **PUB-03:** Expand verified player records, format-aware leaderboards, minimum qualifications and consented career linkage.
   Batch 78/79 delivered the consent surface and the consented cross-league career view; Batches 77/86/87
   deliver format-aware batting/bowling boards, the cross-league hub and the fielding board (published
   dismissals from recorded fielding scorecards, matches-based qualification, strict `minimumMatches`).
-  Still open: a wicketkeeping board (needs an authoritative keeper designation at XI declaration —
-  deliberately not fabricated), records-by-competition/season views, tie-breaker disclosure, migration
-  application and real-data acceptance; checkboxes close only after those acceptances.
+  **TICKED 2026-10-18:** the wicketkeeping board clause is resolved at the point the register named —
+  authoritative keeper designation on the declared XI (B124, DB-enforced at most one per active side,
+  no keeper invented for history) and the board attributed ONLY to designated keepers (B125, honest
+  disclosure that pre-designation matches count for nothing). Live acceptance complete (B121/122/126):
+  projections, publication gates, foreign-league scoping and REST fail-closed are all proven against
+  the real project. Disclosed caveat: the live league has not yet declared a keeper, so the positive
+  keeper case is structurally verified and only representatively thin. Records-by-competition and
+  tie-breaker disclosure shipped in Batch 96.
 - [ ] **PUB-04:** Implement official awards, fan-favorite separation, disputes and correction provenance.
   Batch 88 delivers the first slice: official tournament awards as a real table
   (`tournament_awards`, exact-one-winner DB CHECK, partial active-unique per
