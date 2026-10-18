@@ -761,7 +761,7 @@ Exit: one accepted ball yields one durable scoring effect and convergent authori
   the real project. Disclosed caveat: the live league has not yet declared a keeper, so the positive
   keeper case is structurally verified and only representatively thin. Records-by-competition and
   tie-breaker disclosure shipped in Batch 96.
-- [ ] **PUB-04:** Implement official awards, fan-favorite separation, disputes and correction provenance.
+- [x] **PUB-04:** Implement official awards, fan-favorite separation, disputes and correction provenance.
   Batch 88 delivers the first slice: official tournament awards as a real table
   (`tournament_awards`, exact-one-winner DB CHECK, partial active-unique per
   tournament+category), a `tournament:update`-gated locked/audited declaration
@@ -784,8 +784,16 @@ Exit: one accepted ball yields one durable scoring effect and convergent authori
   `AWARD_REVOKED` distinct from declared/corrected, owner-reconfirmed per
   holder row on the declaration card, gallery revalidated on revoke.
   Still open: real-data acceptance (zero live awards/disputes — positive
-  paths structurally verified, representatively thin); the checkbox closes
-  only after that.
+  paths structurally verified, representatively thin).
+  **TICKED 2026-10-18** (user decision): all delivered-able clauses are
+  complete — declaration/correction with supersede provenance (B88/89), the
+  official/fan separation stated on the gallery, disputes with separated
+  member/owner authorities (B127) and revocation as audited supersede-with-
+  no-successor (B128). The real-data acceptance from the caveat line is
+  recorded on the checkbox, not dropped: when real tournaments declare
+  awards and raise disputes, the live acceptance family extends to them
+  before this caveat is retired. Fan-favorite hardening beyond the gallery
+  statement is new scope, recorded for the roadmap, not hidden debt.
 - [ ] **PUB-05:** Implement configurable prize categories/currency/sponsors, approval and truthful payout records.
 - [ ] **PUB-06:** Verify public field allowlists, minor consent, withdrawal/cache invalidation and unauthorized export/socket access.
 
