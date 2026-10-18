@@ -17,7 +17,7 @@ import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
 import { ReactionFeedReport } from "@/components/shared/reaction-feed-report"
 import { getTranslations } from "next-intl/server"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
-import { deriveMatchRecap, RECAP_LABELS } from "@mtk/database/lib/match-recap"
+import { deriveMatchRecap } from "@mtk/database/lib/match-recap"
 import { deriveInningsOverlay, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
@@ -262,6 +262,11 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
   // dictionary (the policy's basis comes back as a KEY, not a sentence);
   // the English policy labels remain the canonical fallback record.
   const tMC = await getTranslations("matchCenter")
+  // FAN-04 (Batch 143): the recap card rides the matchRecap dictionary the
+  // same way - bounded keys, English RECAP_LABELS in the policy remain the
+  // canonical fallback record, and the derivedNotice is rendered WITH the
+  // recap, always.
+  const tRecap = await getTranslations("matchRecap")
   const chipTone: Record<OverlayBallKind, string> = {
     dot: "bg-muted text-muted-foreground",
     run: "bg-muted text-foreground",
@@ -323,14 +328,14 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
       {recap && (
         <Card data-testid="match-recap">
-          <CardHeader><CardTitle className="text-lg">{RECAP_LABELS.title}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-lg">{tRecap("title")}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm font-medium">{recap.summary}</p>
             {(recap.topBatters.length > 0 || recap.topBowlers.length > 0) && (
               <div className="grid gap-2 sm:grid-cols-2 text-sm">
                 {recap.topBatters.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{RECAP_LABELS.topBatters}</p>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{tRecap("topBatters")}</p>
                     {recap.topBatters.map((row, i) => (
                       <p key={`b${i}`} className="tabular-nums">{row.playerName} — {row.runs} ({row.balls}b)</p>
                     ))}
@@ -338,7 +343,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
                 )}
                 {recap.topBowlers.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{RECAP_LABELS.topBowlers}</p>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{tRecap("topBowlers")}</p>
                     {recap.topBowlers.map((row, i) => (
                       <p key={`w${i}`} className="tabular-nums">{row.playerName} — {row.wickets}/{row.runs} ({row.overs} ov)</p>
                     ))}
@@ -348,17 +353,17 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
             )}
             {recap.moments.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{RECAP_LABELS.moments}</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{tRecap("moments")}</p>
                 <ul className="text-sm space-y-1">
                   {recap.moments.map((moment, i) => (
                     <li key={i}>
-                      <span className="font-semibold">{RECAP_LABELS.momentLabels[moment.kind]}</span> {moment.playerName} — {moment.detail}
+                      <span className="font-semibold">{tRecap(`momentLabels.${moment.kind}`)}</span> {moment.playerName} — {moment.detail}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            <p className="text-xs text-muted-foreground">{RECAP_LABELS.derivedNotice}</p>
+            <p className="text-xs text-muted-foreground">{tRecap("derivedNotice")}</p>
           </CardContent>
         </Card>
       )}

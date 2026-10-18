@@ -6171,6 +6171,41 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 143 - FAN-04 slice: the automatic recap goes through the dictionary (labeled, never official)
+
+- DELIVERED: FAN-04's buildable clause on the ALREADY-delivered recap
+  (FAN-03's deriveMatchRecap pure fold, Batch much earlier: derived view
+  of official scorecard rows only, honest null when rows cannot support
+  a sentence). What FAN-04 still required - an explicit "gate/label"
+  discipline - now holds in three pinned respects:
+  1. LABELS: the public match page's recap card renders through the new
+     matchRecap dictionary (title, topBatters, topBowlers, moments,
+     momentLabels.fifty|hundred|three_fors|five_for, derivedNotice) -
+     same pattern as the B139 overlay move; the English RECAP_LABELS in
+     packages/database/src/lib/match-recap.ts remain the canonical
+     fallback record. The derivedNotice ("Derived automatically from the
+     official scorecard rows - never a fabricated narrative") renders
+     INSIDE the same `recap &&` conditional as the card: no recap is
+     ever displayed without its not-official disclaimer. bn/ar strings
+     are MACHINE-DRAFTED and flagged for HUMAN REVIEW (standing
+     convention).
+  2. NO AI PATH: no LLM call, no provider, no estimation exists in this
+     slice; the recap is deterministic arithmetic over official rows.
+     Any future AI/prediction feature remains unbuilt and gated - FAN-04
+     keeps that clause open rather than pretending a label substitutes
+     for review of a provider-dependent feature.
+  3. OFFICIAL SCORES UNTOUCHED: the recap never recomputes a winner -
+     the result line is the page's publication-safe resultText echoed
+     verbatim; policy header already states DERIVED VIEW ONLY.
+- VERIFIED: public-page-hygiene suite extended - the FAN-03 pin's
+  RECAP_LABELS.title assertion superseded to tRecap("title") (recorded
+  supersession comment), and a new FAN-04 pin asserts deriveMatchRecap
+  is the only recap source, getTranslations("matchRecap") present,
+  tRecap("derivedNotice") rendered inside the recap conditional, no
+  RECAP_LABELS. usage left on the page, and the policy retains the
+  canonical English labels. i18n deep-key-parity suite covers the new
+  namespace automatically. web tsc 0.
+
 ## Batch 142 - REG-05 slice: the self-profile display-name journey (no migration)
 
 - DELIVERED: the personal identity edit REG-05 implied all along - the
