@@ -6140,6 +6140,35 @@ migration.
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 | Migration | none (reads + UI only) |
 
+## Batch 119 - FAN-02 completion: per-notification read marking
+
+The read loop had one half: the bell could mark ALL read, but
+`markNotificationRead` had no consumer anywhere - the notifications page
+showed "New" badges with no way to close one. Found by the systematic
+action-consumer scan (all other hits verified as false positives or
+Session B's REG/COMP domain, recorded untouched).
+
+- `NotificationsInbox` (client): per-item "Mark read" rendered ONLY for
+  unread items (no control on read ones - re-marking impossible from the
+  UI); local state updates ONLY after the member-gated action confirms
+  success (failure toasts, state untouched); honest `aria-live` unread
+  count. Serializable ISO handoff from the page; inline markup removed.
+- The bell's "mark all" path stays intact alongside per-item marking.
+- Wiring guard suite (4 tests) locks the contract, including
+  setItems-after-success ordering; the page test learned the bare-RSC
+  boundary properly (client inbox items asserted through element props,
+  not extracted tree text).
+- Boundary: `getMyNotificationPreferences` remains an action-tier
+  duplicate (the page reads via the lib) - recorded, not silently kept as
+  intended design. No migration.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
