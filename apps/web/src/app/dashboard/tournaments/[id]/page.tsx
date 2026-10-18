@@ -21,6 +21,8 @@ import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { hasPermission } from "@/lib/rbac"
 import { readAwardDeclarationContext } from "@/lib/award-records"
 import { AwardDeclarationCard } from "@/components/tournaments/award-declaration-card"
+import { readOpenAwardDisputes } from "@/lib/award-dispute-records"
+import { AwardDisputeReviewCard } from "@/components/tournaments/award-dispute-review-card"
 import { readPrizeManagementContext } from "@/lib/prize-records"
 import { PrizeManagementCard } from "@/components/tournaments/prize-management-card"
 import { readTournamentPollManagement } from "@/lib/tournament-polls"
@@ -73,6 +75,12 @@ export default async function TournamentDetailPage({ params }: { params: Promise
   const awardContext = canEdit
     ? await readAwardDeclarationContext(context.tenantId, id)
     : null
+
+  // PUB-04 disputes: the owner's open-dispute queue, same authority rule as
+  // the award card — bounded read, and resolution re-checks tournament:update.
+  const openDisputes = canEdit
+    ? await readOpenAwardDisputes(context.tenantId)
+    : []
 
   // Prize-management context (PUB-05): same authority rule as awards — the
   // read is bounded and every write re-checks the gate server-side.
@@ -269,6 +277,9 @@ export default async function TournamentDetailPage({ params }: { params: Promise
             <TournamentSettingsSummary tournament={tournament} />
             {awardContext && (
               <AwardDeclarationCard tournamentId={id} context={awardContext} />
+            )}
+            {canEdit && (
+              <AwardDisputeReviewCard disputes={openDisputes} />
             )}
             {prizeContext && (
               <PrizeManagementCard tournamentId={id} context={prizeContext} />

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { declareTournamentAward } from "@/lib/award-records"
+import { raiseAwardDispute, resolveAwardDispute } from "@/lib/award-dispute-records"
 
 /**
  * PUB-04 official award declaration. All validation, the tournament:update
@@ -19,5 +20,32 @@ export async function declareAward(input: unknown) {
     supersededId: result.supersededId,
     tournamentId: result.tournamentId,
     category: result.category,
+  }
+}
+
+/**
+ * PUB-04 award disputes. Raising is member authority, resolving is owner
+ * authority; both live entirely in the writer — the caller may only hand
+ * through the input. Raising never mutates the award (revalidations just
+ * refresh the galleries/queues that DISPLAY records).
+ */
+export async function raiseAwardDisputeAction(input: unknown) {
+  const result = await raiseAwardDispute(input)
+  revalidatePath("/tournaments")
+  return {
+    success: true as const,
+    raised: result.raised,
+    disputeId: result.disputeId,
+  }
+}
+
+export async function resolveAwardDisputeAction(input: unknown) {
+  const result = await resolveAwardDispute(input)
+  revalidatePath("/tournaments")
+  return {
+    success: true as const,
+    decided: result.decided,
+    disputeId: result.disputeId,
+    decision: result.decision,
   }
 }

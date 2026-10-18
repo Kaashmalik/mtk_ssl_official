@@ -3,6 +3,25 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 127) - `award_disputes` applied remotely** (same
+> proven path: original file, original stamp `20261018160000`, history row
+> inserted, shape-verified in the same session). New table
+> `tournament_award_disputes` (PUB-04): CHECK-pinned reason enum
+> `award_dispute_reason` (`incorrect_winner|winner_ineligible|process_error|other`),
+> status enum `award_dispute_status` (`open|upheld|dismissed`) with a
+> resolution-provenance CHECK (open = no reviewer/resolved_at;
+> decided = both), composite FK to `tournaments(id, tenant_id)` (created the
+> idempotent anchor `tournaments_id_tenant_key`, missing until now),
+> PARTIAL unique `tournament_award_disputes_one_open_per_member_key (award_id,
+> raised_by) WHERE status='open'` (= one OPEN dispute per member per award, a
+> DB guarantee; decided disputes never block a fresh challenge), open-only
+> helper indexes, RLS enable/force=true, grants only ssl/service_role, no
+> DELETE. Verified remotely: all columns typed with the enums, constraints
+> present, anchors + enums + RLS confirmed. Gotcha repeated: audience-facing
+> SQL COMMENT strings must be self-escaped in the migration file itself
+> (a PowerShell-style quote artifact from drafting broke one apply — fixed
+> to standard `''` escaping before retry).
+
 > **18 October 2026 (Batch 124) - LOCAL-ONLY chain backfilled + applied
 > remotely (the Batch 123 discovery generalized):** a full local-vs-remote
 > migration diff found production FIVE migrations behind, all previously

@@ -44,6 +44,7 @@ export * from "./documents";
 export * from "./media";
 export * from "./announcements";
 export * from "./tournament-awards";
+export * from "./tournament-award-disputes";
 export * from "./tournament-prizes";
 export * from "./commentary-events";
 export * from "./notifications";

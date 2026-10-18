@@ -6169,6 +6169,49 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 127 - Award disputes (PUB-04 dispute clause complete)
+
+Pub-04's recorded dispute workflow, built as RECORDS that never mutate the
+award:
+
+- Migration `20261018160000_award_disputes`: fixed reason enum
+  (`incorrect_winner|winner_ineligible|process_error|other` — no free text;
+  a longer dispute brief is recorded future work), status enum
+  (`open|upheld|dismissed) with a resolution-provenance CHECK (open = no
+  reviewer; decided = reviewer AND time), composite match-tenant FK, PARTIAL
+  unique one-OPEN-dispute per member per award (decided disputes never block
+  a fresh challenge), RLS forced, grants only ssl/service_role, no DELETE.
+  Applied remotely with original stamp + history row and shape-verified
+  (constraints, enums, anchor, RLS). Added the idempotent
+  `tournaments_id_tenant_key` anchor production was missing.
+- Raise is self-contained MEMBER authority, never a permission string:
+  requireFanContext re-derives identity/membership from auth(); the writer
+  then proves an approved registration in THAT tournament carries one of the
+  actor's player rows (or was registered by the actor) — the same eligibility
+  read the award writer enforces. Replays are idempotent (pre-check + DB
+  partial unique race fallback, both returning the OPEN row, `raised: false`).
+- Resolve is OWNER authority only (`tournament:update`), row-locked
+  in-transaction, terminal either way (open -> upheld | dismissed), audited
+  `AWARD_DISPUTE_RAISED` / `AWARD_DISPUTE_RESOLVED` with `awardMutated: false`
+  pinned. An upheld dispute NEVER supersedes the award — correction remains
+  the separate Batch 88 supersede decision (authorities separated end to end).
+- UI: a Challenge affordance on the public award gallery, rendered ONLY when
+  `readAwardDisputeAffordanceSafe` proves registered membership (guests and
+  non-members get unchanged output); an already-open dispute renders the
+  pending notice instead. Owner review queue card on the tournament dashboard
+  (bounded read), gated by `tournament:update` like the declaration card.
+
+Tests: pure dispute policy (fixed vocabulary, terminal state machine, labels),
+schema/migration contracts (constraint pins, partial-unique pin,
+additive-idempotent pin, no anon grants), writer unit tests (provenance,
+both registration proofs, replay + race replay, refusals, zod-before-authority
+×5, terminal decisions, no-award-mutation pin), page wiring (affordance
+element/props for members, absent for guests, pending notice swap, owner
+queue element with exactly the fixture rows, hidden from team_manager, copy
+truthfulness constants). Policy module: `award-dispute-policy.ts` (database);
+writer: `award-dispute-records.ts` (web); components:
+`award-dispute-affordance.tsx` / `award-dispute-review-card.tsx`.
+
 ## Batch 126 - Wicketkeeping board live evidence (PUB-03 acceptance complete)
 
 The gated live family gains the keeper board (public-readers.live.test.ts,

@@ -11,6 +11,8 @@ import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones } from "@/lib/public-visibility"
 import { readFanTournamentPolls, readMyPollVoteSafe } from "@/lib/tournament-polls"
+import { readAwardDisputeAffordanceSafe } from "@/lib/award-dispute-records"
+import { AwardDisputeAffordance, AwardDisputePendingNotice } from "@/components/tournaments/award-dispute-affordance"
 import { TournamentPollCard } from "@/components/shared/tournament-poll-card"
 import { TournamentShareCard } from "@/components/shared/tournament-share-card"
 import { MilestoneCards } from "@/components/tournaments/milestone-cards"
@@ -135,6 +137,11 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   // this already-published tournament. Fan favorites do not exist in this data.
   const awards = await readPublishedTournamentAwards(tenantId, id)
   const prizes = await readPublishedTournamentPrizes(tenantId, id)
+  // PUB-04 disputes: the raise affordance is offered only to registered
+  // members; guests and non-members get null and the page is unchanged.
+  const disputeAffordance = awards.length > 0
+    ? await readAwardDisputeAffordanceSafe(tenantId, id)
+    : null
   const awardWinnerName = (award: (typeof awards)[number]) =>
     award.playerName ?? award.teamName ?? "Winner record unavailable"
 
@@ -287,6 +294,14 @@ export default async function PublicTournamentPage({ params }: { params: Promise
                 <p className="text-sm mt-1">{awardWinnerName(award)}</p>
                 {award.citation && <p className="text-xs text-muted-foreground mt-1">{award.citation}</p>}
                 <p className="text-xs text-muted-foreground mt-1">Declared {award.declaredAt.toISOString().slice(0, 10)}</p>
+                {/* PUB-04 disputes: rendered ONLY for registered members of the
+                    league (readAwardDisputeAffordanceSafe returns null for
+                    guests and non-members — anonymous output is unchanged). */}
+                {disputeAffordance && (
+                  disputeAffordance.myOpenDisputeAwardIds.includes(award.id)
+                    ? <AwardDisputePendingNotice />
+                    : <AwardDisputeAffordance tournamentId={id} awardId={award.id} />
+                )}
               </div>
             ))}
           </CardContent>
