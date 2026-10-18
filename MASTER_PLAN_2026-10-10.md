@@ -6169,6 +6169,34 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 121 - PUB-05/PUB-06 live staged-acceptance evidence (read-only)
+
+With the access token verified, the acceptance family now proves the PUB
+clauses against the REAL project (read-only, opt-in gated):
+
+- Public readers PROJECT exactly their disclosed field sets on live rows:
+  tournaments index 8, hall of fame 5, prizes 6, awards gallery 9. Real
+  rows carry the private columns - a careless `select()` cannot pass.
+- PUB-05 prize truthfulness on live data: only approved, non-superseded
+  prizes surface; payout provenance never travels in the payload.
+- Foreign-league scoping: a foreign tenant id reads as empty everywhere.
+- REST tier fails closed for anon on tournaments/awards/prizes/teams.
+- REGISTER CORRECTION: prizes were already implemented (approved +
+  supersede reader with a visibility gate) - the previously recorded
+  "honest gap" was PUB-06 minor consent, NOT prizes.
+- Checkbox honesty: PUB-06 also requires minor consent, withdrawal, cache
+  invalidation and export blocking (unimplemented clauses); PUB-04
+  requires the disputes surface (verified absent this session) - so
+  checkboxes STAY unticked despite this evidence.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `LIVE_DB_ACCEPTANCE=1 npx vitest run public-allowlist.live.test.ts` | **3/3 PASS live** (read-only) |
+| `npx vitest run` (web) | PASS - 149 files / 3,009 (+3 live, skip-out) |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.
