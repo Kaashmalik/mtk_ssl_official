@@ -2,6 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
+import { z } from "zod"
 import { getDashboardContext } from "@/lib/dashboard-context"
 import { hasPermission } from "@/lib/rbac"
 import {
@@ -11,6 +12,7 @@ import {
 import type { MemberRoleChange, MemberStatusChange, MemberRemoval, MemberExpiryChange } from "@/lib/member-management"
 import { readMemberDirectory, readMemberDetails } from "@/lib/member-directory"
 import { memberDirectoryRequest, memberDetailRequest, type MemberDirectoryRequest, type MemberDetailRequest } from "@/lib/member-directory-filters"
+import { setMyDisplayTimeZone } from "@/lib/account-preferences"
 
 export type { MemberRoleChange, MemberStatusChange, MemberRemoval, MemberExpiryChange }
 
@@ -92,4 +94,21 @@ export async function setUserMembershipExpiry(input: MemberExpiryChange) {
   const result = await setMemberExpiry(parsed, context)
   revalidatePath("/dashboard", "layout")
   return result
+}
+
+const displayTimeZoneSchema = z.object({ timeZone: z.string().nullable() })
+
+/**
+ * UX-03: set or clear the caller's personal display timezone (null = unset).
+ * Deliberately OUTSIDE the league RBAC matrix: this belongs to the person,
+ * not to any league role - the account-preferences writer enforces the
+ * Clerk session, activity and Intl-zone validity itself. Both personal
+ * surfaces that render dates revalidate in both directions.
+ */
+export async function updateMyDisplayTimeZone(input: unknown) {
+  const parsed = displayTimeZoneSchema.parse(input)
+  const result = await setMyDisplayTimeZone(parsed)
+  revalidatePath("/dashboard")
+  revalidatePath("/dashboard/account")
+  return { success: true as const, timeZone: result.timeZone }
 }

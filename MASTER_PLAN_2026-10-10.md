@@ -5923,6 +5923,57 @@ there was no `/tournaments` index listing a league's published competitions
 | `git diff --check` | Clean |
 | Migration | none this batch (read path only) |
 
+## Batch 114 - UX-03 display timezone preference (per-user, migration)
+
+`formatDashboardDate` has always been honestly UTC-labelled ("never impute
+the server's zone"), but a member in Karachi reading "09:30 UTC" is doing
+timezone arithmetic in their head. This slice makes the label personal:
+an optional, member-owned display timezone - outside the league RBAC
+matrix, exactly like PUB-03 consent, because it belongs to the person.
+
+- Migration `20261018120000_users_display_time_zone.sql` (A-window, purely
+  additive, idempotent): `users.time_zone text` nullable, no default, no
+  RLS/grant changes. APPLIED remotely via the `DATABASE_URL` fallback
+  driver; history row recorded; verified remotely (nullable text column).
+  Contract test `user-display-timezone-schema.test.ts`.
+- Pure policy `lib/time-policy.ts`: `isValidTimeZone` (Intl IS the
+  contract) moved here from `notification-dispatch` (re-exported for
+  stability), plus `isUsableDisplayTimeZone` and the curated
+  `DISPLAY_TIME_ZONE_OPTIONS` offer list.
+- Writer `lib/account-preferences.ts`: Clerk session + account-activity
+  gates, locked transaction (`FOR UPDATE`), before/after `DISPLAY_TIMEZONE`
+  audit row; unknown zones rejected BEFORE any db work; null = unset.
+  Action `updateMyDisplayTimeZone` revalidates `/dashboard` +
+  `/dashboard/account`.
+- Threading: `DashboardContext` gains an OPTIONAL `displayTimeZone`
+  (existing contexts/test fixtures stay valid); the ready context reads
+  it from the user row; `DashboardMatchList` renders through
+  `formatDashboardDate(date, context.displayTimeZone)`.
+- Formatter honesty preserved byte-identically: no usable zone = the exact
+  previous "… UTC" string; a usable zone renders in that zone with its own
+  short zone name ("19:30 GMT+5") — composed via formatToParts because
+  `timeStyle` and `timeZoneName` are mutually exclusive Intl options
+  (caught by a node probe BEFORE the suite, the exact class of bug tsc
+  happily misses).
+- Account card `display-timezone-card.tsx`: card renders the current state
+  via the pure `describeDisplayTimeZone` derivation (consent-card
+  convention: copy asserted purely, change wiring exercised by tsc).
+- Boundary: notification quiet-hours keep their own per-league
+  `notificationPreferences.timeZone` (delivery policy, untouched); the
+  display preference is account-level. Roadmap checkbox waits on staged
+  acceptance with the real DB session.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - new time-policy/account-preferences suites, dashboard-context shape test updated |
+| `npx vitest run` (database) | PASS - schema contract suite included |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | `20261018120000` applied remotely, verified column + history |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

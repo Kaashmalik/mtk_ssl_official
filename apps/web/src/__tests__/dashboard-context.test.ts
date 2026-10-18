@@ -32,7 +32,9 @@ describe("Authorized active workspace context", () => {
     expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
   })
   it("uses the host tenant and its role, not primary membership or global privilege", async () => {
-    expect(await getDashboardContext("clerk-session")).toEqual({ status: "ready", context: { actorId: "actor", tenantId: "tenant", tenantName: "League", role: "scorer" } })
+    // UX-03: the ready context now also carries the member's display
+    // timezone (null on this fixture's user row = unset = UTC-labelled).
+    expect(await getDashboardContext("clerk-session")).toEqual({ status: "ready", context: { actorId: "actor", tenantId: "tenant", tenantName: "League", role: "scorer", displayTimeZone: null } })
     expect(mocks.primary).not.toHaveBeenCalled()
     const dialect = new PgDialect()
     expect(dialect.sqlToQuery(mocks.user.mock.calls[0][0].where).params).toEqual(["clerk-session"])

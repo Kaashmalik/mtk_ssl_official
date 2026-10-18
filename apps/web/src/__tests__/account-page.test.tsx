@@ -4,15 +4,16 @@ import Link from "next/link"
 import AccountPage from "@/app/dashboard/account/page"
 
 const mocks = vi.hoisted(() => ({
-  auth: vi.fn(), consent: vi.fn(), hub: vi.fn(), redirect: vi.fn(), cardProps: [] as unknown[],
+  auth: vi.fn(), consent: vi.fn(), hub: vi.fn(), tz: vi.fn(), redirect: vi.fn(),
+  cardProps: [] as unknown[], zoneProps: [] as unknown[],
 }))
 
 /**
- * The card is a client component with hooks: in this suite's bare RSC-render
- * pattern it can only be STUBBED (no reconciler exists to run its hooks).
- * The page test therefore asserts the wiring (props recorded below), and the
+ * The cards are client components with hooks: in this suite's bare RSC-render
+ * pattern they can only be STUBBED (no reconciler exists to run their hooks).
+ * The page test therefore asserts the wiring (props recorded below), and each
  * card's copy is asserted through the real module's pure label derivations,
- * which are exactly what the card renders.
+ * which are exactly what the cards render.
  */
 vi.mock("@/components/account/career-consent-card", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/components/account/career-consent-card")>()
@@ -26,13 +27,26 @@ vi.mock("@/components/account/career-consent-card", async (importOriginal) => {
   }
 })
 
+vi.mock("@/components/account/display-timezone-card", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/components/account/display-timezone-card")>()
+  return {
+    DisplayTimezoneCard: (props: { timeZone: string | null }) => {
+      mocks.zoneProps.push(props)
+      return null
+    },
+    describeDisplayTimeZone: real.describeDisplayTimeZone,
+  }
+})
+
 import { describeCareerConsent, consentControlLabel } from "@/components/account/career-consent-card"
+import { describeDisplayTimeZone } from "@/components/account/display-timezone-card"
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }))
 vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/career-records", () => ({ readMyCareerConsent: mocks.consent }))
 vi.mock("@/lib/career-hub", () => ({ readMyCareerHub: mocks.hub }))
+vi.mock("@/lib/account-preferences", () => ({ readMyDisplayTimeZone: mocks.tz }))
 
 const CONSENTED_AT = new Date("2026-10-17T00:00:00Z")
 
@@ -48,10 +62,21 @@ function collectText(node: unknown, out: string[] = []): string[] {
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.cardProps.length = 0
+  mocks.zoneProps.length = 0
   mocks.auth.mockResolvedValue({ userId: "clerk_1" })
   mocks.redirect.mockImplementation(() => { throw new Error("redirect") })
   mocks.consent.mockResolvedValue({ granted: false, consentedAt: null })
   mocks.hub.mockResolvedValue({ consented: false, career: null, leagues: [] })
+  mocks.tz.mockResolvedValue({ timeZone: null })
+})
+
+describe("Display timezone card copy (pure label derivation)", () => {
+  it("states the honest default when nothing is configured", () => {
+    expect(describeDisplayTimeZone(null)).toContain("UTC (default)")
+  })
+  it("states the chosen zone when one is configured", () => {
+    expect(describeDisplayTimeZone("Asia/Karachi")).toBe("Dates and times show in Asia/Karachi.")
+  })
 })
 
 describe("Consent card copy (pure label derivations)", () => {
@@ -64,6 +89,29 @@ describe("Consent card copy (pure label derivations)", () => {
   it("labels the not-granted state and its grant control", () => {
     expect(describeCareerConsent(false, null)).toBe("Not allowed")
     expect(consentControlLabel(false)).toBe("Allow cross-league career linking")
+  })
+})
+
+describe("Display timezone wiring (UX-03)", () => {
+  it("wires the reader's zone into the card verbatim", async () => {
+    mocks.tz.mockResolvedValue({ timeZone: "Asia/Karachi" })
+    collectText(await AccountPage())
+    expect(mocks.zoneProps).toEqual([{ timeZone: "Asia/Karachi" }])
+    // The consent card is unaffected by the preference read.
+    expect(mocks.cardProps).toHaveLength(1)
+  })
+
+  it("wires an unset preference verbatim (null preserved, never fabricated)", async () => {
+    await AccountPage()
+    collectText(await AccountPage())
+    expect(mocks.zoneProps).toEqual([{ timeZone: null }])
+  })
+
+  it("renders the honest UTC default instead of failing the page when the tz read errors", async () => {
+    mocks.tz.mockRejectedValue(new Error("db down"))
+    const text = collectText(await AccountPage()).join(" ")
+    expect(mocks.zoneProps).toEqual([{ timeZone: null }])
+    expect(text).toContain("Your account")
   })
 })
 
@@ -156,5 +204,6 @@ describe("Personal account page (PUB-03/PUB-02 surfaces)", () => {
     await expect(AccountPage()).rejects.toThrow("redirect")
     expect(mocks.consent).not.toHaveBeenCalled()
     expect(mocks.hub).not.toHaveBeenCalled()
+    expect(mocks.tz).not.toHaveBeenCalled()
   })
 })

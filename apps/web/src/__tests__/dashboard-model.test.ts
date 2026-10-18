@@ -104,4 +104,19 @@ describe("Accurate match summaries", () => {
   it("shows an explicit UTC timezone independent of the server timezone", () => {
     expect(formatDashboardDate(new Date("2026-10-12T14:30:00+05:00"))).toContain("09:30 UTC")
   })
+  it("keeps the UTC label when the display timezone is unset or unusable", () => {
+    const date = new Date("2026-10-12T14:30:00Z")
+    expect(formatDashboardDate(date, null)).toContain("14:30 UTC")
+    expect(formatDashboardDate(date, undefined)).toContain("14:30 UTC")
+    // Fail-closed: a bogus stored zone renders exactly like an unset one -
+    // never an exception, never the server's zone imputed as the user's.
+    expect(formatDashboardDate(date, "Mars/Olympus")).toBe(formatDashboardDate(date))
+    expect(formatDashboardDate(date, "")).toBe(formatDashboardDate(date))
+  })
+  it("renders in the member's chosen timezone with its own short zone name", () => {
+    const formatted = formatDashboardDate(new Date("2026-10-12T14:30:00Z"), "Asia/Karachi")
+    // Karachi is UTC+5 in October (no DST): 19:30 local, labelled in Asia/Karachi.
+    expect(formatted).toContain("19:30")
+    expect(formatted).not.toContain("UTC")
+  })
 })

@@ -2,6 +2,7 @@ import { db, notifications, notificationPreferences, fanFollows, users } from "@
 import { and, eq, gte, sql, desc } from "drizzle-orm"
 import { z } from "zod"
 import { memberDeliveryDecision, MINUTE_OF_DAY_MAX } from "@mtk/database/lib/notification-policy"
+import { isValidTimeZone } from "./time-policy"
 
 /**
  * FAN-02 notification dispatch (locked writer).
@@ -158,15 +159,13 @@ export const notificationPreferencesInputSchema = z.object({
   { message: "Unknown time zone" },
 )
 
-/** IANA-zone validation at the boundary; the policy itself never trusts it. */
-export function isValidTimeZone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone })
-    return true
-  } catch {
-    return false
-  }
-}
+/**
+ * IANA-zone validation at the boundary; the policy itself never trusts it.
+ * Batch 114: the single implementation moved to the pure `time-policy`
+ * module (shared with the account display-timezone preference); re-exported
+ * here so the existing call sites and imports stay stable.
+ */
+export { isValidTimeZone } from "./time-policy"
 
 export type NotificationPreferencesWriteResult = {
   changed: boolean

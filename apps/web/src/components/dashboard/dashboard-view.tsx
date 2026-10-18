@@ -116,8 +116,8 @@ export function DashboardMatchList({ title, matches, context, empty }: {
                 {assignment && <span className="rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary">{assignment}</span>}
               </span>
               <span className="text-muted-foreground">{match.status === "completed"
-                ? `Updated ${formatDashboardDate(match.updatedAt)}`
-                : `Scheduled: ${formatDashboardDate(match.scheduledDate)}`}</span>
+                ? `Updated ${formatDashboardDate(match.updatedAt, context.displayTimeZone)}`
+                : `Scheduled: ${formatDashboardDate(match.scheduledDate, context.displayTimeZone)}`}</span>
             </div>
             {[{ name: match.teamA, score: match.scoreA }, { name: match.teamB, score: match.scoreB }].map((team, index) =>
               <div key={index} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-1 text-sm">

@@ -9,6 +9,12 @@ export type DashboardContext = {
   tenantName: string
   actorId: string
   role: UserRole
+  /**
+   * UX-03: the member's optional display timezone (users.time_zone). Optional
+   * so contexts constructed before Batch 114 (and tests) stay valid; null or
+   * omitted means every formatter falls back to the explicit UTC label.
+   */
+  displayTimeZone?: string | null
 }
 export type DashboardAccess =
   | { status: "ready"; context: DashboardContext }
@@ -35,7 +41,7 @@ export async function getDashboardContext(clerkId: string): Promise<DashboardAcc
     if (!role || !hasPermission(role, "match:read")) return { status: "denied" }
     const tenant = await db.query.tenants.findFirst({ where: and(eq(tenants.id, tenantId), eq(tenants.isActive, true)) })
     if (!tenant || tenant.id !== tenantId || tenant.isActive !== true) return { status: "denied" }
-    return { status: "ready", context: { tenantId, tenantName: tenant.name, actorId: actor.id, role } }
+    return { status: "ready", context: { tenantId, tenantName: tenant.name, actorId: actor.id, role, displayTimeZone: actor.timeZone ?? null } }
   } catch {
     return { status: "unavailable" }
   }

@@ -3,6 +3,23 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 114) - `users_display_time_zone` APPLIED remotely via the
+> `DATABASE_URL` fallback.** File:
+> `supabase/migrations/20261018120000_users_display_time_zone.sql` (UX-03):
+> purely additive - `ALTER TABLE users ADD COLUMN IF NOT EXISTS time_zone text`,
+> nullable, no default, no RLS/grant changes (the users table's existing
+> policy set governs). Null = unset; every display formatter falls back to an
+> explicit UTC label and never imputes the server's zone. Writer:
+> `lib/account-preferences.setMyDisplayTimeZone` (Clerk session + account
+> activity gates, row lock, `DISPLAY_TIMEZONE` audit row, Intl-validated with
+> `isValidTimeZone` - the single implementation moved from
+> `lib/notification-dispatch` to the pure `lib/time-policy`, re-exported for
+> stability). History row `20261018120000` `'{}'::text[]` - A's Oct-18
+> window, after Batch 103's `20261018110000`, clear of Session B's chain.
+> Verified remotely: column `time_zone:text:nullable=YES:default=null`,
+> history `18100000` + `18110000` + `18120000`. Contract test:
+> `packages/database/src/__tests__/user-display-timezone-schema.test.ts`.
+
 > **18 October 2026 (Batch 103) - `tournament_polls` APPLIED remotely via the
 > `DATABASE_URL` fallback.** File:
 > `supabase/migrations/20261018110000_tournament_polls.sql` (FAN-01 moderated

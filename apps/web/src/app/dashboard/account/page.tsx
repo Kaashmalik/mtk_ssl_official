@@ -5,7 +5,9 @@ import { redirect } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { readMyCareerConsent } from "@/lib/career-records"
 import { readMyCareerHub } from "@/lib/career-hub"
+import { readMyDisplayTimeZone } from "@/lib/account-preferences"
 import { CareerConsentCard } from "@/components/account/career-consent-card"
+import { DisplayTimezoneCard } from "@/components/account/display-timezone-card"
 
 /**
  * Personal account surface (PUB-03/PUB-02). Deliberately OUTSIDE the league
@@ -21,12 +23,17 @@ export default async function AccountPage() {
 
   // Both readers fail closed on an inactive/unavailable account; the
   // boundary reason is the same message the writer enforces, never a
-  // silent empty state.
-  const [consent, hubResult] = await Promise.all([
+  // silent empty state. The timezone preference reading is additive: if it
+  // fails the card still renders with the honest UTC-labelled default.
+  const [consent, hubResult, timeZoneState] = await Promise.all([
     readMyCareerConsent(),
     readMyCareerHub().then(
       (hub) => ({ ok: true as const, hub }),
       (error: unknown) => ({ ok: false as const, error }),
+    ),
+    readMyDisplayTimeZone().then(
+      (state) => state.timeZone,
+      () => null,
     ),
   ])
 
@@ -44,6 +51,7 @@ export default async function AccountPage() {
       ) : (
         <>
           <CareerConsentCard granted={consent.granted} consentedAt={consent.consentedAt ? consent.consentedAt.toISOString() : null} />
+          <DisplayTimezoneCard timeZone={timeZoneState} />
           <section aria-labelledby="career-hub-heading" className="rounded-2xl border bg-card p-5 shadow-sm">
             <h2 id="career-hub-heading" className="text-lg font-semibold">Your public career</h2>
             {!hubResult.hub.consented ? (

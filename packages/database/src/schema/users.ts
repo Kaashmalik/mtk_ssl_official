@@ -43,6 +43,11 @@ export const users = pgTable("users", {
   // Gates only CROSS-LEAGUE merges (PUB-02 hub); per-league publication is
   // unchanged by it.
   publicCareerConsentAt: timestamp("public_career_consent_at", { withTimezone: true }),
+  // UX-03: optional IANA display timezone (e.g. "Asia/Karachi"). Null =
+  // unset; every display formatter falls back to an explicit UTC label and
+  // never imputes the server's zone. Validated with isValidTimeZone at the
+  // single write entry (account preferences).
+  timeZone: text("time_zone"),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

@@ -1,4 +1,5 @@
 import { hasPermission, type Permission, type UserRole } from "./rbac"
+import { isUsableDisplayTimeZone } from "./time-policy"
 
 export type DashboardAction = { label: string; description: string; href: string; permission: Permission }
 const creationActions: DashboardAction[] = [
@@ -72,8 +73,28 @@ export function matchDashboardHref(match: Pick<DashboardMatch, "id" | "scorerId"
     ? `/matches/${match.id}/scoring` : `/matches/${match.id}`
 }
 
-/** No user timezone is configured yet: never imply the server's timezone is theirs. */
-export function formatDashboardDate(date: Date | null) {
+/**
+ * Dashboard date rendering (UX-03).
+ *
+ * Without a usable display timezone the output stays BYTE-IDENTICAL to the
+ * pre-Batch-114 contract: an explicit "UTC" label - the server's zone is
+ * never imputed as the user's. With a usable IANA zone (validated by
+ * isUsableDisplayTimeZone, not trusted) the time renders in that zone with
+ * its own short zone name, so the label is still honest.
+ */
+export function formatDashboardDate(date: Date | null, displayTimeZone?: string | null) {
   if (!date || !Number.isFinite(date.getTime())) return "Time to be confirmed"
-  return `${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date)} UTC`
+  if (!isUsableDisplayTimeZone(displayTimeZone)) {
+    return `${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date)} UTC`
+  }
+  // timeStyle and timeZoneName are mutually exclusive Intl options, so the
+  // zone label is composed from formatToParts of a separate formatter - the
+  // shape stays "12 Oct 2026, 19:30 PKT", mirroring the UTC fallback's label.
+  const base = new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium", timeStyle: "short", timeZone: displayTimeZone,
+  }).format(date)
+  const zoneName = new Intl.DateTimeFormat("en-GB", { timeZone: displayTimeZone, timeZoneName: "short" })
+    .formatToParts(date)
+    .find((part) => part.type === "timeZoneName")?.value ?? displayTimeZone
+  return `${base} ${zoneName}`
 }
