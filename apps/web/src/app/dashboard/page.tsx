@@ -7,7 +7,7 @@ import { getDashboardContext } from "@/lib/dashboard-context"
 import { getOwnershipTransfer } from "@/app/actions/ownership"
 import { hasPermission } from "@/lib/rbac"
 import { DashboardHeader, DashboardQuickActions, DashboardUnavailable, DashboardLoading, DashboardPanel } from "@/components/dashboard/dashboard-view"
-import { DashboardOverview, DashboardMatches, DashboardTasks } from "@/components/dashboard/dashboard-sections"
+import { DashboardOverview, DashboardAssignments, DashboardMatches, DashboardTasks } from "@/components/dashboard/dashboard-sections"
 import { OwnershipTransferRequest } from "@/components/dashboard/ownership-transfer-request"
 
 export const dynamic = "force-dynamic"
@@ -38,9 +38,9 @@ export default async function DashboardPage() {
     <Suspense fallback={<DashboardLoading title="League overview" />}><DashboardOverview context={context} /></Suspense>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-6">
-        {context.role === "scorer" && <Suspense fallback={<DashboardLoading title="Your scoring assignments" />}>
-          <DashboardMatches context={context} group="assigned" />
-        </Suspense>}
+        <Suspense fallback={<DashboardLoading title="Your assignments" />}>
+          <DashboardAssignments context={context} />
+        </Suspense>
         <Suspense fallback={<DashboardLoading title="Match day" />}><DashboardMatches context={context} group="live" /></Suspense>
         <Suspense fallback={<DashboardLoading title="Recent results" />}><DashboardMatches context={context} group="recent" /></Suspense>
       </div>

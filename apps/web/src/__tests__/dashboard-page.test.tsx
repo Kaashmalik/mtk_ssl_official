@@ -2,7 +2,7 @@ import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import DashboardPage from "@/app/dashboard/page"
-import { DashboardOverview, DashboardMatches, DashboardTasks } from "@/components/dashboard/dashboard-sections"
+import { DashboardOverview, DashboardAssignments, DashboardMatches, DashboardTasks } from "@/components/dashboard/dashboard-sections"
 import { DashboardSetup } from "@/components/dashboard/dashboard-view"
 import type { DashboardContext } from "@/lib/dashboard-context"
 
@@ -54,17 +54,26 @@ describe("Dashboard route gating and section integration", () => {
   })
   it("passes only the server-authorized context to all streamed sections", async () => {
     const tree = elements(await DashboardPage())
-    const sections = tree.filter((e) => [DashboardOverview, DashboardMatches, DashboardTasks].includes(e.type as any))
-    expect(sections).toHaveLength(5)
+    const sections = tree.filter((e) => [DashboardOverview, DashboardMatches, DashboardTasks, DashboardAssignments].includes(e.type as any))
+    // Overview + assignments + match day + recent results + organizer tasks + upcoming fixtures.
+    expect(sections).toHaveLength(6)
     expect(sections.every((e) => e.props.context === context)).toBe(true)
     expect(mocks.context).toHaveBeenCalledWith("clerk-session")
-    expect(tree.filter((e) => e.type === React.Suspense)).toHaveLength(5)
+    expect(tree.filter((e) => e.type === React.Suspense)).toHaveLength(6)
   })
   it.each(["scorer", "fan", "coach", "player", "team_manager"] as const)("does not mount organizer tasks for %s", async (role) => {
     mocks.context.mockResolvedValue({ status: "ready", context: { ...context, role } })
     const tree = elements(await DashboardPage())
     expect(tree.some((e) => e.type === DashboardTasks)).toBe(false)
-    expect(tree.filter((e) => e.type === DashboardMatches && e.props.group === "assigned")).toHaveLength(role === "scorer" ? 1 : 0)
+  })
+  it("mounts the officiating-assignment section for every member role (UX-03)", async () => {
+    for (const role of ["scorer", "fan", "coach", "player", "team_manager", "league_owner"] as const) {
+      mocks.context.mockResolvedValue({ status: "ready", context: { ...context, role } })
+      const tree = elements(await DashboardPage())
+      expect(tree.filter((e) => e.type === DashboardAssignments)).toHaveLength(1)
+      // The generic list no longer renders a role-gated "assigned" panel.
+      expect(tree.some((e) => e.type === DashboardMatches && e.props.group === "assigned")).toBe(false)
+    }
   })
   it.each(["scorer", "fan", "team_manager", "coach", "player"] as const)("does not show setup creation links to %s", async (role) => {
     const tree = elements(await DashboardOverview({ context: { ...context, role } }))

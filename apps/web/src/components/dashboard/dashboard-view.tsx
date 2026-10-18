@@ -1,7 +1,7 @@
 import React from "react"
 import Link from "next/link"
 import { ArrowRight, CheckCircle2, Circle, Trophy, Users, CalendarDays, Sword } from "lucide-react"
-import { formatDashboardDate, getDashboardActions, getSetupSteps, matchDashboardHref,
+import { formatDashboardDate, getDashboardActions, getSetupSteps, matchDashboardHref, dashboardAssignmentLabel,
   type DashboardStats, type DashboardMatch } from "@/lib/dashboard-model"
 import { ROLE_LABELS } from "@/lib/rbac"
 import type { DashboardContext } from "@/lib/dashboard-context"
@@ -107,10 +107,14 @@ export function DashboardMatchList({ title, matches, context, empty }: {
       <ul className="space-y-3">{matches.map((match) => {
         const href = matchDashboardHref(match, context.role, context.actorId)
         const canScore = href.endsWith("/scoring")
+        const assignment = dashboardAssignmentLabel(match, context.actorId)
         return <li key={match.id}>
           <Link href={href} className={`${linkStyle} block border p-4 transition-colors hover:border-primary/40 hover:bg-muted/30`}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="rounded-full bg-muted px-2.5 py-1 font-medium">{statusLabels[match.status] ?? match.status}</span>
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span className="rounded-full bg-muted px-2.5 py-1 font-medium">{statusLabels[match.status] ?? match.status}</span>
+                {assignment && <span className="rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary">{assignment}</span>}
+              </span>
               <span className="text-muted-foreground">{match.status === "completed"
                 ? `Updated ${formatDashboardDate(match.updatedAt)}`
                 : `Scheduled: ${formatDashboardDate(match.scheduledDate)}`}</span>

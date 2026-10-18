@@ -10,7 +10,7 @@ vi.mock("next/link", () => ({ default: ({ children, ...props }: any) => <a {...p
 const context: DashboardContext = { tenantId: "tenant", actorId: "actor", tenantName: "The League", role: "league_owner" }
 const stats = { teams: 2, players: 14, tournaments: 1, matches: 6 }
 const match: DashboardMatch = { id: "match", teamA: "A", teamB: "B", scoreA: "1/0 (0.1)", scoreB: "Yet to bat",
-  status: "live", scorerId: "actor", backupScorerId: null, scheduledDate: null, updatedAt: new Date(), result: null }
+  status: "live", scorerId: "actor", backupScorerId: null, umpire1Id: null, umpire2Id: null, scheduledDate: null, updatedAt: new Date(), result: null }
 const render = (element: React.ReactElement) => renderToStaticMarkup(element)
 
 describe("Dashboard server-rendered UI", () => {

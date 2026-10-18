@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { getDashboardActions, getSetupSteps, toDashboardMatch, matchDashboardHref, formatDashboardDate } from "@/lib/dashboard-model"
+import { getDashboardActions, getSetupSteps, toDashboardMatch, matchDashboardHref, formatDashboardDate,
+  dashboardAssignmentLabel } from "@/lib/dashboard-model"
 import { hasPermission, type UserRole } from "@/lib/rbac"
 
 const match = { id: "match", tenantId: "tenant", teamAId: "a", teamBId: "b", scorerId: "actor",
@@ -37,6 +38,24 @@ describe("Role-aware dashboard journeys", () => {
   })
   it.each(["completed", "abandoned", "cancelled", "no_result"])("uses read-only details for %s", (status) => {
     expect(matchDashboardHref({ ...match, status }, "league_owner", "actor")).toBe("/matches/match")
+  })
+  it("labels the member's assignment slot, including the COMP-06 umpire slots", () => {
+    const slots = { scorerId: null, backupScorerId: null, umpire1Id: null, umpire2Id: null }
+    expect(dashboardAssignmentLabel({ ...slots, scorerId: "actor" }, "actor")).toBe("Scorer")
+    expect(dashboardAssignmentLabel({ ...slots, scorerId: "primary", backupScorerId: "actor" }, "actor")).toBe("Backup scorer")
+    expect(dashboardAssignmentLabel({ ...slots, umpire1Id: "actor" }, "actor")).toBe("Officiating")
+    expect(dashboardAssignmentLabel({ ...slots, umpire2Id: "actor" }, "actor")).toBe("Officiating")
+    expect(dashboardAssignmentLabel({ ...slots, scorerId: "primary", umpire2Id: "actor" }, "actor")).toBe("Officiating")
+    expect(dashboardAssignmentLabel(slots, "actor")).toBeNull()
+  })
+  it("carries the umpire slots through match summaries with honest nulls", () => {
+    const withUmpire = toDashboardMatch({ ...match, scorerId: null, umpire1Id: "u1" }, names, [], "tenant")
+    expect(withUmpire.umpire1Id).toBe("u1")
+    expect(withUmpire.umpire2Id).toBeNull()
+    expect(dashboardAssignmentLabel(withUmpire, "u1")).toBe("Officiating")
+    const withoutUmpire = toDashboardMatch({ ...match, scorerId: null }, names, [], "tenant")
+    expect(withoutUmpire.umpire1Id).toBeNull()
+    expect(dashboardAssignmentLabel(withoutUmpire, "u1")).toBeNull()
   })
   it("requires exact database scorer identity but permits organizer oversight", () => {
     expect(matchDashboardHref(match, "scorer", "someone-else")).toBe("/matches/match")

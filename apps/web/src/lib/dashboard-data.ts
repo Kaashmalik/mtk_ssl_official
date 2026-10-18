@@ -25,13 +25,18 @@ export async function getDashboardStats(context: DashboardContext): Promise<Dash
 
 export type DashboardMatchGroup = "live" | "upcoming" | "recent" | "assigned"
 export async function getDashboardMatches(context: DashboardContext, group: DashboardMatchGroup) {
-  const { tenantId, actorId, role } = context
-  if (group === "assigned" && role !== "scorer") return []
+  const { tenantId, actorId } = context
+  // UX-03 officiating journey: assignments are driven by the match's actual
+  // officiating slots (scorer, backup scorer, and the COMP-06 member umpire
+  // columns), never by the member's role - an umpire can hold ANY member role.
   const status = group === "recent" ? eq(matches.status, "completed") : group === "upcoming"
     ? eq(matches.status, "scheduled") : group === "live" ? inArray(matches.status, ["live", "innings_break", "toss"])
-      : and(or(eq(matches.scorerId, actorId), eq(matches.backupScorerId, actorId)), inArray(matches.status, ["scheduled", "toss", "live", "innings_break"]))
+      : and(or(eq(matches.scorerId, actorId), eq(matches.backupScorerId, actorId),
+        eq(matches.umpire1Id, actorId), eq(matches.umpire2Id, actorId)),
+        inArray(matches.status, ["scheduled", "toss", "live", "innings_break"]))
   const rows = await db.select({ id: matches.id, tenantId: matches.tenantId, teamAId: matches.teamAId,
     teamBId: matches.teamBId, status: matches.status, scorerId: matches.scorerId, backupScorerId: matches.backupScorerId,
+    umpire1Id: matches.umpire1Id, umpire2Id: matches.umpire2Id,
     scheduledDate: matches.scheduledDate, updatedAt: matches.updatedAt, result: matches.result })
     .from(matches).where(and(eq(matches.tenantId, tenantId), status))
     .orderBy(group === "recent" ? desc(matches.updatedAt) : group === "upcoming" ? sql`${matches.scheduledDate} ASC NULLS LAST`

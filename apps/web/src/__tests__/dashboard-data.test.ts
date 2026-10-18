@@ -16,7 +16,7 @@ vi.mock("@mtk/database", async (importOriginal) => ({
   ...await importOriginal<typeof import("@mtk/database")>(), db: { select: mocks.select },
 }))
 const context: DashboardContext = { tenantId: "tenant", actorId: "actor", tenantName: "League", role: "league_owner" }
-const match = { id: "match", tenantId: "tenant", teamAId: "a", teamBId: "b", status: "live", scorerId: "actor", scheduledDate: null, updatedAt: new Date(), result: null }
+const match = { id: "match", tenantId: "tenant", teamAId: "a", teamBId: "b", status: "live", scorerId: "actor", backupScorerId: null, umpire1Id: null, umpire2Id: null, scheduledDate: null, updatedAt: new Date(), result: null }
 const dialect = new PgDialect()
 beforeEach(() => {
   vi.resetAllMocks()
@@ -61,16 +61,23 @@ describe("Scoped bounded dashboard reads", () => {
     const matchQuery = predicates()[0]
     expect(matchQuery.limit).toBe(5)
     expect(matchQuery.order.map((o) => dialect.sqlToQuery(o).sql).join(" ")).toContain('"matches"."id" asc')
-    if (group === "assigned") expect(matchQuery.params).toEqual(["tenant", "actor", "actor", "scheduled", "toss", "live", "innings_break"])
+    if (group === "assigned") expect(matchQuery.params).toEqual(["tenant", "actor", "actor", "actor", "actor", "scheduled", "toss", "live", "innings_break"])
     if (group === "live") expect(matchQuery.params).toEqual(["tenant", "live", "innings_break", "toss"])
     if (group === "upcoming") expect(matchQuery.params).toEqual(["tenant", "scheduled"])
     if (group === "recent") expect(matchQuery.params).toEqual(["tenant", "completed"])
     expect(predicates()[1].params).toEqual(["tenant", "a", "b"])
     expect(predicates()[2].params).toEqual(["tenant", "match"])
   })
-  it("does not query assignments for non-scorer roles", async () => {
+  it("queries the four officiating slots for every member; without an assignment the list is honestly empty", async () => {
+    mocks.rows.matches = []
     expect(await getDashboardMatches(context, "assigned")).toEqual([])
-    expect(mocks.select).not.toHaveBeenCalled()
+    expect(mocks.select).toHaveBeenCalledOnce()
+    const predicate = predicates()[0]
+    // UX-03: assignments are membership-driven, never role-driven - scorer,
+    // backup scorer and both COMP-06 member-umpire slots are matched.
+    for (const column of ['"scorer_id"', '"backup_scorer_id"', '"umpire1_id"', '"umpire2_id"']) {
+      expect(predicate.sql).toContain(column)
+    }
   })
   it("includes backup assignments in the exact-league predicate and retains the slot in summaries", async () => {
     mocks.rows.matches = [{ ...match, scorerId: "primary", backupScorerId: "actor" }]
@@ -79,6 +86,15 @@ describe("Scoped bounded dashboard reads", () => {
     expect(predicates()[0].sql).toContain(" or ")
     expect(result[0].backupScorerId).toBe("actor")
     expect(mocks.queries[0].fields).toHaveProperty("backupScorerId")
+  })
+  it("surfaces member-umpire assignments regardless of the member's role (COMP-06)", async () => {
+    mocks.rows.matches = [{ ...match, scorerId: null, backupScorerId: null, umpire1Id: "actor", umpire2Id: null }]
+    const result = await getDashboardMatches({ ...context, role: "player" }, "assigned")
+    expect(result).toHaveLength(1)
+    expect(result[0].umpire1Id).toBe("actor")
+    expect(result[0].umpire2Id).toBeNull()
+    expect(mocks.queries[0].fields).toHaveProperty("umpire1Id")
+    expect(mocks.queries[0].fields).toHaveProperty("umpire2Id")
   })
   it("returns empty successful results without empty IN queries", async () => {
     mocks.rows.matches = []

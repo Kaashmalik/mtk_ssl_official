@@ -5810,6 +5810,44 @@ stays unticked.
 | `git diff --check` | Clean |
 | Migration | none this batch (route + test change only) |
 
+## Batch 111 - UX-03 officiating role journey (member umpire assignments)
+
+The dashboard's "assigned" group was hard-gated to `role === "scorer"` and
+matched only `scorer_id` / `backup_scorer_id`, so a COMP-06 member umpire -
+whom the assignment writer accepts in ANY effective member role - never saw
+their officiating assignments.
+
+- **dashboard-data**: the assigned group now matches all four officiating
+  slots (scorer, backup scorer, umpire1, umpire2) regardless of the member's
+  role, and projects the umpire columns. The role gate is gone; assignments
+  are membership-driven, exactly like the assignment writer's own rules.
+- **dashboard-model**: match summaries carry `umpire1Id`/`umpire2Id` with
+  honest nulls; new pure `dashboardAssignmentLabel()` resolves Scorer /
+  Backup scorer / Officiating (scorer priority first) with no role
+  assumptions - testable without a database.
+- **dashboard-view**: match rows show an assignment chip next to the status.
+- **dashboard-sections/page**: a single `DashboardAssignments` section
+  replaces the scorer-only panel on every member's dashboard; it renders
+  nothing when the genuinely-empty list returns. Scorers keep their explicit
+  "ask to be assigned" empty state, which is their journey's hinge.
+
+**Boundary (recorded honestly).** UX-03 remains open: edit-form drafts,
+localized/RTL preferences (no i18n infrastructure or supported-locale
+decision exists in the repo) and the timezone display preference
+(`formatDashboardDate` is explicitly UTC-labelled); role journeys beyond
+officiating (coach/captain surfaces) still need product definition.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (web) | PASS - dashboard suites extended (4-slot predicate params, umpire-surface case, assignment labels, per-role section mount) |
+| `npx vitest run` (database) | PASS - full suite |
+| scoring-service jest | 13 suites PASS |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
+| `git diff --check` | Clean |
+| Migration | none this batch (read/label change only) |
+
 ### Definition of done for each batch
 
 - Focused code follows existing monorepo conventions and source-of-truth ownership.

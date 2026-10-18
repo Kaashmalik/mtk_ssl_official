@@ -29,7 +29,8 @@ export function getSetupSteps(stats: DashboardStats) {
 }
 
 type MatchSummary = { id: string; tenantId: string; teamAId: string; teamBId: string; status: string;
-  scorerId: string | null; backupScorerId?: string | null; scheduledDate: Date | null; updatedAt: Date; result: string | null }
+  scorerId: string | null; backupScorerId?: string | null; umpire1Id?: string | null; umpire2Id?: string | null;
+  scheduledDate: Date | null; updatedAt: Date; result: string | null }
 type InningsSummary = { matchId: string; tenantId: string; teamId: string; inningsNumber: number;
   totalRuns: number; totalWickets: number; totalBalls: number }
 export function toDashboardMatch(match: MatchSummary, names: Map<string, string>, innings: InningsSummary[], tenantId: string) {
@@ -43,10 +44,26 @@ export function toDashboardMatch(match: MatchSummary, names: Map<string, string>
   }
   return { id: match.id, teamA: names.get(match.teamAId) ?? "Team unavailable",
     teamB: names.get(match.teamBId) ?? "Team unavailable", scoreA: score(match.teamAId), scoreB: score(match.teamBId),
-    status: match.status, scorerId: match.scorerId, backupScorerId: match.backupScorerId ?? null, scheduledDate: match.scheduledDate,
+    status: match.status, scorerId: match.scorerId, backupScorerId: match.backupScorerId ?? null,
+    umpire1Id: match.umpire1Id ?? null, umpire2Id: match.umpire2Id ?? null, scheduledDate: match.scheduledDate,
     updatedAt: match.updatedAt, result: match.result }
 }
 export type DashboardMatch = ReturnType<typeof toDashboardMatch>
+
+/**
+ * UX-03 officiating journey: what the member's assignment on this match is.
+ * Mirrors the read predicate in dashboard-data (same four slots). A null
+ * result means the member holds no assignment slot on the match.
+ */
+export function dashboardAssignmentLabel(
+  match: Pick<DashboardMatch, "scorerId" | "backupScorerId" | "umpire1Id" | "umpire2Id">,
+  actorId: string,
+): "Scorer" | "Backup scorer" | "Officiating" | null {
+  if (match.scorerId === actorId) return "Scorer"
+  if (match.backupScorerId === actorId) return "Backup scorer"
+  if (match.umpire1Id === actorId || match.umpire2Id === actorId) return "Officiating"
+  return null
+}
 
 export function matchDashboardHref(match: Pick<DashboardMatch, "id" | "scorerId" | "status"> & { backupScorerId?: string | null }, role: UserRole, actorId: string) {
   const editable = ["scheduled", "toss", "live", "innings_break"].includes(match.status)
