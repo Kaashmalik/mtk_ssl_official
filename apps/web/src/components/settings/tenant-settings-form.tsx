@@ -10,7 +10,7 @@ import { Input } from "@mtk/ui/components/ui/input"
 import { Label } from "@mtk/ui/components/ui/label"
 import { toast } from "sonner"
 import { Loader2, Settings } from "lucide-react"
-import { updateTenantBrandingSettings } from "@/app/actions/tenants"
+import { updateTenantBrandingSettings, publishTenantBranding, rollbackTenantBranding } from "@/app/actions/tenants"
 
 const settingsSchema = z.object({
   name: z.string().min(2, "League name must be at least 2 characters").max(120),
@@ -38,6 +38,8 @@ interface TenantSettingsFormProps {
 
 export function TenantSettingsForm({ initialData }: TenantSettingsFormProps) {
   const [saving, setSaving] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [rollingBack, setRollingBack] = useState(false)
 
   const form = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -66,15 +68,48 @@ export function TenantSettingsForm({ initialData }: TenantSettingsFormProps) {
       })
 
       if (res.success) {
-        toast.success("Settings saved successfully! Refreshing page branding...")
-        window.location.reload()
+        // Brand Studio (PREM-02): a save lands as a DRAFT - honest copy, no
+        // "refreshing branding" promise, because nothing live changed yet.
+        toast.success("Draft saved. Publish to make it live on your pages.")
       } else {
-        toast.error("Failed to save settings")
+        toast.error("Failed to save draft")
       }
     } catch (err: any) {
-      toast.error(err.message || "Failed to save settings")
+      toast.error(err.message || "Failed to save draft")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const onPublish = async () => {
+    setPublishing(true)
+    try {
+      const res = await publishTenantBranding()
+      if (res.changed) {
+        toast.success("Branding published — it is now the live snapshot")
+      } else {
+        toast.info("Nothing to publish — save a draft first")
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to publish branding")
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const onRollback = async () => {
+    setRollingBack(true)
+    try {
+      const res = await rollbackTenantBranding()
+      if (res.changed) {
+        toast.success("Branding rolled back to the previous snapshot")
+      } else {
+        toast.info("Nothing to roll back yet — rollback appears after your first publish")
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to roll back branding")
+    } finally {
+      setRollingBack(false)
     }
   }
 
@@ -89,7 +124,7 @@ export function TenantSettingsForm({ initialData }: TenantSettingsFormProps) {
             General League Settings
           </CardTitle>
           <CardDescription>
-            Configure your league name and custom app details.
+            Configure your league name and custom app details. Branding changes save as a DRAFT — publish them to make the snapshot live; roll back restores the previous snapshot.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -207,18 +242,50 @@ export function TenantSettingsForm({ initialData }: TenantSettingsFormProps) {
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-3">
+      <div className="flex flex-wrap justify-end gap-3">
         <Button type="button" variant="outline" onClick={() => form.reset()}>
           Reset
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={rollingBack}
+          onClick={onRollback}
+          aria-label="Roll back branding to the previous snapshot"
+        >
+          {rollingBack ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Rolling back...
+            </>
+          ) : (
+            "Roll Back Branding"
+          )}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={publishing}
+          onClick={onPublish}
+          aria-label="Publish the pending branding draft"
+        >
+          {publishing ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Publishing...
+            </>
+          ) : (
+            "Publish Branding"
+          )}
         </Button>
         <Button type="submit" disabled={saving} style={{ backgroundColor: primaryColor, color: "white" }}>
           {saving ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Saving Settings...
+              Saving Draft...
             </>
           ) : (
-            "Save Changes"
+            "Save Draft"
           )}
         </Button>
       </div>

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 
 /**
@@ -25,6 +25,14 @@ export const tenantBranding = pgTable("tenant_branding", {
   mobileAppPackageName: text("mobile_app_package_name"),
   separateDatabase: boolean("separate_database").default(false).notNull(),
   databaseInstanceUrl: text("database_instance_url"),
+  // Brand Studio (PREM-02, Batch 135): edits become a draft; publishing
+  // moves the draft into `published` (the active snapshot readers render)
+  // and keeps the prior snapshot for one-step rollback. Legacy rows with a
+  // null snapshot keep rendering their own columns unchanged.
+  draft: jsonb("draft"),
+  published: jsonb("published"),
+  previousPublished: jsonb("previous_published"),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -6171,6 +6171,56 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 135 - PREM-02 slice: Brand Studio draft/publish/rollback (migration applied remotely)
+
+- DELIVERED: branding is no longer a live-write surface - edits save as a
+  DRAFT, publish moves the draft into the active snapshot (keeping the
+  previous snapshot for one-step rollback), and the active reader renders
+  the published snapshot. Cohesion: legacy rows (no snapshot) keep
+  rendering their own columns, so nothing regresses before a league's
+  first publish.
+- Migration `20261018190000_brand_studio` APPLIED remotely and verified
+  (tenant_branding + draft/published/previous_published jsonb +
+  published_at, two shape CHECKs). DESIGN FIX before apply: the first
+  cohesion draft (published implies previous) was wrong for a FIRST
+  publish - replaced with snapshot JSON-shape checks; rollback replay
+  (no previous) is an honest changed:false instead of a fake revert.
+- Writers (branding-settings.ts): saveBrandingDraft / publishBrandingDraft
+  / rollbackBranding under the same tenant-locked transaction discipline as
+  saveBrandingSettings - plan gating evaluates against the plan read under
+  the lock, so a concurrent downgrade cannot smuggle a gated value into a
+  draft or a publication. All three audited (BRAND_DRAFT_SAVED /
+  BRAND_PUBLISHED / BRAND_ROLLBACK). activeBrandingSnapshot() is the single
+  precedence rule (published wins, legacy columns fallback).
+- SEMANTIC-CONFLICT FIX: updateTenantBrandingSettings (settings form action)
+  was a second LIVE branding write path - under the snapshot model a direct
+  column write would silently never render. It now feeds the same locked,
+  plan-gated draft (tenant name stays live; names are identity, not
+  branding). New actions publishTenantBranding / rollbackTenantBranding
+  (settings:manage) return changed:false honestly on replay.
+- Routes: POST /api/settings/branding/publish and /rollback (super-admin
+  gated, thin); PUT schema extended to cover customCss,
+  loginPageBackgroundUrl, loginPageCustomHtml so a published snapshot fully
+  replaces the render-relevant row (the sign-in page consumes
+  loginPageBackgroundUrl - the legacy upsert never persisted it).
+- getTenantBranding now returns the ACTIVE snapshot (sign-in page renders
+  published branding automatically); its consumers need only the value
+  fields, verified (appName/loginPageBackgroundUrl/logoUrl/primaryColor).
+- UI (tenant-settings-form.tsx): Save Draft (honest copy - no
+  "refreshing branding" promise), Publish Branding, Roll Back Branding with
+  aria labels and replay-honest toasts.
+- Record boundary honestly (PREM-02 remains OPEN): dashboard-chrome
+  theming via TenantBrandingProvider (component exists, ZERO consumers -
+  discovered this batch; needs wiring or the dead-audit), email sender
+  visuals, scorecard/overlay surfaces are not yet snapshot-driven. The
+  draft/publish/rollback ENGINE and the sign-in render path are delivered.
+- Tests: branding-settings.test.ts extended to 22 (9 new: gated draft
+  refusal before write, draft insert + audit, draft retarget never touches
+  published, publish consumes draft + previous-preserved + audit,
+  nothingToPublish honest replay, rollback swap + audit, first-publish
+  rollback replay, snapshot precedence legacy/published/null). tsc web+db 0.
+
+
 ## Batch 134 - REG-05 invitation slice: captain + player journeys (migration applied remotely)
 
 - DELIVERED: the invitation system now carries the captain and player

@@ -2,11 +2,12 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
-import { db, getPlanLimits, tenants, tenantBranding, subscriptions, users, userTenantRoles, membershipGrantsAccess, type PlanKey } from "@mtk/database"
+import { db, getPlanLimits, tenants, subscriptions, users, userTenantRoles, membershipGrantsAccess, type PlanKey } from "@mtk/database"
 import { and, desc, eq, gt, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 import { getTenantFromRequest } from "@/lib/tenant"
+import { publishBrandingDraft, rollbackBranding, saveBrandingDraft } from "@/lib/branding-settings"
 
 
 const createTenantSchema = z.object({
@@ -248,34 +249,66 @@ export const updateTenantBrandingSettings = withAuth("settings:manage", async (i
     throw new Error("A separate white-label app name requires the Pro plan or above")
   }
 
-  // Update tenant name
+  // Update tenant name (live - names are identity, not branding).
   await db.update(tenants)
     .set({ name: validated.name, updatedAt: new Date() })
     .where(eq(tenants.id, tenant.id))
 
-  // Upsert tenant branding
-  const brandingData = {
+  // Brand Studio (PREM-02, Batch 135): branding edits land as a DRAFT. A
+  // direct column write while a published snapshot exists would never render
+  // (the snapshot wins), so this previously-live write path now feeds the
+  // same locked, plan-gated draft the Brand Studio publishes from.
+  const result = await saveBrandingDraft({
     tenantId: tenant.id,
-    appName: validated.appName || validated.name,
-    logoUrl: validated.logoUrl || null,
-    faviconUrl: validated.faviconUrl || null,
-    primaryColor: validated.primaryColor || null,
-    secondaryColor: validated.secondaryColor || null,
-    accentColor: validated.accentColor || null,
-    updatedAt: new Date()
-  }
-
-  const [existingBranding] = await db.select().from(tenantBranding).where(eq(tenantBranding.tenantId, tenant.id)).limit(1)
-  if (existingBranding) {
-    await db.update(tenantBranding).set(brandingData).where(eq(tenantBranding.tenantId, tenant.id))
-  } else {
-    await db.insert(tenantBranding).values({
-      ...brandingData,
-      createdAt: new Date()
-    })
-  }
+    data: {
+      appName: validated.appName || validated.name,
+      logoUrl: validated.logoUrl || null,
+      faviconUrl: validated.faviconUrl || null,
+      primaryColor: validated.primaryColor || null,
+      secondaryColor: validated.secondaryColor || null,
+      accentColor: validated.accentColor || null,
+    },
+  })
+  if ("violation" in result) throw new Error(result.violation)
+  if ("missing" in result) throw new Error("Tenant not found")
 
   revalidatePath("/dashboard/settings")
   revalidatePath("/dashboard")
-  return { success: true }
+  return { success: true, draft: true }
+})
+
+/**
+ * Publish the pending Brand Studio draft into the active snapshot
+ * (PREM-02, Batch 135). Honest replay: no draft -> changed:false.
+ */
+export const publishTenantBranding = withAuth("settings:manage", async () => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  const tenant = await getMyTenant()
+  if (!tenant) throw new Error("Tenant not found")
+
+  const result = await publishBrandingDraft({ tenantId: tenant.id })
+  if ("missing" in result) throw new Error("Tenant not found")
+  if ("nothingToPublish" in result) return { success: true, changed: false }
+  revalidatePath("/dashboard/settings")
+  revalidatePath("/dashboard")
+  return { success: true, changed: true }
+})
+
+/**
+ * Roll the active branding snapshot back to the previous one (PREM-02,
+ * Batch 135). Honest replay: no previous snapshot -> changed:false.
+ */
+export const rollbackTenantBranding = withAuth("settings:manage", async () => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  const tenant = await getMyTenant()
+  if (!tenant) throw new Error("Tenant not found")
+
+  const result = await rollbackBranding({ tenantId: tenant.id })
+  if ("missing" in result) throw new Error("Tenant not found")
+  if ("changed" in result) return { success: true, changed: false }
+  revalidatePath("/dashboard/settings")
+  revalidatePath("/dashboard")
+  return { success: true, changed: true }
 })

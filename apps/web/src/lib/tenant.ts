@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { db } from "@mtk/database";
 import { tenants, tenantBranding } from "@mtk/database";
+import { activeBrandingSnapshot } from "./branding-settings";
 import { and, eq } from "drizzle-orm";
 import { normalizeHost, tenantSlugCandidates } from "./tenant-host";
 
@@ -45,7 +46,9 @@ export async function getTenantFromRequest(includeInactive = false) {
 }
 
 /**
- * Get tenant branding configuration
+ * Get tenant branding configuration - the ACTIVE snapshot (PREM-02,
+ * Batch 135): a published Brand Studio snapshot wins; legacy rows without a
+ * snapshot keep rendering their own columns unchanged.
  */
 export async function getTenantBranding(tenantId: string) {
   const branding = await db
@@ -54,7 +57,9 @@ export async function getTenantBranding(tenantId: string) {
     .where(eq(tenantBranding.tenantId, tenantId))
     .limit(1);
 
-  return branding[0] || null;
+  const row = branding[0];
+  if (!row) return null;
+  return activeBrandingSnapshot(row);
 }
 
 /**

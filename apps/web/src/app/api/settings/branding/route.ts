@@ -28,6 +28,9 @@ const schema = z.object({
   mobileAppSplashUrl: z.string().max(2048).nullable().optional(),
   mobileAppBundleId: z.string().max(256).nullable().optional(),
   mobileAppPackageName: z.string().max(256).nullable().optional(),
+  customCss: z.string().max(20000).nullable().optional(),
+  loginPageBackgroundUrl: z.string().max(2048).nullable().optional(),
+  loginPageCustomHtml: z.string().max(50000).nullable().optional(),
   customDomain: z.string().max(253).nullable().optional(),
 });
 

@@ -3,6 +3,13 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **18 October 2026 (Batch 135) - `brand_studio` applied remotely**
+> (same proven path: original file, original stamp `20261018190000`,
+> applied with the comment-strip-BEFORE-chunking splitter, columns and
+> constraints verified in the same session). tenant_branding +
+> draft/published/previous_published/published_at + two JSON-shape CHECKs
+> for the PREM-02 Brand Studio slice; additive, no data/grant changes.
+
 > **18 October 2026 (Batch 134) - `captain_role` applied remotely** (same
 > proven path: original file, original stamp `20261018180000`, applied
 > statement-by-statement, verified in the same session). `user_role` enum
