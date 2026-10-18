@@ -3,6 +3,12 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 141) - `scorecard_correction_requests` applied remotely**
+> (same proven path; table + 2 enums + 4 indexes + resolution CHECK +
+> RLS verified in the same session). REG-05 member-raised scorecard
+> correction requests; records never mutations; additive, no data/grant
+> changes to existing objects.
+
 > **18 October 2026 (Batch 138) - `match_availability` applied remotely**
 > (same proven path: original file, original stamp `20261018210000`,
 > applied with the comment-strip-BEFORE-chunking splitter, table/indexes/

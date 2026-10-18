@@ -21,7 +21,9 @@ import { readMatchReactionsForModeration } from "@/lib/fan-reaction-moderation"
 import { readOpenReactionReports } from "@/lib/fan-report-records"
 import { readActiveFanBlocks } from "@/lib/fan-block-records"
 import { readMatchAvailabilitySummary, readMyAvailability } from "@/lib/match-availability"
+import { readMatchCorrectionRequests } from "@/lib/scorecard-corrections"
 import { AvailabilityCard, type AvailabilityAnswer } from "@/components/matches/availability-card"
+import { CorrectionRequestCard, type CorrectionEntry } from "@/components/matches/correction-request-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
 import { auth } from "@clerk/nextjs/server"
@@ -86,6 +88,21 @@ let viewerIsLeagueOwner = false
   // this match's league under a lock; these reads only size the card.
   const availabilityView = await readMyAvailability(id, match.tenantId)
   const availabilityAnswers: AvailabilityAnswer[] = await readMatchAvailabilitySummary(id, match.tenantId)
+  // REG-05 (Batch 141): correction-request state - the owner authority read
+  // and the match's bounded request list. The writers re-verify membership
+  // and owner authority under locks; these reads only size the card.
+  let viewerLeagueOwner = false
+  if (availabilityView.userId) {
+    const [viewerMember] = await db.select({ role: userTenantRoles.role })
+      .from(userTenantRoles)
+      .where(and(eq(userTenantRoles.userId, availabilityView.userId), eq(userTenantRoles.tenantId, match.tenantId)))
+      .limit(1)
+    viewerLeagueOwner = viewerMember?.role === "league_owner"
+  }
+  const correctionRequests = await readMatchCorrectionRequests(id, match.tenantId)
+  const myOpenRequest = availabilityView.userId
+    ? correctionRequests.find(r => r.requestedBy === availabilityView.userId && r.status === "open") ?? null
+    : null
 
   // Fetch Team A details
   const [teamA] = await db.select().from(teams).where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, match.tenantId))).limit(1)
@@ -335,6 +352,16 @@ let viewerIsLeagueOwner = false
         currentUserId={availabilityView.userId || null}
         initialStatus={availabilityView.status}
         answers={availabilityAnswers}
+      />
+
+      {/* REG-05 (Batch 141): scorecard correction requests - records,
+          never mutations; the owner resolves, authority kept apart */}
+      <CorrectionRequestCard
+        matchId={match.id}
+        viewerIsOwner={viewerLeagueOwner}
+        myUserId={availabilityView.userId || null}
+        myOpenRequest={myOpenRequest as CorrectionEntry | null}
+        requests={correctionRequests as CorrectionEntry[]}
       />
 
       {/* Match Header Hero */}

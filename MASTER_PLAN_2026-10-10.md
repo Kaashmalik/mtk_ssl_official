@@ -6171,6 +6171,45 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 1 of the three-phase completion (user directive 2026-10-18)
 
+## Batch 141 - REG-05 slice: scorecard correction requests (records, never mutations; migration applied remotely)
+
+- DELIVERED: the reviewed correction workflow the plan explicitly called
+  out as "still needed" (MASTER_PLAN SCORE section: "a reviewed correction
+  workflow is still needed") - a member-facing request journey for
+  scorecard mistakes: RAISE (fixed reason set: wrong_runs | wrong_wicket |
+  wrong_batter | missing_player | other) and RESOLVE (league owner:
+  approved | dismissed). CORRECTION REQUESTS ARE RECORDS, NEVER
+  MUTATIONS: raising does not change a scorecard; approval does not
+  auto-edit anything - the owner corrects data through the existing
+  audited scoring paths, keeping review and correction authorities apart
+  (same discipline as award disputes/PUB-04).
+- Migration `20261018220000_scorecard_correction_requests` APPLIED
+  remotely and verified: 9 columns, 2 enum types (fixed vocabulary - no
+  free text in this slice), 4 indexes (partial unique one-open-per-member
+  per match + open match idx + tenant/raised idx), resolution-provenance
+  CHECK (open = no reviewer; decided = reviewer AND time), RLS FORCED,
+  grants ssl/service_role ONLY, zero anon grants.
+- WRITER: submit matches the availability gate discipline (session-only
+  actor, PK match fetch, ACTIVE expiry-aware membership in the match's
+  own league, FOR UPDATE before read-modify-write, replay = pure read);
+  an identical replay returns the existing open request (changed:false);
+  a DIFFERENT reason while one is open REFUSES - a raised formal record
+  is not silently rewritten (recorded product default); matches with no
+  scorecard yet (draft/registration) refuse honestly. Resolution is
+  league-owner-only under a lock, pure-read on terminal replays, audited
+  SCORECARD_CORRECTION_RAISED / SCORECARD_CORRECTION_RESOLVED.
+- UI: CorrectionRequestCard on the dashboard match page - fixed-vocabulary
+  reason select + raise, own-request status chip, owner list with
+  approve/dismiss; localized through the corrections namespace in all
+  three dictionaries (key parity enforced by the i18n suite).
+- TESTS: policy (4) + journey (10) incl. never-touches-the-scorecard,
+  non-member/no-scorecard refusals, pure replays both directions,
+  different-reason refusal, owner-only resolution with provenance,
+  malformed-intent pre-transaction refusals, shape pin. HARNESS LESSON:
+  record fake-insert captures at values()-time (writers mix plain await
+  and .returning() - capturing only in returning() silently drops audit
+  rows).
+
 ## Batch 140 - UX-03 continuity: the language switcher (completes the i18n slice)
 
 - DELIVERED: the in-app language switcher - three endonym buttons
