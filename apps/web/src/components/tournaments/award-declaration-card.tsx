@@ -9,7 +9,7 @@ import { Label } from "@mtk/ui/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@mtk/ui/components/ui/select"
 import { Textarea } from "@mtk/ui/components/ui/textarea"
 import { Loader2, Award } from "lucide-react"
-import { declareAward } from "@/app/actions/awards"
+import { declareAward, revokeAwardAction } from "@/app/actions/awards"
 import { AWARD_CATEGORIES, AWARD_CATEGORY_LABELS, type AwardCategory } from "@mtk/database/lib/award-policy"
 import type { AwardDeclarationContext } from "@/lib/award-records"
 
@@ -37,6 +37,12 @@ export const AWARD_MANAGER_LABELS = {
   successChanged: "Official award recorded",
   successUnchanged: "This award is already recorded — nothing changed",
   failure: "Failed to record the award",
+  revoke: "Revoke",
+  revokeConfirm: "Confirm revoke",
+  revokeNotice: "Revoking withdraws the award entirely — no successor is declared. The gallery will stop showing it and the decision stays auditable.",
+  revokeSuccess: "Official award revoked",
+  revokeUnchanged: "This award is already superseded — nothing revoked",
+  revokeFailure: "Failed to revoke the award",
 } as const
 
 /** A brief winner label for the holders list, when a name could not resolve. */
@@ -53,6 +59,8 @@ export function AwardDeclarationCard({ tournamentId, context }: {
   const [playerId, setPlayerId] = useState("")
   const [teamId, setTeamId] = useState("")
   const [citation, setCitation] = useState("")
+  // Two-step confirm per holder row: the first click asks, the second revokes.
+  const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
 
   const activeForCategory = context.activeAwards.find((award) => award.category === category)
   const winnerMissing = winnerType === "player" ? playerId === "" : teamId === ""
@@ -72,6 +80,19 @@ export function AwardDeclarationCard({ tournamentId, context }: {
         router.refresh()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : AWARD_MANAGER_LABELS.failure)
+      }
+    })
+  }
+
+  const revoke = (awardId: string) => {
+    startTransition(async () => {
+      try {
+        const result = await revokeAwardAction({ tournamentId, awardId })
+        toast.success(result.revoked ? AWARD_MANAGER_LABELS.revokeSuccess : AWARD_MANAGER_LABELS.revokeUnchanged)
+        setRevokeTarget(null)
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : AWARD_MANAGER_LABELS.revokeFailure)
       }
     })
   }
@@ -176,15 +197,35 @@ export function AwardDeclarationCard({ tournamentId, context }: {
 
         <div className="border-t pt-4">
           <span className="text-sm font-semibold">{AWARD_MANAGER_LABELS.holdersTitle}</span>
+          <p className="text-xs text-muted-foreground mt-1">{AWARD_MANAGER_LABELS.revokeNotice}</p>
           {context.activeAwards.length === 0 ? (
             <p className="text-sm text-muted-foreground mt-1">{AWARD_MANAGER_LABELS.holdersEmpty}</p>
           ) : (
             <ul className="mt-2 space-y-1">
               {context.activeAwards.map((award) => (
-                <li key={award.id} className="text-sm">
+                <li key={award.id} data-testid="active-award-holder" className="text-sm">
                   <span className="font-medium">{AWARD_CATEGORY_LABELS[award.category as AwardCategory] ?? award.category}</span>
                   {" — "}{award.holderName ?? HOLDER_UNAVAILABLE}
                   {award.citation ? <span className="text-muted-foreground"> · {award.citation}</span> : null}
+                  <span className="ml-2 inline-flex gap-1">
+                    {revokeTarget === award.id ? (
+                      <Button
+                        size="sm" variant="destructive" className="h-6 text-xs"
+                        disabled={isPending}
+                        onClick={() => revoke(award.id)}
+                      >
+                        {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : AWARD_MANAGER_LABELS.revokeConfirm}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm" variant="outline" className="h-6 text-xs"
+                        disabled={isPending}
+                        onClick={() => setRevokeTarget(award.id)}
+                      >
+                        {AWARD_MANAGER_LABELS.revoke}
+                      </Button>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { declareTournamentAward } from "@/lib/award-records"
+import { declareTournamentAward, revokeTournamentAward } from "@/lib/award-records"
+import { AWARD_MANAGER_LABELS } from "@/components/tournaments/award-declaration-card"
 
 const mocks = vi.hoisted(() => ({ context: vi.fn(), transaction: vi.fn() }))
 vi.mock("@/lib/league-reads", () => ({ requireActiveLeagueContext: mocks.context }))
@@ -181,5 +182,64 @@ describe("Official award declaration (PUB-04 first slice)", () => {
     await declareTournamentAward({ ...playerInput, citation: null })
     expect(tx.values).toHaveBeenNthCalledWith(1, expect.objectContaining({ tenantId: TENANT, declaredBy: ACTOR }))
     expect(tx.values).toHaveBeenNthCalledWith(2, expect.objectContaining({ tenantId: TENANT, actorId: ACTOR }))
+  })
+})
+
+describe("Official award revocation (PUB-04 close-out)", () => {
+  it("withdraws an active award as a supersede with NO successor, audited as revocation", async () => {
+    const tx = txMock([[{ id: ACTIVE, category: "best_batsman", playerId: PLAYER, teamId: null }]])
+
+    const result = await revokeTournamentAward({ tournamentId: TOURNAMENT, awardId: ACTIVE })
+
+    expect(mocks.context).toHaveBeenCalledWith("tournament:update")
+    expect(result).toEqual({ revoked: true, awardId: ACTIVE, tournamentId: TOURNAMENT, category: "best_batsman" })
+    // Supersede, never mutate/delete: only supersededAt moves.
+    expect(tx.update).toHaveBeenCalledTimes(1)
+    expect(tx.set).toHaveBeenCalledWith(expect.objectContaining({ supersededAt: expect.any(Date) }))
+    expect(tx.values).toHaveBeenCalledWith(expect.objectContaining({
+      method: "AWARD_REVOKED", tenantId: TENANT, actorId: ACTOR, actorRole: "league_owner",
+      payload: expect.objectContaining({
+        tournamentId: TOURNAMENT, awardId: ACTIVE, category: "best_batsman",
+        winner: { playerId: PLAYER }, revoked: true,
+      }),
+    }))
+  })
+
+  it("is terminal: an already-superseded award revokes nothing new", async () => {
+    const tx = txMock([[]])
+
+    await expect(revokeTournamentAward({ tournamentId: TOURNAMENT, awardId: ACTIVE }))
+      .rejects.toThrow("award not found in this league, or already superseded")
+    expect(tx.update).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { name: "an unknown field", input: { tournamentId: TOURNAMENT, awardId: ACTIVE, hard: true } },
+    { name: "a malformed award id", input: { tournamentId: TOURNAMENT, awardId: "nope" } },
+  ])("rejects $name before any authority or database work", async ({ input }) => {
+    const tx = txMock([])
+    await expect(revokeTournamentAward(input as never)).rejects.toThrow()
+    expect(mocks.context).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(tx.select).not.toHaveBeenCalled()
+  })
+})
+
+describe("Award manager copy for revocation (PUB-04 truthfulness)", () => {
+  it("says exactly what revoking does and never claims deletion", () => {
+    expect(AWARD_MANAGER_LABELS.revoke).toBe("Revoke")
+    expect(AWARD_MANAGER_LABELS.revokeConfirm).toBe("Confirm revoke")
+    expect(AWARD_MANAGER_LABELS.revokeNotice).toContain("withdraws")
+    expect(AWARD_MANAGER_LABELS.revokeNotice).toContain("no successor")
+    expect(AWARD_MANAGER_LABELS.revokeNotice).toContain("auditable")
+    expect(AWARD_MANAGER_LABELS.revokeUnchanged).toContain("already superseded")
+    // The revocation copy itself never claims deletion; the card-wide intro's
+    // "nothing is ever deleted" is a TRUE statement and stays.
+    expect(AWARD_MANAGER_LABELS.revokeNotice.toLowerCase()).not.toContain("delete")
+    expect(AWARD_MANAGER_LABELS.revokeSuccess.toLowerCase()).not.toContain("delete")
+    for (const value of Object.values(AWARD_MANAGER_LABELS)) {
+      expect(value.toLowerCase()).not.toContain("permanently remove")
+    }
   })
 })

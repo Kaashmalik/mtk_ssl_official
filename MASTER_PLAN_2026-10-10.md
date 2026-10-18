@@ -6169,6 +6169,33 @@ Session B's REG/COMP domain, recorded untouched).
 | `npx vitest run` (web) | PASS - 149 files / 3,009 tests |
 | `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** error lines |
 
+## Batch 128 - Award revocation (PUB-04 delivered-able clauses complete)
+
+Revocation closes PUB-04's recorded close-out clause, built on the SAME
+authority and supersede mechanics as declaration:
+
+- `revokeTournamentAward` (owner `tournament:update`): a row-locked select of
+  the ACTIVE award fully pinned by (id, tournamentId, tenantId,
+  supersededAt IS NULL) -> supersededAt moves -> audit `AWARD_REVOKED` with
+  the full facts (category, winner, revoked: true). This is a supersede with
+  NO successor: nothing is deleted or edited, the partial active-unique and
+  every reader's active gate do the rest. The audit METHOD is the provenance
+  that distinguishes "withdrawn" from "corrected away". Terminal: an
+  already-superseded row revokes nothing (idempotent by error).
+- Action revalidates the tournament gallery so a revoked award never stays
+  public. No notification fan-out — the gallery change plus the audit are
+  the record (disclosed boundary).
+- UI: a two-step Revoke control per holder row on the declaration card
+  (Revoke -> Confirm revoke, disabled while pending), with copy that states
+  exactly the semantics: "withdraws the award entirely — no successor is
+  declared", stays "auditable", and NEVER claims deletion.
+
+Tests pin: provenance method + payload, single-update/no-delete, terminal
+failure text, zod-before-authority, and label truthfulness (revocation
+labels scoped from the card-wide "nothing is ever deleted" TRUE statement).
+Now staged-acceptance remains PUB-04's only open clause; the tick is the
+user's call with the thin-data caveat (zero live awards/disputes).
+
 ## Batch 127 - Award disputes (PUB-04 dispute clause complete)
 
 Pub-04's recorded dispute workflow, built as RECORDS that never mutate the

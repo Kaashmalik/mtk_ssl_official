@@ -203,6 +203,83 @@ export async function declareTournamentAward(input: unknown): Promise<DeclareAwa
 /** Bounded picker snapshot size (house bound; overflow is disclosed, not hidden). */
 export const AWARD_MANAGER_BOUND = 200
 
+export const revokeAwardInputSchema = z.object({
+  tournamentId: z.string().uuid(),
+  awardId: z.string().uuid(),
+}).strict()
+
+export type RevokeAwardInput = z.infer<typeof revokeAwardInputSchema>
+
+export type RevokeAwardResult = {
+  /** False when the award was already superseded (corrected or revoked; replay). */
+  revoked: boolean
+  awardId: string
+  tournamentId: string
+  category: AwardCategory
+}
+
+/**
+ * PUB-04 revocation, the close-out clause. Revoking withdraws an official
+ * award ENTIRELY: there is no successor winner, so this is a supersede with
+ * no replacement — the active row stops being active (the partial unique and
+ * every reader's `supersededAt IS NULL` gate do the rest), the prior decision
+ * stays history, and NOTHING is deleted or edited. The audit method
+ * (`AWARD_REVOKED`, distinct from AWARD_DECLARED/AWARD_CORRECTED) is the
+ * provenance that says "withdrawn", not "corrected". Same owner authority as
+ * declaration; terminal: an already-superseded row revokes nothing new.
+ * No notification fan-out — the gallery simply stops showing the award, and
+ * the audit is the record (disclosed boundary).
+ */
+export async function revokeTournamentAward(input: unknown): Promise<RevokeAwardResult> {
+  const parsed = revokeAwardInputSchema.parse(input)
+  const context = await requireActiveLeagueContext("tournament:update")
+
+  return db.transaction(async (tx) => {
+    // (1) Row-locked, fully tenant-pinned, ACTIVE only: an already-superseded
+    // award (corrected or revoked before) is terminal — nothing revokes twice.
+    const [active] = await tx
+      .select({
+        id: tournamentAwards.id,
+        category: tournamentAwards.category,
+        playerId: tournamentAwards.playerId,
+        teamId: tournamentAwards.teamId,
+      })
+      .from(tournamentAwards)
+      .where(and(
+        eq(tournamentAwards.id, parsed.awardId),
+        eq(tournamentAwards.tournamentId, parsed.tournamentId),
+        eq(tournamentAwards.tenantId, context.tenantId),
+        isNull(tournamentAwards.supersededAt),
+      ))
+      .for("update")
+      .limit(1)
+    if (!active) throw new Error("Forbidden: award not found in this league, or already superseded")
+
+    await tx.update(tournamentAwards)
+      .set({ supersededAt: new Date() })
+      .where(eq(tournamentAwards.id, active.id))
+
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(),
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.role,
+      method: "AWARD_REVOKED",
+      path: "/actions/awards",
+      statusCode: "200",
+      payload: {
+        tournamentId: parsed.tournamentId,
+        awardId: active.id,
+        category: active.category,
+        winner: active.playerId != null ? { playerId: active.playerId } : { teamId: active.teamId },
+        revoked: true,
+      },
+    })
+
+    return { revoked: true, awardId: active.id, tournamentId: parsed.tournamentId, category: active.category }
+  }, { isolationLevel: "read committed" })
+}
+
 export type AwardCandidateTeam = { id: string; name: string }
 export type AwardCandidatePlayer = { id: string; name: string; teamId: string | null }
 export type ActiveAwardSummary = {

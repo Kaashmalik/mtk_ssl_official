@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { declareTournamentAward } from "@/lib/award-records"
+import { declareTournamentAward, revokeTournamentAward } from "@/lib/award-records"
 import { raiseAwardDispute, resolveAwardDispute } from "@/lib/award-dispute-records"
 
 /**
@@ -47,5 +47,20 @@ export async function resolveAwardDisputeAction(input: unknown) {
     decided: result.decided,
     disputeId: result.disputeId,
     decision: result.decision,
+  }
+}
+
+/**
+ * PUB-04 revocation. Organizer authority; the writer re-checks everything.
+ * The gallery revalidates so a revoked award never stays public.
+ */
+export async function revokeAwardAction(input: unknown) {
+  const result = await revokeTournamentAward(input)
+  revalidatePath(`/tournaments/${result.tournamentId}`)
+  return {
+    success: true as const,
+    revoked: result.revoked,
+    awardId: result.awardId,
+    category: result.category,
   }
 }
