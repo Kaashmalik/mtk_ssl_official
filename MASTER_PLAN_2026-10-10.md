@@ -6279,6 +6279,57 @@ security upgrade, `fc3cdc9` B171c drop fix).
 | `node scripts/migration-inventory.cjs --db` | **missingInDb (none); untrackedInDb (none); exit 0** |
 | Playwright live checks | home 0 errors; anon redirects to sign-in; Clerk card renders |
 
+## Batch 173-174 - THE SIGNED-IN FLOW WAS BROKEN ON EVERY DEPLOYMENT (middleware auth gate) - found live, fixed, verified
+
+The Batch 171-172 deployment was reachable but NOT usable: after a
+real sign-in, every protected route (including the home page's
+"Manage Dashboard" button) 307-redirected to `/sign-in`, and the
+sign-in page then rendered a BLANK dark page - the reported
+"black screen". Reproduced end-to-end with a genuine signed-in session
+on the production URL (real Clerk OTP into a real mailbox), which also
+surfaced Clerk's own console line: *"<SignIn/> cannot render when a
+user is already signed in ... redirecting to afterSignIn"*.
+
+Root cause: `apps/web/src/middleware.ts` read `auth.sessionClaims` as a
+static property of the object handed to the `clerkMiddleware` callback.
+In @clerk/nextjs v6 that object is a CALLABLE - claims exist only
+after `await auth()` - so the read was `undefined` for EVERY request.
+Every protected request looked signed-out to the edge while clerk-js
+correctly reported an active session. The middleware had ZERO test
+coverage, which is why the defect survived the whole battery.
+
+- **B173** (`6478c8c`): middleware awaits `auth()` once and uses the
+  real `userId` for the mutation rate-limit key and the protected-route
+  gate; new pin `src/__tests__/middleware-auth.test.ts` (5 tests) mocks
+  the v6 callable-auth contract. Gates: tsc 0, build green, web
+  3,271/3,271, release 93/93. DEPLOYED + VERIFIED: a signed-in
+  league-owner session now renders the full dashboard (sidebar,
+  workspace panels, setup checklist) on https://mtk-ssl.vercel.app.
+- **Owner account data fix** (remote, not a code change): the seeded
+  `super_admin` users row had `clerk_id = NULL` because the Clerk
+  `user.created` webhook was never configured on the dev instance, so
+  the dashboard's clerk_id lookup could never match. The row is now
+  linked to the verified Clerk account. A QA account (real mailbox +
+  users row + `league_owner` membership) was provisioned for
+  verification and can be purged on request.
+- **B174** (`4ef4a3f`): the notification socket no longer falls back to
+  `http://localhost:4008` on a deployment with no notification server
+  (console-error storm on every page); an unset URL now means
+  "disabled". SMTP credentials pushed to the project so transactional
+  email leaves the degraded state.
+- **Live sweep (16 pages)**: 12/12 dashboard pages render with real
+  content; API roots answer with JSON 401s for signed-out calls (never
+  HTML redirects) and 200/401 as designed. Two findings are the
+  isolation model working AS DESIGNED: public surfaces
+  (`/tournaments`, `/leaderboards`, match pages) are tenant-host-scoped
+  and fail closed on the bare `vercel.app` domain - they need the
+  league's own domain (`ssl.cricket`) attached to the project. Redis
+  stays degraded until a hosted `REDIS_URL` exists.
+- **Owner follow-ups**: attach `ssl.cricket` to Vercel + DNS; configure
+  the Clerk webhook (`/api/webhooks/clerk` + `CLERK_WEBHOOK_SECRET`);
+  move Clerk to production keys; hosted Redis; `STREAMING_ACCESS_TOKEN`
+  and the remaining feature vars when those features launch.
+
 ## Batch 158 - REL-01 + REL-05 EXECUTED locally + tick finalization (one shot, evidence-gated)
 
 - REL-01 (two-league RLS isolation) EXECUTED, not just planned:
