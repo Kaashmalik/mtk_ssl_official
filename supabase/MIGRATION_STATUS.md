@@ -3,6 +3,23 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 169) - REG-01 reconciled LIVE + ledgered; deployment unblocked**
+> `20261017130000_league_applications` was verified FULLY PRESENT in the
+> deployed schema (8 signature objects confirmed live: table, state/version/
+> name/slug CHECKs, both partial unique keys, RLS enabled+forced,
+> service_role+ssl grants, anon denied, 3 FKs) - it had been applied
+> remotely long ago but never LEDGERED, the only reason the `--db` gate
+> reported it. Ledger row inserted (created_by `reg01-remote-apply-b169`).
+> The `--db` gate now reports exactly ONE deferral:
+> `20261019160000_drop_users_tenant_ids` - deploy-order-gated behind the
+> projection-only admin console deployment, which this very deployment
+> (Vercel project `mtk-ssl`, repo `mtk_ssl_official@main`) ships; the drop
+> follows once the live site is verified.
+> Deployment notes: project now Git-linked (github Kaashmalik/
+> mtk_ssl_official, branch main, Root Directory `apps/web`); 24 runtime
+> env vars pushed from `.env` (production target). Batch 169 fixed four
+> `next build`-only breaks locally (see commit 5a6716a).
+
 > **19 October 2026 (Batch 166) - office additive migrations APPLIED remotely + ledgered, verification-first**
 > Applied to the remote database and recorded in
 > `supabase_migrations.schema_migrations` (created_by
