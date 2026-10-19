@@ -6227,6 +6227,58 @@ reports exactly those two, untracked 0. Full notes in
 | --- | --- |
 | `node scripts/migration-inventory.cjs --db` | missingInDb = 20261017130000, 20261019160000 (both deliberate); untrackedInDb = none |
 
+## Batch 169-171c - THE PLATFORM IS DEPLOYED TO PRODUCTION (Vercel, git-linked) + remote DB FULL parity
+
+Production deployment achieved (user directive; github `mtk_ssl_official@main`
+auto-deploys to Vercel): **https://mtk-ssl.vercel.app** (commits `5a6716a`
+B169 fixes, `8b5a291` B170 registers, `59a7612`+`4e915bc` B171/B171b
+security upgrade, `fc3cdc9` B171c drop fix).
+
+- **B169** (`5a6716a`): four production-build breaks fixed locally before
+  first deploy - sync non-async exports in `follows.ts` ("use server"
+  requires all-async), client component barrel import pulling the postgres
+  driver into the browser bundle (`membership-display.ts` switched to the
+  pure deep import), two type-only zod schemas tripping the build's
+  no-unused-vars ERROR (`push-delivery.ts`, `scorecards.ts`) - the latter
+  CORRECTED after our own pins caught that the retired writer's refusal
+  must stay unconditional; `apps/web/vercel.json` (workspace-aware
+  install/build: @mtk/database dist has no prepare hook).
+- **Vercel plumbing found + fixed**: project was linked to the WRONG repo
+  (old `mtk-ssl2026` - a separate, still-active lineage, office Session B's;
+  its deploys all errored on the unconfigured project). Repointed via API:
+  `Kaashmalik/mtk_ssl_official@main`, Root Directory `apps/web`, framework
+  nextjs. 24 env vars pushed (production; DATABASE_URL -> connected
+  Supabase).
+- **B171/B171b** (`59a7612`/`4e915bc`): Vercel's dependency-security block
+  refused next 15.5.6 after a 100%-successful compile - upgraded
+  `pnpm up -r next@15.5.28` (Vercel's `backport` tag = the patched release
+  of the SAME line; constraint floors raised).
+- **B171c** (`fc3cdc9`): REG-01 verified live + ledgered (it had been
+  applied remotely but never ledgered) and `drop_users_tenant_ids`
+  corrected PRE-ADOPTION + applied after the deploy satisfied its
+  deploy-order gate: as shipped it failed BOTH the live DB and any virgin
+  rebuild (003's dead policy `Users can view users in their tenants`
+  depended on the column; never retired by any later migration). Fixed
+  migration drops the policy with the column; verified live (tenant_ids
+  absent, 3 policies, platform-role CHECK intact). Pre-drop snapshot:
+  `E:\Temp\mtk-build\users-tenantids-backup-20261019.csv`.
+- **`--db` gate FULLY GREEN for the first time**: missingInDb (none),
+  untrackedInDb (none). The migration folder and the deployed schema are
+  in FULL parity.
+- **Live verification** (Playwright on the production URL): home renders
+  (0 console errors), `/tournaments` + `/dashboard` correctly redirect
+  anon -> Clerk sign-in; sign-in card renders fully (Google + email).
+  HONEST LIMITATION: Clerk runs on DEVELOPMENT keys (pk_test_ - the
+  sign-in header shows the instance default "My Application"); a Clerk
+  PRODUCTION instance (+ live keys + domain config) is an owner task in
+  the Clerk dashboard before real users.
+
+| Command | Result |
+| --- | --- |
+| Vercel git deploy `4e915bc` | READY - https://mtk-ssl.vercel.app |
+| `node scripts/migration-inventory.cjs --db` | **missingInDb (none); untrackedInDb (none); exit 0** |
+| Playwright live checks | home 0 errors; anon redirects to sign-in; Clerk card renders |
+
 ## Batch 158 - REL-01 + REL-05 EXECUTED locally + tick finalization (one shot, evidence-gated)
 
 - REL-01 (two-league RLS isolation) EXECUTED, not just planned:
