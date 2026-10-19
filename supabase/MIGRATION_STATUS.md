@@ -3,6 +3,24 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 166) - office additive migrations APPLIED remotely + ledgered, verification-first**
+> Applied to the remote database and recorded in
+> `supabase_migrations.schema_migrations` (created_by
+> `office-batch-remote-apply`), each after live-schema verification of
+> its signature objects (tables/columns/constraints/indexes/RLS flags):
+> `20261019100000_invitation_email_jobs` (6), `20261019110000_account_locale_preferences`
+> (2), `20261019120000_notification_email_preference` (1),
+> `20261019130000_notification_push_preference` (1),
+> `20261019140000_fan_predictions` (3), `20261019150000_tournament_application_replies`
+> (3). All six are additive: the previously deployed app is unaffected,
+> and the Batch 159-165 features stay fail-closed until their READY
+> flags/keys ship in a deployment.
+> STILL NOT APPLIED remotely, deliberately: `20261019160000_drop_users_tenant_ids`
+> (see the Batch 165 block - destructive, deploy-order-gated) and
+> `20261017130000_league_applications` (REG-01, Session B's under the
+> parallel-session boundary). The `--db` drift gate reports exactly
+> these two and stays red until they land - that is the gate working.
+
 > **19 October 2026 (Batch 165) - one LOCAL migration, NOT applied remotely - STRICT
 > DEPLOY ORDER**
 > `20261019160000_drop_users_tenant_ids` (ISO-06 retirement): `DROP COLUMN IF
