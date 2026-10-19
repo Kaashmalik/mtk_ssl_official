@@ -182,8 +182,11 @@ export async function PATCH(request: NextRequest) {
           .limit(1);
         if (!pre) return { kind: "not-found" as const };
 
+        // ISO-06 (Batch 165): explicit projection even for the lock - the
+        // applicant row is read for its activity flag only, never as a
+        // full row, so retired columns can never load here either.
         const [applicant] = await tx
-          .select()
+          .select({ id: users.id, isActive: users.isActive })
           .from(users)
           .where(eq(users.id, pre.applicantId))
           .for("update")

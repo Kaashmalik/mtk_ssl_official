@@ -123,13 +123,13 @@ export async function readListedHubLeagues(): Promise<HubLeaguesRead> {
 }
 
 /** Published competitions per listed league (same statuses as public detail pages). */
-async function readPublishedCompetitionCounts(tenantIds: string[]): Promise<Map<string, number>> {
-  if (tenantIds.length === 0) return new Map()
+async function readPublishedCompetitionCounts(leagueIds: string[]): Promise<Map<string, number>> {
+  if (leagueIds.length === 0) return new Map()
   const rows = await db
     .select({ tenantId: tournaments.tenantId, competitions: count() })
     .from(tournaments)
     .where(and(
-      inArray(tournaments.tenantId, tenantIds),
+      inArray(tournaments.tenantId, leagueIds),
       inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES]),
     ))
     .groupBy(tournaments.tenantId)
@@ -141,8 +141,8 @@ async function readPublishedCompetitionCounts(tenantIds: string[]): Promise<Map<
  * is published AND it has no unpublished parent — the same parent-gating rule
  * `readPublishedMatch` enforces for single-league pages.
  */
-async function readLiveMatchCounts(tenantIds: string[]): Promise<Map<string, number>> {
-  if (tenantIds.length === 0) return new Map()
+async function readLiveMatchCounts(leagueIds: string[]): Promise<Map<string, number>> {
+  if (leagueIds.length === 0) return new Map()
   const rows = await db
     .select({ tenantId: matches.tenantId, live: count() })
     .from(matches)
@@ -151,7 +151,7 @@ async function readLiveMatchCounts(tenantIds: string[]): Promise<Map<string, num
       and(eq(tournaments.id, matches.tournamentId), eq(tournaments.tenantId, matches.tenantId)),
     )
     .where(and(
-      inArray(matches.tenantId, tenantIds),
+      inArray(matches.tenantId, leagueIds),
       inArray(matches.status, [...PUBLISHED_MATCH_STATUS_VALUES]),
       sql`${matches.status} = 'live'`,
       or(isNull(matches.tournamentId), inArray(tournaments.status, [...PUBLISHED_TOURNAMENT_STATUS_VALUES])),

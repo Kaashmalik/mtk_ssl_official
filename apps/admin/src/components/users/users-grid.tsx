@@ -11,12 +11,14 @@ interface AdminUser {
   displayName: string | null;
   role: string;
   isActive: boolean;
-  tenantIds: string[] | null;
   lastLoginAt: string | null;
   createdAt: string;
 }
 
-const ROLES = ["super_admin", "league_owner", "team_manager", "coach", "scorer", "player", "fan"] as const;
+// ISO-06 (Batch 165): users.role is the PLATFORM role column only (super_admin
+// | fan). League roles live exclusively in user_tenant_roles, managed per
+// league - the platform console no longer offers, reads or writes them.
+const ROLES = ["super_admin", "fan"] as const;
 
 export function UsersGrid() {
   const [rows, setRows] = useState<AdminUser[]>([]);

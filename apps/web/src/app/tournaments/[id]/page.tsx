@@ -17,7 +17,9 @@ import { TournamentPollCard } from "@/components/shared/tournament-poll-card"
 import { TournamentShareCard } from "@/components/shared/tournament-share-card"
 import { MilestoneCards } from "@/components/tournaments/milestone-cards"
 import { computeStandings, computeGroupStandings, type StandingsMatchInput } from "@/lib/standings"
+import { computeFormGuide, type FormGuideMatchInput } from "@/lib/form-guide"
 import { GroupStandings } from "@/components/tournaments/group-standings"
+import { FormGuide } from "@/components/tournaments/form-guide"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft", registration: "Registration Open", live: "Live", completed: "Completed", cancelled: "Cancelled",
@@ -137,6 +139,26 @@ export default async function PublicTournamentPage({ params }: { params: Promise
 
   const groupStandings = computeGroupStandings({ teams: registeredTeams, matches: standingsInputs })
 
+  // FAN-03 (Batch 165): the approved form-guide analytic package - a pure,
+  // rule-versioned fold over the SAME official published match rows the
+  // standings consume. Only resulted/voided matches contribute letters; an
+  // upcoming or in-progress match can never manufacture form.
+  const formGuideInputs: FormGuideMatchInput[] = tournamentMatchesRaw.map((m) => ({
+    id: m.id,
+    status: m.status,
+    scheduledDate: m.scheduledDate,
+    teamAId: m.teamAId,
+    teamBId: m.teamBId,
+    winnerId: m.winnerId,
+    resultText: m.result,
+  }))
+  const formGuideTeamNames = new Map(registeredTeams.map((t) => [t.id, t.name]))
+  for (const m of tournamentMatches) {
+    if (!formGuideTeamNames.has(m.teamAId) && m.teamAName !== "TBD") formGuideTeamNames.set(m.teamAId, m.teamAName)
+    if (!formGuideTeamNames.has(m.teamBId) && m.teamBName !== "TBD") formGuideTeamNames.set(m.teamBId, m.teamBName)
+  }
+  const formGuideRows = computeFormGuide(formGuideInputs, formGuideTeamNames)
+
   // Official award gallery (PUB-04): only ACTIVE, organizer-declared awards of
   // this already-published tournament. Fan favorites do not exist in this data.
   const awards = await readPublishedTournamentAwards(tenantId, id)
@@ -246,6 +268,11 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       )}
 
       <GroupStandings groups={groupStandings} />
+
+      {/* FAN-03 (Batch 165): approved analytic package - the derived form
+          guide. Same official facts as the points table; disclosure attached. */}
+      <FormGuide rows={formGuideRows} />
+
       {standings.length > 0 && (
                 <Card>
                   <CardHeader><CardTitle>Points Table</CardTitle></CardHeader>

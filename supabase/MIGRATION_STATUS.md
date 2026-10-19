@@ -3,6 +3,21 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 165) - one LOCAL migration, NOT applied remotely - STRICT
+> DEPLOY ORDER**
+> `20261019160000_drop_users_tenant_ids` (ISO-06 retirement): `DROP COLUMN IF
+> EXISTS tenant_ids` on users. Destructive and irreversible. The column was
+> write-disabled in B138, has no authorization reader (pinned by the
+> iso06-retirement source scan), and its data is fully superseded by
+> user_tenant_roles. APPLY ONLY AFTER deploying the code whose every users
+> read is an explicit projection (Batch 165 admin routes + this repo's web
+> sources): an app still enumerating the column would fail every users query
+> after the drop. users.role itself is NOT touched - it is the PLATFORM role
+> column (super_admin|fan, users_role_platform_only CHECK); league roles live
+> exclusively in user_tenant_roles, and the platform console's users.role
+> surface (read filter + PATCH enum + grid dropdown) is now platform-only by
+> construction.
+
 > **19 October 2026 (Batch 164) - two LOCAL migrations, NOT applied remotely**
 > `20261019140000_fan_predictions` (FAN-04 fan predictions): RLS-forced
 > `fan_predictions` (tenant/match/user cascade FKs, pick CHECK home|away,

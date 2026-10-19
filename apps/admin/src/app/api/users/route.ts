@@ -33,7 +33,20 @@ export async function GET(request: Request) {
     if (status === "active") conditions.push(eq(users.isActive, true));
     if (status === "suspended") conditions.push(eq(users.isActive, false));
 
-    const list = await db.select().from(users)
+    // ISO-06 (Batch 165): explicit projection, platform-console fields only.
+    // No full-row reads and no tenantIds: the legacy column is dropped by
+    // migration 20261019160000 and no console surface may depend on it.
+    const list = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        role: users.role,
+        isActive: users.isActive,
+        lastLoginAt: users.lastLoginAt,
+        createdAt: users.createdAt,
+      })
+      .from(users)
       .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(desc(users.createdAt))
       .limit(200);

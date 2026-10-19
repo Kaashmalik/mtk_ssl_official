@@ -31,9 +31,11 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   displayName: text("display_name"),
   avatarUrl: text("avatar_url"),
-  // LEGACY (ISO-06): write-disabled fallback superseded by user_tenant_roles.
-  // Kept as data only; no consumer reads it for authorization any more.
-  tenantIds: uuid("tenant_ids").array().notNull().default([]),
+  // ISO-06 (Batch 165): the LEGACY tenant_ids column is RETIRED - dropped by
+  // migration 20261019160000. It was write-disabled first (B138) and has had
+  // no reader for authorization since; the source wellness test
+  // (iso06-retirement.test.ts) pins that no production source may reference
+  // it. League membership lives exclusively in user_tenant_roles.
   // PLATFORM role only (super_admin | fan, enforced by users_role_platform_only).
   // League roles live exclusively in user_tenant_roles - this column is never
   // read for league authorization (ISO-06).
