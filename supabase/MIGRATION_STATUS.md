@@ -3,6 +3,19 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 156) - BASE-04 ledger reconciliation (verification-first)**
+> The `--db` deployed-schema gate ran against the live database for the
+> first time. Its reconcile is now NAME-AWARE (stamps differ between
+> the CLI ledger and the folder for 7 batches that were already
+> deployed and are now matched by their file-name suffix). Ten
+> migrations that were applied remotely outside the supabase CLI
+> (batches 132-153, each verified same-session) were ledgered AFTER
+> their signature objects were re-verified in the live schema
+> (tables/columns/enum labels; the reconcile refused to write any row
+> it could not verify). `20261017130000` (league_applications) is
+> deliberately NOT reconciled here: it is REG-01, Session B's
+> migration under the parallel-session boundary.
+
 > **19 October 2026 (Batch 153) - `match_status` widening + reason columns applied remotely**
 > (same proven path: original file, original stamp `20261019010000`,
 > applied with the comment-strip-BEFORE-chunking splitter + 6-statement

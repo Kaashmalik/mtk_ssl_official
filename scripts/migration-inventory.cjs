@@ -60,20 +60,44 @@ function registryStamps() {
 /**
  * Pure three-way reconcile. Kept pure so the drift rules are testable
  * without a database - the db runner below only feeds it rows.
+ *
+ * seenInDb items may be plain stamps (legacy shape, used by tests) or
+ * {version, name} rows: the deployed ledger records a NAME column, and
+ * some batches were legitimately applied under a different stamp with
+ * the same name, so a migration counts as deployed when EITHER its
+ * folder stamp or its file-name suffix was recorded. Stamp-only
+ * matching faked drift that the schema did not have.
  */
-function reconcile(expected, seenInRegistry, seenInDb) {
+function reconcile(expected, seenInRegistry, seenInDb, seenInDbNames = []) {
   const registry = new Set(seenInRegistry)
-  const db = new Set(seenInDb)
+  const dbRows = new Map()
+  for (const item of seenInDb) {
+    if (item !== null && typeof item === "object") dbRows.set(String(item.version), item.name ?? null)
+    else dbRows.set(String(item), null)
+  }
+  for (const item of seenInDbNames) {
+    if (item !== null && typeof item === "object") {
+      if (!dbRows.has(String(item.version))) dbRows.set(String(item.version), item.name ?? null)
+    } else if (!dbRows.has(String(item))) dbRows.set(String(item), String(item))
+  }
+  const expectedStamps = new Set(expected.map((m) => m.stamp))
+  const expectedNames = new Set(expected.map((m) => m.name))
+  const isDeployed = (m) =>
+    [...dbRows.entries()].some(([version, name]) => version === m.stamp || (name !== null && name === m.name))
   const rows = expected.map((m) => ({
     ...m,
     registry: registry.has(m.stamp),
-    db: db.has(m.stamp),
+    db: isDeployed(m),
   }))
+  const untracked = [...dbRows.entries()]
+    .filter(([version, name]) => !expectedStamps.has(version) && (name === null || !expectedNames.has(name)))
+    .map(([version]) => version)
+    .sort()
   return {
     rows,
     drift: {
       missingInDb: rows.filter((r) => !r.db).map((r) => r.stamp),
-      untrackedInDb: [...db].filter((s) => !expected.some((m) => m.stamp === s)).sort(),
+      untrackedInDb: untracked,
       pendingInRegistry: rows.filter((r) => !r.registry).map((r) => r.stamp),
     },
   }
@@ -82,14 +106,16 @@ function reconcile(expected, seenInRegistry, seenInDb) {
 /** Reads applied stamps from the live Supabase migrations table. Never called in --manifest/--registry modes. */
 async function dbAppliedStamps() {
   if (!process.env.DATABASE_URL) throw new Error("--db requires DATABASE_URL")
-  const { Client } = require("pg")
-  const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+  // Use the repo's established driver (postgres, a packages/database
+  // dependency) instead of adding a second pg client to the tree.
+  const dbPkg = require("path").join(__dirname, "..", "packages", "database")
+  const postgres = require(require.resolve("postgres", { paths: [dbPkg] }))
+  const sql = postgres(process.env.DATABASE_URL, { max: 1, ssl: "prefer", connect_timeout: 30 })
   try {
-    await client.connect()
-    const result = await client.query("SELECT version FROM supabase_migrations.schema_migrations ORDER BY version")
-    return result.rows.map((r) => String(r.version))
+    const result = await sql`SELECT version, name FROM supabase_migrations.schema_migrations ORDER BY version`
+    return result.map((r) => ({ version: String(r.version), name: r.name ?? null }))
   } finally {
-    await client.end()
+    await sql.end({ timeout: 5 })
   }
 }
 

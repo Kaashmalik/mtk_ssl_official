@@ -6173,6 +6173,34 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 156 - BASE-04 evidence: deployed-schema gate made real + ledger reconciled (remote, verified)
+
+- DELIVERED: the `--db` deployed-schema gate existed but could never
+  run - it required a `pg` client the repo never installed. It now
+  uses the repo's established `postgres` driver (a packages/database
+  dependency), and the first real run against the deployed database
+  produced the drift evidence the gate was built for:
+  - 7 migrations showed as "untracked" purely because earlier batches
+    ledgered them under different stamps with the SAME name - the
+    reconcile is now NAME-AWARE (stamp OR file-name suffix match),
+    with 2 new test pins; stamp-only matching faked drift.
+  - 10 migrations were applied remotely OUTSIDE the supabase CLI
+    (verified same-session in their batches) but never ledgered. The
+    ledger reconcile verified each migration's signature objects in
+    the LIVE schema first (tables/columns/enum labels, hand-mapped
+    from the files - 13 catalog checks total, zero guessed) and only
+    then recorded the row, with an explanatory self-describing
+    statement entry and a distinct created_by.
+  - HONEST REMAINING DRIFT (deliberate, not hidden): exactly ONE
+    missing ledger row - `20261017130000` (league_applications), which
+    is REG-01, Session B's migration under the parallel-session
+    boundary. It is Session B's to reconcile; the gate stays red
+    (exit 1) until then, which is the gate telling the truth.
+    `pendingInRegistry` remains informational (register covers
+    Oct-6-onward; legacy stamps legitimately unregistered).
+- ENV: build scratch on E:\Temp\mtk-build (user drive change).
+- VERIFIED: release suite 93/93 (91 + 2 new reconcile pins).
+
 ## Batch 154 - SCORE-10 slice: the cricket-rules fold, wired into the SoT (no migration)
 
 - DELIVERED: one shared rules vocabulary for the conversion knots every

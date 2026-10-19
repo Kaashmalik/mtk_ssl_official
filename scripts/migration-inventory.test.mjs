@@ -43,3 +43,18 @@ test("clean state has zero drift in every direction", () => {
   assert.equal(result.drift.untrackedInDb.length, 0)
   assert.equal(result.drift.pendingInRegistry.length, 0)
 })
+
+test("a migration applied under a different stamp with the same NAME counts as deployed, and that ledger row is not untracked (BASE-04, Batch 156)", () => {
+  const expected = [{ file: "20261016102316_outbox.sql", stamp: "20261016102316", name: "scoring_transactional_outbox" }]
+  // Ledger row recorded with a different version but the SAME name.
+  const result = reconcile(expected, new Set(), [{ version: "20261016130058", name: "scoring_transactional_outbox" }])
+  assert.deepEqual(result.drift.missingInDb, [], "name match is a deployment match")
+  assert.deepEqual(result.drift.untrackedInDb, [], "a name-matched ledger row is tracked, never normalized away")
+})
+
+test("an unrelated ledger stamp with an UNKNOWN name is still honest drift (Batch 156)", () => {
+  const expected = [{ file: "1_a.sql", stamp: "00000000000001", name: "a" }]
+  const result = reconcile(expected, new Set(), [{ version: "20269999999999", name: "something_else" }])
+  assert.deepEqual(result.drift.missingInDb, ["00000000000001"])
+  assert.deepEqual(result.drift.untrackedInDb, ["20269999999999"], "unknown names are never silently absorbed")
+})
