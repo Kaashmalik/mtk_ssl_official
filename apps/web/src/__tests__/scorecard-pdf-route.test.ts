@@ -23,11 +23,15 @@ const mocks = vi.hoisted(() => ({
   tenantContext: vi.fn(),
   readPublishedMatch: vi.fn(),
   select: vi.fn(),
+  branding: vi.fn(),
 }))
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("@/lib/public-tenant", () => ({ getPublicTenantContext: mocks.tenantContext }))
 vi.mock("@/lib/public-visibility", () => ({ readPublishedMatch: mocks.readPublishedMatch }))
+// B161 PREM-02: branding is resolved by its own reader, stubbed here so the
+// fail-closed db-call counts stay about the ROUTE's reads only.
+vi.mock("@/lib/tenant", () => ({ getTenantBranding: mocks.branding }))
 vi.mock("@mtk/database", async (original) => ({
   ...await original<typeof import("@mtk/database")>(),
   db: { select: mocks.select },
@@ -117,6 +121,8 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ userId: "clerk-export" })
   mocks.tenantContext.mockResolvedValue({ tenantId: TENANT })
   mocks.readPublishedMatch.mockResolvedValue(PUBLISHED_MATCH)
+  // Un-branded league: the fallback palette must render byte-identically.
+  mocks.branding.mockResolvedValue(null)
 })
 
 describe("PUB-06: scorecard PDF export is fail-closed", () => {
@@ -199,5 +205,26 @@ describe("PUB-06: scorecard PDF export read discipline", () => {
 
     expect(response.headers.get("Cache-Control")).toBe("private, no-store")
     expect(response.headers.get("Cache-Control")).not.toContain("public")
+  })
+
+  it("B161: wears the league's published branding only on the render path", async () => {
+    mocks.branding.mockResolvedValue({ primaryColor: "#02735e", appName: "Delta League" })
+    queueHappyPath()
+
+    const response = await callRoute()
+
+    expect(response.status).toBe(200)
+    const body = await response.text()
+    expect(body).toContain("#02735e")
+    expect(body).toContain("Delta League &mdash; Official Scorecard")
+    expect(body).not.toContain("#1a1a2e")
+    // Branding is a RENDER-path read: the fail-closed 404 below must never
+    // issue it.
+    expect(mocks.branding).toHaveBeenCalledTimes(1)
+    expect(mocks.branding).toHaveBeenCalledWith(TENANT)
+
+    mocks.readPublishedMatch.mockResolvedValue(null)
+    await callRoute()
+    expect(mocks.branding).toHaveBeenCalledTimes(1)
   })
 })

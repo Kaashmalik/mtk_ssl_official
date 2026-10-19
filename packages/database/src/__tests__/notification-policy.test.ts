@@ -12,7 +12,7 @@ const UTC_0130 = new Date("2026-10-17T01:30:00Z") // 01:30 UTC, 06:30 Karachi.
 const KARACHI = "Asia/Karachi"
 
 function prefs(overrides: Partial<NotificationPreferencesInput> = {}): NotificationPreferencesInput {
-  return { inAppEnabled: true, quietStartMinute: null, quietEndMinute: null, timeZone: null, ...overrides }
+  return { inAppEnabled: true, emailEnabled: true, quietStartMinute: null, quietEndMinute: null, timeZone: null, ...overrides }
 }
 
 describe("parseQuietWindow", () => {
@@ -77,7 +77,7 @@ describe("memberDeliveryDecision", () => {
   })
 
   it("refuses unwired channels even with full consent - no fabricated delivery", () => {
-    for (const channel of ["email", "push", "sms"] as const) {
+    for (const channel of ["push", "sms"] as const) {
       const decision = memberDeliveryDecision({
         channel,
         prefs: prefs({ timeZone: KARACHI }),
@@ -85,6 +85,42 @@ describe("memberDeliveryDecision", () => {
       })
       expect(decision).toEqual({ channel, allowed: false, reason: "channel_unwired" })
     }
+  })
+
+  it("B161: email consent is its own fail-closed gate, distinct from wiring", () => {
+    // Preferences predating the field (no emailEnabled) never email.
+    expect(memberDeliveryDecision({
+      channel: "email",
+      prefs: { ...prefs({ timeZone: KARACHI }), emailEnabled: undefined },
+      now: UTC_NOON,
+    })).toEqual({ channel: "email", allowed: false, reason: "consent_off" })
+    // Explicit false refuses the same way.
+    expect(memberDeliveryDecision({
+      channel: "email",
+      prefs: prefs({ emailEnabled: false }),
+      now: UTC_NOON,
+    })).toEqual({ channel: "email", allowed: false, reason: "consent_off" })
+    // Consent alone is STILL not enough - the channel must be wired server-side.
+    expect(memberDeliveryDecision({
+      channel: "email",
+      prefs: prefs({ emailEnabled: true }),
+      now: UTC_NOON,
+    })).toEqual({ channel: "email", allowed: false, reason: "channel_unwired" })
+    // A deployment that genuinely wires email (B161 dispatch passes this only
+    // when NOTIFICATION_EMAIL_READY + provider key are configured) may send.
+    expect(memberDeliveryDecision({
+      channel: "email",
+      prefs: prefs({ emailEnabled: true }),
+      now: UTC_NOON,
+      wiring: { email: true },
+    })).toEqual({ channel: "email", allowed: true, reason: "ok" })
+    // The wiring override cannot resurrect a channel the member refused.
+    expect(memberDeliveryDecision({
+      channel: "email",
+      prefs: prefs({ emailEnabled: false }),
+      now: UTC_NOON,
+      wiring: { email: true },
+    })).toEqual({ channel: "email", allowed: false, reason: "consent_off" })
   })
 
   it("honors in-app consent", () => {

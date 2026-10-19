@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Mic, Bot, Send, Languages, Volume2 } from "lucide-react";
 import {
@@ -48,6 +48,10 @@ export function CommentaryClient() {
   const [selectedLanguage, setSelectedLanguage] = useState("en");
   const [selectedTone, setSelectedTone] = useState("neutral");
   const [aiAssistEnabled, setAiAssistEnabled] = useState(true);
+// Provenance of the textbox's CURRENT content ("ai" | "template" | null):
+// saved rows must record whether model assistance produced the text, never
+// a blanket false.
+const lastGeneratedRef = useRef<"ai" | "template" | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -80,9 +84,9 @@ export function CommentaryClient() {
       const res = await fetch(`/api/matches/${selectedMatch}/commentary`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: newCommentary, language: selectedLanguage, tone: selectedTone, is_ai_generated: false }),
+        body: JSON.stringify({ text: newCommentary, language: selectedLanguage, tone: selectedTone, is_ai_generated: lastGeneratedRef.current === "ai" }),
       });
-      if (res.ok) { setNewCommentary(""); toast.success("Commentary added"); }
+      if (res.ok) { setNewCommentary(""); lastGeneratedRef.current = null; toast.success("Commentary added"); }
       else toast.error("Failed to add commentary");
     } catch { toast.error("Failed to add commentary"); }
     finally { setLoading(false); }
@@ -97,7 +101,17 @@ export function CommentaryClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ language: selectedLanguage, tone: selectedTone }),
       });
-      if (res.ok) { const d = await res.json(); setNewCommentary(d.text); toast.success("AI commentary generated"); }
+      if (res.ok) {
+        const d = await res.json();
+        setNewCommentary(d.text);
+        lastGeneratedRef.current = d.source === "ai" ? "ai" : "template";
+        // Provenance honesty: never present template output as AI work.
+        if (d.source === "template") {
+          toast.info("Template commentary (AI provider not configured) - please review before saving");
+        } else {
+          toast.success("AI commentary generated");
+        }
+      }
       else toast.error("Failed to generate AI commentary");
     } catch { toast.error("Failed to generate AI commentary"); }
     finally { setLoading(false); }

@@ -9,6 +9,7 @@ import { toast } from "sonner"
 
 export type NotificationPreferencesValues = {
   inAppEnabled: boolean
+  emailEnabled?: boolean
   quietStartMinute: number | null
   quietEndMinute: number | null
   timeZone: string | null
@@ -44,6 +45,7 @@ export function NotificationPreferencesForm({
 }) {
   const quietOn = initial?.quietStartMinute != null && initial?.quietEndMinute != null
   const [inAppEnabled, setInAppEnabled] = useState(initial?.inAppEnabled ?? true)
+  const [emailEnabled, setEmailEnabled] = useState(initial?.emailEnabled ?? false)
   const [quietEnabled, setQuietEnabled] = useState(quietOn)
   const [startMinute, setStartMinute] = useState(initial?.quietStartMinute ?? 22 * 60)
   const [endMinute, setEndMinute] = useState(initial?.quietEndMinute ?? 7 * 60)
@@ -55,6 +57,7 @@ export function NotificationPreferencesForm({
       try {
         const result = await saveNotificationPreferences({
           inAppEnabled,
+          emailEnabled,
           quietEnabled,
           quietStartMinute: startMinute,
           quietEndMinute: endMinute,
@@ -92,9 +95,26 @@ export function NotificationPreferencesForm({
 
       <div className="flex items-start justify-between gap-4">
         <div>
+          <Label htmlFor="pref-email" className="font-medium">Email</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Followed-tournament updates also land in your email. Quiet hours
+            always apply to email, and you can turn this off anytime.
+          </p>
+        </div>
+        <input
+          id="pref-email"
+          type="checkbox"
+          checked={emailEnabled}
+          onChange={(e) => setEmailEnabled(e.target.checked)}
+          className="mt-1 h-4 w-4"
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
           <Label htmlFor="pref-quiet" className="font-medium">Quiet hours</Label>
           <p className="text-xs text-muted-foreground mt-1">
-            Future interrupting channels (email/push) will respect this window in your time zone.
+            Email respects this window in your time zone.
             The in-app bell never interrupts, so it is always delivered.
           </p>
         </div>

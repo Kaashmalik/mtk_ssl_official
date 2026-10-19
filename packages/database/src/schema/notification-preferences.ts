@@ -22,6 +22,9 @@ export const notificationPreferences = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     // In-app bell consent; absent row defaults to true (see policy).
     inAppEnabled: boolean("in_app_enabled").default(true).notNull(),
+    // FAN-02 email consent (B161). Fail-closed: absent/false. Delivery ALSO
+    // requires the channel to be wired server-side; consent alone never sends.
+    emailEnabled: boolean("email_enabled").default(false).notNull(),
     // Quiet window [start, end) in wall-clock minutes of day (0-1439).
     quietStartMinute: smallint("quiet_start_minute"),
     quietEndMinute: smallint("quiet_end_minute"),

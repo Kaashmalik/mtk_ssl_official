@@ -25,6 +25,8 @@ export const MINUTE_OF_DAY_MAX = 1439
 
 export type NotificationPreferencesInput = {
   inAppEnabled: boolean
+  /** B161: email consent. Absent = fail-closed (never email). */
+  emailEnabled?: boolean
   quietStartMinute: number | null
   quietEndMinute: number | null
   timeZone: string | null
@@ -108,14 +110,24 @@ export function memberDeliveryDecision(input: {
   channel: NotificationChannelType
   prefs: NotificationPreferencesInput | null
   now: Date
+  /**
+   * B161: which channels THIS process has actually wired. Absent keeps the
+   * honest defaults (only in_app), so existing callers cannot start "sending"
+   * email by accident. A wired-but-unconsented channel still refuses with
+   * consent_off; consent without wiring still refuses with channel_unwired.
+   */
+  wiring?: Partial<Record<NotificationChannelType, boolean>>
 }): DeliveryDecision {
-  const { channel, prefs, now } = input
+  const { channel, prefs, now, wiring } = input
   if (!prefs) {
     return channel === "in_app"
       ? { channel, allowed: true, reason: "ok" }
       : { channel, allowed: false, reason: "consent_off" }
   }
   if (channel === "in_app" && !prefs.inAppEnabled) {
+    return { channel, allowed: false, reason: "consent_off" }
+  }
+  if (channel === "email" && prefs.emailEnabled !== true) {
     return { channel, allowed: false, reason: "consent_off" }
   }
   if (channel !== "in_app") {
@@ -130,11 +142,13 @@ export function memberDeliveryDecision(input: {
   }
   const WIRING: Record<NotificationChannelType, boolean> = {
     in_app: true,
-    // No external provider is integrated; claiming to "send" email/push/sms
-    // would fabricate delivery. Policy reports them honestly as unwired.
+    // No external provider is integrated by default; claiming to "send"
+    // email/push/sms would fabricate delivery. A deployment that genuinely
+    // wires a channel passes it in `wiring` (B161: email).
     email: false,
     push: false,
     sms: false,
+    ...wiring,
   }
   if (!WIRING[channel]) return { channel, allowed: false, reason: "channel_unwired" }
   return { channel, allowed: true, reason: "ok" }

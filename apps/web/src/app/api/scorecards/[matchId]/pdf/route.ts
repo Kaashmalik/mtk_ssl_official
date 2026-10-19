@@ -4,6 +4,8 @@ import { eq, and, asc, inArray } from "drizzle-orm"
 import { getPublicTenantContext } from "@/lib/public-tenant"
 import { readPublishedMatch } from "@/lib/public-visibility"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
+import { getTenantBranding } from "@/lib/tenant"
+import { brandPresentation, brandVariables } from "@/lib/brand-presentation"
 
 /**
  * GET /api/scorecards/[matchId]/pdf
@@ -41,6 +43,16 @@ export async function GET(
       .from(teams).where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, tenantId))).limit(1),
   ])
   if (!teamA[0] || !teamB[0]) return new NextResponse("Not Found", { status: 404 })
+
+  // PREM-02: the printable scorecard wears the league's published branding -
+  // resolved only on the render path (a fail-closed 404 never issues extra
+  // reads), validated hex colors only (never raw strings), with the classic
+  // ink as the fallback so an un-branded league looks exactly as before.
+  const brand = brandPresentation(await getTenantBranding(tenantId))
+  const brandVars = brandVariables(brand)
+  const ink = brandVars["--primary"] ?? "#1a1a2e"
+  const inkForeground = brandVars["--primary-foreground"] ?? "#fff"
+  const footerName = brand?.appName?.trim() || "Shakir Super League"
 
   let venueName = "TBD"
   if (match.venueId) {
@@ -230,7 +242,7 @@ export async function GET(
     body {
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
-      color: #1a1a2e;
+      color: ${ink};
       background: #fff;
       padding: 24px 32px;
       max-width: 960px;
@@ -239,7 +251,7 @@ export async function GET(
 
     /* --- Header --- */
     .match-header {
-      border-bottom: 3px solid #1a1a2e;
+      border-bottom: 3px solid ${ink};
       padding-bottom: 12px;
       margin-bottom: 20px;
     }
@@ -258,8 +270,8 @@ export async function GET(
     }
     .result-banner {
       margin-top: 10px;
-      background: #1a1a2e;
-      color: #fff;
+      background: ${ink};
+      color: ${inkForeground};
       padding: 6px 12px;
       border-radius: 4px;
       font-weight: 600;
@@ -278,7 +290,7 @@ export async function GET(
       margin-bottom: 8px;
       padding: 6px 10px;
       background: #f0f0f5;
-      border-left: 4px solid #1a1a2e;
+      border-left: 4px solid ${ink};
     }
     .innings h3 {
       font-size: 13px;
@@ -296,8 +308,8 @@ export async function GET(
       font-size: 12px;
     }
     th {
-      background: #1a1a2e;
-      color: #fff;
+      background: ${ink};
+      color: ${inkForeground};
       padding: 5px 8px;
       text-align: left;
       font-weight: 600;
@@ -340,7 +352,7 @@ export async function GET(
 <body>
   <div class="no-print" style="background:#fef3c7;border:1px solid #d97706;padding:10px 16px;border-radius:6px;margin-bottom:20px;font-size:13px;">
     📄 <strong>Print this page</strong> (Ctrl+P / ⌘P) and select <em>"Save as PDF"</em> to export.
-    <button onclick="window.print()" style="margin-left:12px;padding:4px 12px;background:#1a1a2e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">
+    <button onclick="window.print()" style="margin-left:12px;padding:4px 12px;background:${ink};color:${inkForeground};border:none;border-radius:4px;cursor:pointer;font-size:12px;">
       Print / Save PDF
     </button>
   </div>
@@ -359,7 +371,7 @@ export async function GET(
   ${inningsHtml || "<p>No innings data available yet.</p>"}
 
   <div class="pdf-footer">
-    <span>Shakir Super League &mdash; Official Scorecard</span>
+    <span>${footerName} &mdash; Official Scorecard</span>
     <span>Generated ${new Date().toLocaleString("en-GB")}</span>
   </div>
 </body>

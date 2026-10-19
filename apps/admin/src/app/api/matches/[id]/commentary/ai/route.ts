@@ -7,11 +7,42 @@ import { alias } from "drizzle-orm/pg-core";
 import { eq } from "drizzle-orm";
 
 // OpenAI API integration (placeholder - actual implementation would use OpenAI SDK)
+// B161: a REAL provider call when COMMENTARY_AI_API_KEY is configured
+// (OpenAI-compatible chat completions; base URL + model overridable). Without
+// a key the route answers with the deterministic TEMPLATE and DISCLOSES it
+// via the returned `source` — never claiming AI provenance it does not have.
+export const commentaryAiConfigured = () => Boolean(process.env.COMMENTARY_AI_API_KEY?.trim())
+
+async function callAiProvider(prompt: string): Promise<string> {
+  const apiKey = process.env.COMMENTARY_AI_API_KEY!.trim()
+  const baseUrl = (process.env.COMMENTARY_AI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "")
+  const model = process.env.COMMENTARY_AI_MODEL?.trim() || "gpt-4o-mini"
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    signal: AbortSignal.timeout(30000),
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      temperature: 0.7,
+      max_tokens: 300,
+      messages: [
+        { role: "system", content: "You are a live cricket commentary writer. Answer with ONLY the commentary sentence(s), no preface, in the requested language and tone. Never invent facts not present in the match data." },
+        { role: "user", content: prompt },
+      ],
+    }),
+  })
+  if (!response.ok) throw new Error(`commentary provider http ${response.status}`)
+  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> }
+  const text = body.choices?.[0]?.message?.content?.trim()
+  if (!text) throw new Error("commentary provider returned no content")
+  return text.slice(0, 800)
+}
+
 async function generateAiCommentary(
   matchData: any,
   language: string,
   tone: string
-): Promise<string> {
+): Promise<{ text: string; source: "ai" | "template" }> {
   const toneDescriptions: Record<string, string> = {
     neutral: "neutral cricket commentary",
     hype: "exciting and energetic commentary",
@@ -33,7 +64,24 @@ async function generateAiCommentary(
     sd: `${matchData.team_a?.name} ${runs} رنز ٺاهيا آهن ${wickets} وڪيٽن جي نقصان تي ${overs} اوورن ۾.`,
   };
 
-  return templates[language] || templates.en;
+  const fallbackText = templates[language] || templates.en;
+
+  if (!commentaryAiConfigured()) {
+    return { text: fallbackText, source: "template" };
+  }
+  try {
+    const languageName = new Intl.DisplayNames(["en"], { type: "language" }).of(language) ?? language;
+    const prompt = [
+      `Write one or two sentences of ${toneDescriptions[tone] ?? "neutral cricket commentary"} in ${languageName}.`,
+      `Current score: ${runs} runs, ${wickets} wickets from ${overs}.${balls} overs.`,
+      wickets > 0 ? `Wickets lost: ${wickets}.` : "No wickets lost yet.",
+      "Use only these facts; do not invent players or events.",
+    ].join(" ");
+    return { text: await callAiProvider(prompt), source: "ai" };
+  } catch {
+    // A provider failure degrades HONESTLY to the template, still labelled.
+    return { text: fallbackText, source: "template" };
+  }
 }
 
 // POST /api/matches/[id]/commentary/ai - Generate AI commentary
@@ -106,10 +154,13 @@ export async function POST(
       })),
     };
 
-    const generatedText = await generateAiCommentary(matchWithInnings, language, tone);
+    const generated = await generateAiCommentary(matchWithInnings, language, tone);
 
     return NextResponse.json({
-      text: generatedText,
+      text: generated.text,
+      // Provenance disclosure: the admin UI must ALWAYS render this so a
+      // template line is never mistaken for model output.
+      source: generated.source,
       language,
       tone,
       match_id: matchId,

@@ -1,8 +1,11 @@
-import { db, notifications, notificationPreferences, fanFollows, users } from "@mtk/database"
+import { db, notifications, notificationPreferences, fanFollows, users, tenants } from "@mtk/database"
 import { and, eq, gte, sql, desc } from "drizzle-orm"
 import { z } from "zod"
 import { memberDeliveryDecision, MINUTE_OF_DAY_MAX } from "@mtk/database/lib/notification-policy"
 import { isValidTimeZone } from "./time-policy"
+import { getTenantBranding } from "./tenant"
+import { brandPresentation, type BrandPresentation } from "./brand-presentation"
+import { buildNotificationEmail, notificationEmailFrom, notificationEmailReady, type NotificationEmail } from "./notification-email"
 
 /**
  * FAN-02 notification dispatch (locked writer).
@@ -12,8 +15,14 @@ import { isValidTimeZone } from "./time-policy"
  * allows the channel NOW — nothing is written "for later delivery", because a
  * row that promises a send no one performs would be a fabricated delivery.
  *
- * With no external provider integrated, only `in_app` rows are ever written;
- * email/push/sms honestly resolve to `channel_unwired` and produce nothing.
+ * Channels: `in_app` always. Email (B161) only when the member consented
+ * (notification_preferences.email_enabled) AND the deployment wired the
+ * channel (NOTIFICATION_EMAIL_READY + RESEND_API_KEY) — consent without
+ * wiring reads channel_unwired and writes nothing. The provider attempt
+ * happens AFTER the consent transaction commits (provider HTTP never holds
+ * the row lock) and its outcome is recorded honestly on the row:
+ * `provider_accepted` means the provider took the message, never that a
+ * human read it. Push/sms remain honestly unwired.
  */
 
 /** Duplicate fan-outs for the same fact inside this window are suppressed. */
@@ -29,12 +38,23 @@ const dispatchInputSchema = z.object({
   title: z.string().min(1).max(160),
   body: z.string().max(500),
   dedupKey: z.string().min(8).max(120),
+  channel: z.enum(["in_app", "email"]).default("in_app"),
 })
 
 export type DispatchResult = {
   written: boolean
   /** Always present: `ok` on a write, otherwise the honest refusal reason. */
-  reason: "ok" | "consent_off" | "quiet_hours" | "channel_unwired" | "deduplicated"
+  reason: "ok" | "consent_off" | "quiet_hours" | "channel_unwired" | "deduplicated" | "no_recipient"
+  /** EMAIL only: the honest, post-commit provider outcome (never "delivered"). */
+  sendState?: "provider_accepted" | "provider_refused"
+}
+
+type EmailDeliveryContext = {
+  rowId: string
+  to: string
+  leagueName: string
+  brand: BrandPresentation | null
+  email: NotificationEmail
 }
 
 /**
@@ -47,10 +67,13 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
   const now = new Date()
   const quietCutoff = new Date(now.getTime() - DEDUP_WINDOW_HOURS * 3_600_000)
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx): Promise<
+    DispatchResult & { email?: EmailDeliveryContext }
+  > => {
     const [prefs] = await tx
       .select({
         inAppEnabled: notificationPreferences.inAppEnabled,
+        emailEnabled: notificationPreferences.emailEnabled,
         quietStartMinute: notificationPreferences.quietStartMinute,
         quietEndMinute: notificationPreferences.quietEndMinute,
         timeZone: notificationPreferences.timeZone,
@@ -64,9 +87,10 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
       .limit(1)
 
     const decision = memberDeliveryDecision({
-      channel: "in_app",
+      channel: parsed.channel,
       prefs: prefs ?? null,
       now,
+      wiring: parsed.channel === "email" ? { email: notificationEmailReady() } : undefined,
     })
     if (!decision.allowed) return { written: false, reason: decision.reason }
 
@@ -77,24 +101,107 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
         eq(notifications.tenantId, parsed.tenantId),
         eq(notifications.userId, parsed.memberId),
         eq(notifications.type, parsed.type),
-        eq(notifications.channel, "in_app"),
+        eq(notifications.channel, parsed.channel),
         gte(notifications.createdAt, quietCutoff),
         sql`${notifications.data} ->> 'dedupKey' = ${parsed.dedupKey}`,
       ))
       .limit(1)
     if (duplicate) return { written: false, reason: "deduplicated" }
 
-    await tx.insert(notifications).values({
+    if (parsed.channel === "in_app") {
+      await tx.insert(notifications).values({
+        tenantId: parsed.tenantId,
+        userId: parsed.memberId,
+        type: parsed.type,
+        channel: "in_app",
+        title: parsed.title,
+        body: parsed.body,
+        data: { dedupKey: parsed.dedupKey },
+      })
+      return { written: true, reason: "ok" }
+    }
+
+    // EMAIL: an active account with a real address is required; consent was
+    // already proven above by the same policy that gates the channel.
+    const [account] = await tx
+      .select({ email: users.email })
+      .from(users)
+      .where(and(eq(users.id, parsed.memberId), eq(users.isActive, true)))
+      .limit(1)
+    if (!account?.email) return { written: false, reason: "no_recipient" }
+
+    const [row] = await tx.insert(notifications).values({
       tenantId: parsed.tenantId,
       userId: parsed.memberId,
       type: parsed.type,
-      channel: "in_app",
+      channel: "email",
       title: parsed.title,
       body: parsed.body,
-      data: { dedupKey: parsed.dedupKey },
+      data: { dedupKey: parsed.dedupKey, deliveryState: "queued" },
+    }).returning({ id: notifications.id })
+
+    const [tenant] = await tx
+      .select({ name: tenants.name })
+      .from(tenants)
+      .where(eq(tenants.id, parsed.tenantId))
+      .limit(1)
+    const brand = brandPresentation(await getTenantBranding(parsed.tenantId))
+    const email = buildNotificationEmail({
+      leagueName: tenant?.name ?? "",
+      title: parsed.title,
+      body: parsed.body,
+      brand,
+      appUrl: process.env.NEXT_PUBLIC_APP_URL ?? null,
     })
-    return { written: true, reason: "ok" }
+
+    return {
+      written: true,
+      reason: "ok",
+      email: { rowId: row.id, to: account.email, leagueName: tenant?.name ?? "", brand, email },
+    }
   })
+
+  // Provider HTTP happens strictly AFTER the consent transaction has committed.
+  if (result.written && result.email) {
+    const { email: delivery } = result
+    try {
+      const apiKey = process.env.RESEND_API_KEY?.trim()
+      if (!apiKey) {
+        await db.update(notifications)
+          .set({ data: { dedupKey: parsed.dedupKey, deliveryState: "provider_refused", deliveryError: "provider_unconfigured" } })
+          .where(eq(notifications.id, delivery.rowId))
+        return { written: true, reason: "ok", sendState: "provider_refused" }
+      }
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `notification-email/${delivery.rowId}`,
+        },
+        body: JSON.stringify({
+          from: notificationEmailFrom(),
+          to: delivery.to,
+          subject: delivery.email.subject,
+          text: delivery.email.text,
+          tags: [{ name: "notification_id", value: delivery.rowId }],
+        }),
+      })
+      const sendState: DispatchResult["sendState"] = response.ok ? "provider_accepted" : "provider_refused"
+      await db.update(notifications)
+        .set({ data: { dedupKey: parsed.dedupKey, deliveryState: sendState, ...(response.ok ? {} : { deliveryError: `provider_http_${response.status}` }) } })
+        .where(eq(notifications.id, delivery.rowId))
+      return { written: true, reason: "ok", sendState }
+    } catch {
+      await db.update(notifications)
+        .set({ data: { dedupKey: parsed.dedupKey, deliveryState: "provider_refused", deliveryError: "network_unknown" } })
+        .where(eq(notifications.id, delivery.rowId))
+      return { written: true, reason: "ok", sendState: "provider_refused" }
+    }
+  }
+
+  return { written: result.written, reason: result.reason }
 }
 
 /**
@@ -145,6 +252,8 @@ export async function dispatchNotificationToTournamentFollowers(input: {
 
 const notificationPreferencesInputSchema = z.object({
   inAppEnabled: z.boolean(),
+  /** B161: email consent; dispatch additionally requires the wired channel. */
+  emailEnabled: z.boolean().default(false),
   quietStartMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   quietEndMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   timeZone: z.string().min(1).max(64).nullable(),
@@ -172,6 +281,7 @@ export type NotificationPreferencesWriteResult = {
   /** The overwrote-before state is returned so the UI can toast the truth. */
   previous: {
     inAppEnabled: boolean
+    emailEnabled: boolean
     quietStartMinute: number | null
     quietEndMinute: number | null
     timeZone: string | null
@@ -205,6 +315,7 @@ export async function saveNotificationPreferencesForMember(
     const previous = existing
       ? {
         inAppEnabled: existing.inAppEnabled,
+        emailEnabled: existing.emailEnabled,
         quietStartMinute: existing.quietStartMinute,
         quietEndMinute: existing.quietEndMinute,
         timeZone: existing.timeZone,
@@ -213,6 +324,7 @@ export async function saveNotificationPreferencesForMember(
 
     const changed = previous == null
       || previous.inAppEnabled !== prefs.inAppEnabled
+      || previous.emailEnabled !== prefs.emailEnabled
       || previous.quietStartMinute !== prefs.quietStartMinute
       || previous.quietEndMinute !== prefs.quietEndMinute
       || previous.timeZone !== prefs.timeZone
@@ -222,6 +334,7 @@ export async function saveNotificationPreferencesForMember(
       await tx.update(notificationPreferences)
         .set({
           inAppEnabled: prefs.inAppEnabled,
+          emailEnabled: prefs.emailEnabled,
           quietStartMinute: prefs.quietStartMinute,
           quietEndMinute: prefs.quietEndMinute,
           timeZone: prefs.timeZone,
@@ -236,6 +349,7 @@ export async function saveNotificationPreferencesForMember(
         tenantId,
         userId: memberId,
         inAppEnabled: prefs.inAppEnabled,
+        emailEnabled: prefs.emailEnabled,
         quietStartMinute: prefs.quietStartMinute,
         quietEndMinute: prefs.quietEndMinute,
         timeZone: prefs.timeZone,

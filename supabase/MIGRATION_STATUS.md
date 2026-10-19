@@ -3,6 +3,15 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 161) - one LOCAL migration, NOT applied remotely**
+> `20261019120000_notification_email_preference` (FAN-02 email channel):
+> `notification_preferences.email_enabled` boolean NOT NULL DEFAULT false -
+> the per-member EMAIL consent column. Purely additive; the column alone
+> changes nothing (the policy reports email as channel_unwired until a
+> deployment sets NOTIFICATION_EMAIL_READY=true with a RESEND_API_KEY AND
+> the member has flipped consent on). Apply in a reviewed deployment before
+> wiring the notification email channel.
+
 > **19 October 2026 (Batch 159) - two LOCAL migrations, NOT applied remotely**
 > `20261019100000_invitation_email_jobs` (IAM-04): encrypted,
 > lease-queued invitation dispatch outbox (AES-256-GCM payload bound to
