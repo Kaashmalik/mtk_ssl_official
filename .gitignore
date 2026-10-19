@@ -74,3 +74,6 @@ playwright-report/
 
 # Local assistant/agent state
 .workbuddy-ai/
+
+.vercel
+.env*.local
