@@ -3,6 +3,21 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 171c) - drop_users_tenant_ids APPLIED remotely - drift gate FULLY GREEN**
+> The platform console deployment shipped (Vercel `mtk-ssl` <- github
+> `mtk_ssl_official@main`, live at https://mtk-ssl.vercel.app), satisfying
+> the B165 deploy-order precondition; the drop is APPLIED and LEDGERED
+> (verified: tenant_ids absent, 3 users policies remain, platform-role
+> CHECK intact, users RLS enabled/unforced = pre-existing state;
+> pre-drop snapshot: E:/Temp/mtk-build/users-tenantids-backup-20261019.csv,
+> 1 row). The migration FILE was corrected pre-adoption (Batch 171c): as
+> shipped it also failed ANY virgin rebuild of this folder - 003's dead
+> policy "Users can view users in their tenants" depended on the column
+> and no later migration ever retired it. The fixed migration drops that
+> policy with the column. `--db` gate: missingInDb (none), untrackedInDb
+> (none) - the folder and the deployed schema are in FULL parity for the
+> first time.
+
 > **19 October 2026 (Batch 169) - REG-01 reconciled LIVE + ledgered; deployment unblocked**
 > `20261017130000_league_applications` was verified FULLY PRESENT in the
 > deployed schema (8 signature objects confirmed live: table, state/version/
