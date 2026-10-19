@@ -24,6 +24,8 @@ import { readActiveFanBlocks } from "@/lib/fan-block-records"
 import { readMatchAvailabilitySummary, readMyAvailability } from "@/lib/match-availability"
 import { readMatchCorrectionRequests } from "@/lib/scorecard-corrections"
 import { AvailabilityCard, type AvailabilityAnswer } from "@/components/matches/availability-card"
+import { MatchPredictionCard } from "@/components/matches/prediction-card"
+import { readMyPredictionView } from "@/lib/fan-predictions"
 import { CorrectionRequestCard, type CorrectionEntry } from "@/components/matches/correction-request-card"
 import { getFullScorecard } from "@/app/actions/scorecards"
 import { ShareButton } from "@/components/share/share-button"
@@ -109,6 +111,18 @@ let viewerIsLeagueOwner = false
   const [teamA] = await db.select().from(teams).where(and(eq(teams.id, match.teamAId), eq(teams.tenantId, match.tenantId))).limit(1)
   // Fetch Team B details
   const [teamB] = await db.select().from(teams).where(and(eq(teams.id, match.teamBId), eq(teams.tenantId, match.tenantId))).limit(1)
+
+  // FAN-04 (Batch 164): the prediction card state - the viewer's pick plus
+  // the DERIVED verdict from the official row. The read only sizes the
+  // card; the write re-verifies session, membership and window under a
+  // transaction.
+  const predictionView = await readMyPredictionView(
+    id,
+    match.tenantId,
+    availabilityView.userId || null,
+    teamA?.name ?? "Home team",
+    teamB?.name ?? "Away team",
+  )
 
   // FAN-01 owner moderation: individual reaction rows are only ever surfaced
   // here, to the league owner, bounded newest-first. Fail closed to empty -
@@ -354,6 +368,24 @@ let viewerIsLeagueOwner = false
         initialStatus={availabilityView.status}
         answers={availabilityAnswers}
       />
+
+      {/* FAN-04 (Batch 164): private no-stakes predictions - the view derives
+          the verdict from the official row; the writer gates the window and
+          membership. The read sizes the card only; the writer re-verifies. */}
+      {predictionView && (
+        <MatchPredictionCard
+          matchId={match.id}
+          teamAName={teamA.name}
+          teamBName={teamB.name}
+          view={{
+            pick: predictionView.pick,
+            windowOpen: predictionView.window.open,
+            windowSentence: predictionView.window.sentence,
+            settled: predictionView.settled,
+            resultText: predictionView.resultText,
+          }}
+        />
+      )}
 
       {/* REG-05 (Batch 141): scorecard correction requests - records,
           never mutations; the owner resolves, authority kept apart */}

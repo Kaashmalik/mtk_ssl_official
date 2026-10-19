@@ -3,6 +3,20 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 164) - two LOCAL migrations, NOT applied remotely**
+> `20261019140000_fan_predictions` (FAN-04 fan predictions): RLS-forced
+> `fan_predictions` (tenant/match/user cascade FKs, pick CHECK home|away,
+> UNIQUE (match_id, user_id), tenant index). Private no-stakes picks; NO
+> stored correctness - verdicts derive from the official match row at read
+> time, so nothing about a recorded score can be altered or contradicted.
+> `20261019150000_tournament_application_replies` (REG-03 threaded
+> replies): RLS-forced `tournament_application_replies` (application FK
+> cascade, author_side CHECK member|owner, body length CHECK 1..2000,
+> thread index). Apply both in a reviewed deployment before the
+> prediction action / reply thread surfaces are enabled; the web writers
+> fail closed on the missing tables, and existing deployments change
+> nothing until the new cards are used.
+
 > **19 October 2026 (Batch 162) - one LOCAL migration, NOT applied remotely**
 > `20261019130000_notification_push_preference` (FAN-02 push channel):
 > `notification_preferences.push_enabled` boolean NOT NULL DEFAULT false -

@@ -93,6 +93,8 @@ export * from "./schema/impersonation-sessions";
 export * from "./schema/match-availability";
 export * from "./schema/scorecard-correction-requests";
 export * from "./schema/tournament-applications";
+export * from "./schema/fan-predictions";
+export * from "./schema/tournament-application-replies";
 export * from "./lib/match-availability-policy";
 export * from "./lib/scorecard-correction-policy";
 export * from "./lib/profile-policy";
@@ -103,5 +105,7 @@ export * from "./lib/squad-rules-policy";
 export * from "./lib/outbox-policy";
 export * from "./lib/competition-control-policy";
 export * from "./lib/cricket-rules-policy";
+export * from "./lib/fan-prediction-policy";
+export * from "./lib/application-reply-policy";
 
 

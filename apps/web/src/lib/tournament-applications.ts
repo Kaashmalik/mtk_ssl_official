@@ -4,11 +4,12 @@ import {
   db,
   teams,
   tournamentApplications,
+  tournamentApplicationReplies,
   tournaments,
   userTenantRoles,
   users,
 } from "@mtk/database"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, count, eq } from "drizzle-orm"
 import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { auth } from "@clerk/nextjs/server"
@@ -20,6 +21,14 @@ import {
   resolveOwnerDecision,
   type OwnerDecision,
 } from "@mtk/database/lib/tournament-application-policy"
+import {
+  describeReplyRefusal,
+  normalizeReplyBody,
+  REPLIES_PER_APPLICATION_LIMIT,
+  replyAuthorSide,
+  replyThreadTarget,
+  type ReplyAuthorSide,
+} from "@mtk/database/lib/application-reply-policy"
 import { membershipGrantsAccess } from "@mtk/database"
 
 /**
@@ -292,4 +301,152 @@ export async function readTournamentApplications(tournamentId: string) {
     .where(eq(tournamentApplications.tournamentId, tournamentId))
     .orderBy(asc(tournamentApplications.createdAt))
     .limit(100)
+}
+
+/**
+ * REG-03 (Batch 164): the threaded reply journey - the needs_information
+ * conversation gap B147 documented. The thread is a RECORD: the member side
+ * is the team's CURRENT manager, the owner side is a league_owner; both are
+ * verified server-side inside the transaction (author_side is never
+ * client-asserted). Replies attach only to a LIVE application - resolving
+ * an application locks its history. A reply NEVER mutates the state
+ * machine; decisions remain the owner's audited moves.
+ */
+export async function replyToTournamentApplication(
+  applicationId: string,
+  rawBody: string,
+): Promise<{ replied: true; side: ReplyAuthorSide; changed: boolean }> {
+  z.string().uuid().parse(applicationId)
+  const normalized = normalizeReplyBody(rawBody)
+  if ("refusal" in normalized) throw new Error(describeReplyRefusal(normalized.refusal))
+  const { userId: clerkId } = await auth()
+  if (!clerkId) throw new Error("Unauthorized")
+  const account = await accountOf(clerkId)
+
+  return db.transaction(async (tx) => {
+    const [application] = await tx
+      .select({
+        id: tournamentApplications.id,
+        tenantId: tournamentApplications.tenantId,
+        teamId: tournamentApplications.teamId,
+        status: tournamentApplications.status,
+      })
+      .from(tournamentApplications)
+      .where(eq(tournamentApplications.id, applicationId))
+      .limit(1)
+    if (!application) throw new Error("Application not found")
+
+    const [team] = await tx
+      .select({ managerId: teams.managerId })
+      .from(teams)
+      .where(eq(teams.id, application.teamId))
+      .limit(1)
+    if (!team) throw new Error("Application team not found")
+    const [membership] = await tx
+      .select({ role: userTenantRoles.role, status: userTenantRoles.status, expiresAt: userTenantRoles.expiresAt })
+      .from(userTenantRoles)
+      .where(and(eq(userTenantRoles.userId, account.id), eq(userTenantRoles.tenantId, application.tenantId)))
+      .limit(1)
+
+    const side = replyAuthorSide(
+      { userId: account.id },
+      { teamManagerId: team.managerId ?? "", tenantId: application.tenantId },
+      membership,
+    )
+    if (!side) throw new Error(describeReplyRefusal("forbidden"))
+
+    // Serialize against a concurrent owner decision: the status that gates
+    // the reply is read under the same lock the decision writer takes.
+    await tx.execute(sql`SELECT ${tournamentApplications.id} FROM ${tournamentApplications}
+      WHERE ${tournamentApplications.id} = ${application.id} FOR UPDATE`)
+    if (replyThreadTarget(application.status) === "terminal") {
+      throw new Error(describeReplyRefusal("terminal"))
+    }
+
+    // Anti-flood: a bounded conversation keeps the record readable.
+    const [{ total }] = await tx
+      .select({ total: count() })
+      .from(tournamentApplicationReplies)
+      .where(eq(tournamentApplicationReplies.applicationId, application.id))
+    if (Number(total) >= REPLIES_PER_APPLICATION_LIMIT) {
+      throw new Error(describeReplyRefusal("flood"))
+    }
+
+    await tx.insert(tournamentApplicationReplies).values({
+      tenantId: application.tenantId,
+      applicationId: application.id,
+      authorId: account.id,
+      authorSide: side,
+      body: normalized.body,
+    })
+
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(),
+      tenantId: application.tenantId,
+      actorId: account.id,
+      actorRole: side === "owner" ? "league_owner" : null,
+      method: "TOURNAMENT_APPLICATION_REPLIED",
+      path: "/dashboard/tournaments",
+      statusCode: "200",
+      payload: { resourceId: application.id, side, status: application.status },
+    })
+    return { replied: true, side, changed: true }
+  }, { isolationLevel: "read committed" })
+}
+
+export type ApplicationReplyRow = {
+  id: string
+  authorSide: string
+  body: string
+  createdAt: Date
+}
+
+/** Participant-only thread read: the CURRENT manager or the league owner. */
+export async function readApplicationReplies(
+  applicationId: string,
+): Promise<ApplicationReplyRow[]> {
+  z.string().uuid().parse(applicationId)
+  const { userId: clerkId } = await auth()
+  if (!clerkId) throw new Error("Unauthorized")
+  const account = await accountOf(clerkId)
+
+  const [application] = await db
+    .select({
+      id: tournamentApplications.id,
+      tenantId: tournamentApplications.tenantId,
+      teamId: tournamentApplications.teamId,
+      status: tournamentApplications.status,
+    })
+    .from(tournamentApplications)
+    .where(eq(tournamentApplications.id, applicationId))
+    .limit(1)
+  if (!application) throw new Error("Application not found")
+  const [team] = await db
+    .select({ managerId: teams.managerId })
+    .from(teams)
+    .where(eq(teams.id, application.teamId))
+    .limit(1)
+  const [membership] = await db
+    .select({ role: userTenantRoles.role, status: userTenantRoles.status, expiresAt: userTenantRoles.expiresAt })
+    .from(userTenantRoles)
+    .where(and(eq(userTenantRoles.userId, account.id), eq(userTenantRoles.tenantId, application.tenantId)))
+    .limit(1)
+  const side = replyAuthorSide(
+    { userId: account.id },
+    { teamManagerId: team?.managerId ?? "", tenantId: application.tenantId },
+    membership,
+  )
+  if (!side) throw new Error(describeReplyRefusal("forbidden"))
+
+  return db
+    .select({
+      id: tournamentApplicationReplies.id,
+      authorSide: tournamentApplicationReplies.authorSide,
+      body: tournamentApplicationReplies.body,
+      createdAt: tournamentApplicationReplies.createdAt,
+    })
+    .from(tournamentApplicationReplies)
+    .where(eq(tournamentApplicationReplies.applicationId, application.id))
+    .orderBy(asc(tournamentApplicationReplies.createdAt))
+    .limit(REPLIES_PER_APPLICATION_LIMIT)
 }
