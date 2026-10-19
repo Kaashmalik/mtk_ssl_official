@@ -19,15 +19,15 @@ export async function unfollowEntity(followableType: FanFollowType, followableId
   return { success: true, action: result.action }
 }
 
-export function isFollowing(followableType: FanFollowType, followableId: string) {
+export async function isFollowing(followableType: FanFollowType, followableId: string) {
   return isFanFollowing(followableType, followableId)
 }
 
-export function getFollowerCount(followableType: FanFollowType, followableId: string) {
+export async function getFollowerCount(followableType: FanFollowType, followableId: string) {
   return getFanFollowerCount(followableType, followableId)
 }
 
 /** The signed-in account's follows in the active league; the tenant is resolved server-side. */
-export function getMyFollowing() {
+export async function getMyFollowing() {
   return getMyFollowingFanEntities()
 }

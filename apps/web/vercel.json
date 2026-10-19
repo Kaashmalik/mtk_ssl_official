@@ -1,16 +1,1 @@
-{
-  "framework": "nextjs",
-  "buildCommand": "cd ../.. && pnpm turbo build --filter=@mtk/web",
-  "installCommand": "cd ../.. && pnpm install",
-  "outputDirectory": ".next",
-  "crons": [
-    {
-      "path": "/api/cron/ssl-renewal",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/subscription-renewal",
-      "schedule": "0 7 * * *"
-    }
-  ]
-}
+{"$schema": "https://openapi.vercel.sh/vercel.json", "framework": "nextjs", "installCommand": "cd ../.. && pnpm install --frozen-lockfile", "buildCommand": "cd ../.. && pnpm --filter @mtk/database build && pnpm --filter @mtk/web build"}

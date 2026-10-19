@@ -3,7 +3,10 @@
  * source of truth for whether access is granted remains the shared
  * membership-effectiveness policy — this module only renders state.
  */
-import { parseMembershipExpiry } from "@mtk/database"
+// Deep import, not the barrel: this module is imported by CLIENT components
+// (users list). The `@mtk/database` barrel pulls in the postgres driver, which
+// cannot bundle for the browser. membership-effectiveness is pure.
+import { parseMembershipExpiry } from "@mtk/database/lib/membership-effectiveness"
 
 export type MembershipExpiryState = "unbounded" | "live" | "expired" | "invalid"
 

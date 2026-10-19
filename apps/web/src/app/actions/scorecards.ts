@@ -44,6 +44,9 @@ const bowlingEntrySchema = z.object({
   dotBalls: z.number().int().min(0).default(0),
 })
 
+// File-LOCAL schema (a "use server" file may only export async functions,
+// so this can never be exported). Value-referenced inside the denial stub
+// below so the input contract is still validated before the write refusal.
 const saveScorecardSchema = z.object({
   tenantId: z.string().uuid().optional(),
   matchId: z.string().uuid(),
@@ -67,9 +70,12 @@ async function requireScorecardTenant(permission: "scorecard:read" | "scorecard:
  * needs an explicit audited/idempotent canonical workflow, not direct inserts.
  * Keep this exported denial stub so old clients cannot revive a second writer.
  */
-export const saveScorecard = withAuth("scorecard:create", async (_input: SaveScorecardInput) => {
+export const saveScorecard = withAuth("scorecard:create", async (input: SaveScorecardInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
+  // Value-use of the schema: even a refused write validates its input shape,
+  // so malformed payloads fail with a validation error, not a blanket refusal.
+  saveScorecardSchema.parse(input)
   await requireScorecardTenant("scorecard:create")
   throw new Error("Manual scorecard writes are disabled. Record deliveries through the scoring service; historical corrections require a canonical audited workflow.")
 })

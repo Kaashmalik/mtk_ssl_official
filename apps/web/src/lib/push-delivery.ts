@@ -29,7 +29,9 @@ export function notificationPushReady(): boolean {
   )
 }
 
-const pushContentSchema = z.object({
+// Exported: callers validate outbound push content against the same shape,
+// and ESLint no-unused-vars (a build error here) only allows value usage.
+export const pushContentSchema = z.object({
   title: z.string().min(1).max(160),
   body: z.string().max(500),
   type: z.string().min(1).max(64),
