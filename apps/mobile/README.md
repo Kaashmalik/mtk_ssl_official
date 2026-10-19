@@ -57,6 +57,27 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 EXPO_PUBLIC_PROJECT_ID=your_expo_project_id
 ```
 
+### Authenticated scoring (Batch 160, SCORE-08/09)
+
+Scoring writes are account-bound; anonymous delivery submission does not exist.
+Two additional variables are required before the scoring console and offline
+sync activate:
+
+```env
+# Web app base URL — the ONLY endpoint the device posts deliveries to
+# (never the scoring service directly).
+EXPO_PUBLIC_APP_URL=http://localhost:3000
+# Clerk publishable key of the SAME Clerk instance as the web app.
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_or_live_...
+```
+
+Behaviour when they are set: sign in via `app/sign-in.tsx` (email code), the
+screen hydrates innings + named squads from `/api/mobile/scoring/state`, and
+offline-queued deliveries sync through `/api/mobile/scoring/ball` with the
+session bearer token only for the signed-in account that recorded them.
+Without them the app browses normally and scoring shows an honest
+"sign-in not configured" note instead of pretending to record.
+
 ## Development
 
 ### Running on Device

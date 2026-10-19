@@ -19,6 +19,13 @@ export interface BallData {
   isNoBall?: boolean;
   isBye?: boolean;
   isLegBye?: boolean;
+  /** SCORE-11 writer fencing: last observed session epoch/revision. */
+  handoverEpoch?: number;
+  expectedRevision?: number;
+  /** SCORE-09: the signed-in account that recorded this delivery. */
+  accountId: string;
+  /** A revision conflict stopped the sync — review, never auto-overwrite. */
+  conflicted?: boolean;
   timestamp: number;
   synced: boolean;
 }
@@ -29,9 +36,21 @@ interface OfflineStore {
   setOnline: (online: boolean) => void;
   addPendingBall: (ball: BallData) => void;
   markBallSynced: (ballId: string) => void;
+  markBallConflicted: (ballId: string) => void;
   clearSyncedBalls: () => void;
-  getPendingBalls: (matchId?: string) => BallData[];
+  /** Deliveries recorded by THIS signed-in account only (SCORE-09). */
+  getPendingBalls: (matchId?: string, accountId?: string) => BallData[];
+  getConflictedBalls: (matchId?: string, accountId?: string) => BallData[];
 }
+
+const inScope = (ball: BallData, matchId?: string, accountId?: string) => {
+  // Account-scoped entries sync ONLY for the SAME signed-in account.
+  // Legacy entries saved with no account are quarantined forever: the
+  // canonical gate identifies their author server-side, not this device.
+  if (ball.accountId !== accountId) return false;
+  if (matchId && ball.matchId !== matchId) return false;
+  return !ball.synced;
+};
 
 export const useOfflineStore = create<OfflineStore>()(
   persist(
@@ -49,16 +68,25 @@ export const useOfflineStore = create<OfflineStore>()(
             ball.id === ballId ? { ...ball, synced: true } : ball
           ),
         })),
+      markBallConflicted: (ballId) =>
+        set((state) => ({
+          pendingBalls: state.pendingBalls.map((ball) =>
+            ball.id === ballId ? { ...ball, conflicted: true } : ball
+          ),
+        })),
       clearSyncedBalls: () =>
         set((state) => ({
           pendingBalls: state.pendingBalls.filter((ball) => !ball.synced),
         })),
-      getPendingBalls: (matchId) => {
-        const pending = get().pendingBalls.filter((ball) => !ball.synced);
-        if (!matchId) {
-          return pending;
-        }
-        return pending.filter((ball) => ball.matchId === matchId);
+      getPendingBalls: (matchId, accountId) => {
+        return get().pendingBalls.filter(
+          (ball) => inScope(ball, matchId, accountId) && !ball.conflicted
+        );
+      },
+      getConflictedBalls: (matchId, accountId) => {
+        return get().pendingBalls.filter(
+          (ball) => inScope(ball, matchId, accountId) && ball.conflicted
+        );
       },
     }),
     {
@@ -67,4 +95,3 @@ export const useOfflineStore = create<OfflineStore>()(
     }
   )
 );
-

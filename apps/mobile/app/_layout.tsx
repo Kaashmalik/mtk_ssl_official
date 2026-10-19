@@ -3,9 +3,12 @@ import { useEffect, Component, type ReactNode } from "react";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ClerkProvider } from "@clerk/clerk-expo";
+import { tokenCache } from "@clerk/clerk-expo/token-cache";
 import { View, Text } from "react-native";
 import "react-native-url-polyfill/auto";
 import "../src/lib/i18n";
+import { clerkConfigured } from "@/lib/app-api";
 import { useOfflineSync } from "@/hooks/use-offline-sync";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -34,9 +37,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 }
 
 export default function RootLayout() {
-  useOfflineSync();
   usePushNotifications();
   const router = useRouter();
+  const publishableKey =
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const providerReady = clerkConfigured();
 
   useEffect(() => {
     // Handle deep linking
@@ -71,8 +76,32 @@ export default function RootLayout() {
     <ErrorBoundary>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        {providerReady && publishableKey ? (
+          <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+            <SyncBridge />
+            <AppTree />
+          </ClerkProvider>
+        ) : (
+          // Sign-in unavailable in this build: browsing still works; scoring
+          // screens state that sign-in is not configured instead of crashing.
+          <AppTree />
+        )}
         <StatusBar style="auto" />
         <OfflineBanner />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+    </ErrorBoundary>
+  );
+}
+
+function SyncBridge() {
+  useOfflineSync();
+  return null;
+}
+
+function AppTree() {
+  return (
+    <>
         <Stack
           screenOptions={{
             headerStyle: {
@@ -133,9 +162,7 @@ export default function RootLayout() {
             }}
           />
         </Stack>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
-    </ErrorBoundary>
+    </>
   );
 }
 

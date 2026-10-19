@@ -3,51 +3,22 @@
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { canScoreMatch, requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { withAuth } from "./action-guard"
 import { withScoringFence } from "@/lib/scoring-fence-action"
 import {
-  proxyRecordBall,
   proxyUndoBall,
   proxyCreateInnings,
   proxyCompleteInnings,
 } from "@/lib/scoring-service-client"
 import { findInningsId, findScoringMatch, findScoringTenant, readBallHistory,
-  readInningsForCommand, readMatchPlayersForScoring, readMatchScoringBatch } from "@/lib/scoring-reads"
+  readMatchPlayersForScoring, readMatchScoringBatch } from "@/lib/scoring-reads"
+import { recordBallCommandSchema, submitDelivery } from "@/lib/scoring-submission"
 
 // ─── Schemas ──────────────────────────────────────────────────
 
-const recordBallSchema = z.object({
-  matchId: z.string().uuid(),
-  inningsId: z.string().uuid(),
-  clientOpId: z.string().trim().min(1).max(200),
-  queueAccountId: z.string().min(1).max(200).optional(),
-  queueTenantId: z.string().uuid().optional(),
-  overNumber: z.number().int().min(0),
-  ballNumber: z.number().int().min(1).max(6),
-  runs: z.number().int().min(0).max(7),
-  batsmanId: z.string().uuid().optional().nullable(),
-  bowlerId: z.string().uuid().optional().nullable(),
-  isWicket: z.boolean().default(false),
-  wicketType: z.enum([
-    "bowled", "caught", "lbw", "run_out", "stumped", "hit_wicket", "retired", "retired_hurt",
-  ]).optional().nullable(),
-  isWide: z.boolean().default(false),
-  isNoBall: z.boolean().default(false),
-  isBye: z.boolean().default(false),
-  isLegBye: z.boolean().default(false),
-  isFour: z.boolean().default(false),
-  isSix: z.boolean().default(false),
-  // SCORE-11 writer fencing: the handover epoch the scoring session observed.
-  handoverEpoch: z.number().int().min(0).optional(),
-  expectedRevision: z.number().int().min(0).max(2147483647).optional(),
-  review: z.object({ reason: z.string().trim().min(10).max(1000),
-    previousEpoch: z.number().int().min(0).optional(),
-    previousRevision: z.number().int().min(0).optional(),
-  }).optional(),
-})
+const recordBallSchema = recordBallCommandSchema
 
 export type RecordBallInput = z.infer<typeof recordBallSchema>
 
@@ -84,66 +55,13 @@ export const recordBall = withAuth("match:score", withScoringFence(async (input:
     throw new Error("Saved delivery belongs to a different scoring account or league. Switch back to review it.")
   }
 
-  if (!validated.batsmanId || !validated.bowlerId) {
-    throw new Error("Batsman and bowler are required")
-  }
-
-  await requireMatchScoringAccess(userId, tenant.id, validated.matchId)
-  const actorId = await requireScoringActorId(userId)
-  const innings = await readInningsForCommand(validated.inningsId, validated.matchId, tenant.id)
-
-  if (!innings) throw new Error("Innings not found")
-  // Lifecycle and replay decisions belong to the canonical service: a retry
-  // may legitimately acknowledge a delivery accepted before completion.
-
-  const delivery = scorerRunsToDelivery(validated)
-  if (validated.isWicket && !validated.wicketType) throw new Error("Select a dismissal type")
-
-  const wicket = validated.isWicket && validated.wicketType
-    ? { type: validated.wicketType, playerId: validated.batsmanId }
-    : undefined
-
-  const result = await proxyRecordBall({
-    matchId: validated.matchId,
-    inningsId: validated.inningsId,
-    clientOpId: validated.clientOpId,
-    over: validated.overNumber,
-    ball: validated.ballNumber,
-    runs: delivery.runs,
-    batsmanId: validated.batsmanId,
-    bowlerId: validated.bowlerId,
-    extras: delivery.extras,
-    wicket,
-    handoverEpoch: validated.handoverEpoch,
-    expectedRevision: validated.expectedRevision,
-    review: validated.review,
-  }, tenant.id, actorId)
-
-  if (validated.clientOpId && result.clientOpId !== validated.clientOpId) {
-    throw new Error("Scoring service did not acknowledge this operation ID")
-  }
+  const acknowledgement = await submitDelivery(userId, tenant.id, validated)
 
   revalidatePath(`/matches/${validated.matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${validated.matchId}`)
   revalidatePath("/dashboard/scoring")
 
-  return {
-    success: true,
-    ballId: result.ballId,
-    scoringRevision: result.scoringRevision,
-    clientOpId: validated.clientOpId ?? null,
-    replayed: result.replayed ?? false,
-    scorecard: {
-      matchId: validated.matchId,
-      inningsId: validated.inningsId,
-      innings: result.scorecard.innings,
-      totalRuns: result.scorecard.totalRuns,
-      totalWickets: result.scorecard.totalWickets,
-      overs: result.scorecard.overs,
-      balls: result.scorecard.balls,
-      runRate: result.scorecard.runRate,
-    },
-  }
+  return acknowledgement
 }))
 
 // ─── Undo Ball ────────────────────────────────────────────────

@@ -18,6 +18,7 @@
     "update": "eas update --branch production --message \"OTA update\""
   },
   "dependencies": {
+    "@clerk/clerk-expo": "^2.20.0",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
