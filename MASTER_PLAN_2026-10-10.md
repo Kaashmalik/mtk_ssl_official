@@ -6173,6 +6173,60 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 167 - post-office-sync gate fixes (sync absorbed office B159-B165; three main-branch breaks fixed)
+
+Office batches 159-165 were synced from `origin/main` (fast-forward `0d72e00` ->
+`0aec96a`, 0 local-only commits, no conflicts). This machine's full battery then
+caught three genuine main-branch gate breaks the office machine state masked;
+all fixed WITHOUT weakening any assertion (commit `894e26b`):
+
+1. **B164 regression** - `fan-prediction-policy.ts` relied on boolean-literal
+   union narrowing, which TS 5.9 does NOT perform when `strictNullChecks=false`
+   (scoring-service's tsconfig; the database package's strict config masked it
+   office-side). Fixed with an `in`-guard narrowing (probe-verified under the
+   exact flags). Behaviour unchanged.
+2. **B165 flake** - the two iso06 repo-wide source-scan tests exceeded vitest's
+   5 s default on a cold machine (timeouts, not assertion failures). Explicit
+   120 s test timeouts added; assertions untouched.
+3. **B161 regression** - the admin AI-commentary route exported a helper
+   (`commentaryAiConfigured`), which Next.js route validation rejects (only
+   handlers + config exports allowed). Un-exported; it had no consumers.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `pnpm --filter web test` | PASS - 171 files / 3,266 tests (3 skipped, live-gated) |
+| `pnpm --filter @mtk/database test` | PASS - 459 tests |
+| `npx jest` (scoring-service) | PASS - 14 suites / 336 tests |
+| `pnpm test:release` | PASS - 93/93 |
+| `tsc --noEmit` (web + database + scoring-service + admin) | **0 + 0 + 0 + 0** |
+
+## Batch 166 - office additive migrations APPLIED remotely (verification-first) + ledgered
+
+The office session did not apply its seven local migrations. Applied the six
+ADDITIVE ones to the remote database, each verified against the live schema
+(signature objects confirmed present) BEFORE ledgering into
+`supabase_migrations.schema_migrations` (created_by `office-batch-remote-apply`)
+- commit `b8042a4`:
+`20261019100000` invitation_email_jobs (6 objects), `20261019110000`
+account_locale_preferences (2), `20261019120000` notification_email_preference
+(1), `20261019130000` notification_push_preference (1), `20261019140000`
+fan_predictions (3), `20261019150000` tournament_application_replies (3).
+All six are additive: the deployed app is unaffected and the B159-165 features
+stay fail-closed until their READY flags/keys ship in a deployment.
+Deliberately NOT applied: `20261019160000_drop_users_tenant_ids` (destructive,
+deploy-order-gated behind the B165 admin-console deployment - office owns
+deploy) and REG-01 `20261017130000` (Session B's). The `--db` drift gate now
+reports exactly those two, untracked 0. Full notes in
+`supabase/MIGRATION_STATUS.md`.
+
+#### Verification recorded
+
+| Command | Result |
+| --- | --- |
+| `node scripts/migration-inventory.cjs --db` | missingInDb = 20261017130000, 20261019160000 (both deliberate); untrackedInDb = none |
+
 ## Batch 158 - REL-01 + REL-05 EXECUTED locally + tick finalization (one shot, evidence-gated)
 
 - REL-01 (two-league RLS isolation) EXECUTED, not just planned:
