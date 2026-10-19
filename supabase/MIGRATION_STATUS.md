@@ -3,6 +3,27 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **20 October 2026 (Batch 176) - legacy platform-role league memberships REPAIRED + CHECK added**
+> The live database still carried a pre-ISO-06 shape: `20260623` backfilled
+> `user_tenant_roles` from `users.tenant_ids` using `users.role`, so the
+> seeded platform super_admin ended up with a LEAGUE membership of
+> `super_admin`. `20261012100136` (ISO-06) states "a global platform role is
+> never copied into league authority" and maps platform roles to `fan` (or
+> `league_owner` for the tenant's actual owner), but its backfill used
+> `ON CONFLICT DO NOTHING`, so the legacy row was never repaired - and every
+> league reader rejects a platform role in a membership
+> (`requireActiveLeagueContext`, `getDashboardContext`, tenant membership
+> resolution). Result in production: every league console page failed with
+> "Forbidden: league access unavailable" for the seeded owner.
+> `20261020100000_normalize_tenant_membership_platform_roles.sql` repairs the
+> rows with ISO-06's own mapping and adds CHECK
+> `user_tenant_roles_no_platform_role` so the shape cannot return. APPLIED +
+> LEDGERED (verification-first): owner membership is now `league_owner`,
+> 0 platform-role memberships remain, `users.role` (platform `super_admin`)
+> untouched. `--db` gate re-run: missingInDb (none), untrackedInDb (none).
+> NOTE for the office: the same backfill pattern (copying `users.role` into a
+> membership) must not be reintroduced.
+
 > **19 October 2026 (Batch 171c) - drop_users_tenant_ids APPLIED remotely - drift gate FULLY GREEN**
 > The platform console deployment shipped (Vercel `mtk-ssl` <- github
 > `mtk_ssl_official@main`, live at https://mtk-ssl.vercel.app), satisfying
