@@ -25,6 +25,7 @@ import {
 } from '@mtk/database';
 import Redis from 'ioredis';
 import { calculateDeliveryDelta } from '@mtk/database/lib/scoring-delivery';
+import { assessInningsClosure } from './cricket-rules';
 import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
 import { z } from 'zod';
 import { env } from './env';
@@ -471,6 +472,27 @@ export class ScoringService {
       }
 
       const scorecard = scorecardFor(updatedInnings);
+      // SCORE-10 (Batch 154): the innings-closure decision is computed from
+      // the just-updated row inside the same transaction (never a stale
+      // read). A second-innings target derives from the first innings
+      // total, read here only when it can matter.
+      const firstInnings = updatedInnings.inningsNumber >= 2
+        ? await tx.query.matchInnings.findFirst({
+            where: and(
+              eq(matchInnings.matchId, matchId),
+              eq(matchInnings.tenantId, tenantId),
+              eq(matchInnings.inningsNumber, 1),
+            ),
+          })
+        : null;
+      const inningsClosure = assessInningsClosure({
+        inningsNumber: updatedInnings.inningsNumber,
+        totalRuns: updatedInnings.totalRuns,
+        totalWickets: updatedInnings.totalWickets,
+        legalBalls: updatedInnings.totalBalls,
+        matchTotalOvers: match.totalOvers ?? null,
+        firstInningsTotalRuns: firstInnings?.totalRuns ?? null,
+      });
       // Reconcile the existing trigger-owned projection with the exact innings
       // delta in this transaction (older triggers omit extras during undo).
       await tx.update(scorecardProjections).set({
@@ -492,6 +514,9 @@ export class ScoringService {
         ballId: insertedBall.id,
         clientOpId: command.clientOpId,
         scorecard,
+        // SCORE-10 (Batch 154): state-decided innings closure, decided in
+        // the same transaction that recorded the ball.
+        rules: { inningsClosure },
         scoringRevision: await commitScoringRevision(tx, match, actorId, command.expectedRevision, 'record_ball', {
           clientOpId: command.clientOpId, ballId: insertedBall.id,
           ...(command.review ? { clientReportedReview: command.review } : {}),

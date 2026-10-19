@@ -100,5 +100,6 @@ export * from "./lib/registration-eligibility-policy";
 export * from "./lib/squad-rules-policy";
 export * from "./lib/outbox-policy";
 export * from "./lib/competition-control-policy";
+export * from "./lib/cricket-rules-policy";
 
 

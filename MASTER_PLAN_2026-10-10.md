@@ -6173,6 +6173,38 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 154 - SCORE-10 slice: the cricket-rules fold, wired into the SoT (no migration)
+
+- DELIVERED: one shared rules vocabulary for the conversion knots every
+  scorer hits, previously spread across client guesses or missing.
+  - POLICY (cricket-rules-policy.ts, 6 tests, pure): wides and no-balls
+    are never legal balls (byes/leg-byes are); display coordinates
+    advance ONLY on legal deliveries and the over completes on the
+    sixth legal ball (an illegal ball on 6 re-bowls, never completes);
+    strike swaps on odd crossed runs and at over-end, with the
+    double-swap cancellation (a boundary to finish the over does not
+    flip the strike twice); every dismissal mode removes the striker
+    EXCEPT named run-outs (scorer names the batter; a stranger is
+    refused outright) and retirements (not dismissals); innings closure
+    decided by STATE - target reached first, all-out at declared-1
+    wickets, then overs exhausted, all named reasons; super-over sizing
+    (2 wickets or the fixed ball count).
+  - SOT WIRING (scoring-service: cricket-rules.ts + 5-test spec):
+    `assessInningsClosure` computes the closure from the JUST-UPDATED
+    innings row inside the same transaction that recorded the ball;
+    the second-innings target strictly derives from first-innings
+    total + 1 (read in-tx only when it can matter); over limit defaults
+    to 20 when the match row carries none; `recordBall`'s response
+    carries `rules.inningsClosure` (additive; spec uses toMatchObject).
+  - HONESTY (in code comments, not hidden): all-out assumes a full XI
+    when no declared-XI count is supplied - short-declared-XI closure
+    follows the XI wiring (playing-xi policy exists); strike rotation
+    is still client-owned (batters are not tracked SoT-side), so the
+    SoT deliberately does NOT advise the next batter.
+- VERIFIED: policy 6 + adapter 5 = 11 new tests; scoring tsc 0.
+- ENV: build scratch redirected to E:\Temp\mtk-build per the user's
+  drive change (D: near capacity); batteries now set TEMP/TMP there.
+
 ## Batch 153 - COMP-07 slice: forfeit, postponement, rescheduling (migration applied remotely)
 
 - DELIVERED: competition controls end-to-end, the owner's last missing
