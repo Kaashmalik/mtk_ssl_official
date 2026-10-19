@@ -43,6 +43,10 @@ export function predictionWindow(
 
 export function describePredictionWindow(state: PredictionWindowState): string {
   if (state.open) return "Predictions are open until the match begins."
+  // `in`-guard, not a boolean-literal narrowing: scoring-service's tsconfig
+  // runs with strictNullChecks=false, where TS 5.9 does NOT narrow
+  // boolean-literal discriminants (office batch B164 regression).
+  if (!("reason" in state)) return "Predictions are open until the match begins."
   if (state.reason === "kickoff_passed") return "Predictions are closed: the scheduled start time has passed."
   if (state.reason === "match_terminal") return "Predictions are closed: this match has a final outcome."
   return "Predictions are closed: the match is underway or has begun."

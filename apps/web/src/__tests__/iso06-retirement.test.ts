@@ -38,7 +38,10 @@ function stripComments(source: string): string {
 }
 
 describe("ISO-06 (B165): the tenantIds array is retired from every production source", () => {
-  it("no non-test production source references users.tenantIds or the tenant_ids column", () => {
+  // Repo-wide scans walk every production file on disk; give them an
+  // explicit timeout instead of vitest's 5s default (they are IO-bound
+  // and machine-speed dependent - both timed out on a cold cache).
+  it("no non-test production source references users.tenantIds or the tenant_ids column", { timeout: 120_000 }, () => {
     for (const dir of [WEB_APP, ADMIN_SRC, DB_SRC]) {
       for (const file of walk(dir)) {
         const code = stripComments(readFileSync(file, "utf8"))
@@ -47,7 +50,7 @@ describe("ISO-06 (B165): the tenantIds array is retired from every production so
     }
   })
 
-  it("no full-row users select remains (explicit projections only)", () => {
+  it("no full-row users select remains (explicit projections only)", { timeout: 120_000 }, () => {
     for (const dir of [WEB_APP, ADMIN_SRC]) {
       for (const file of walk(dir)) {
         const code = readFileSync(file, "utf8")

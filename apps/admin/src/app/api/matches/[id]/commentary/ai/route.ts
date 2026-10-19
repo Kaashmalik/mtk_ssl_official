@@ -11,7 +11,9 @@ import { eq } from "drizzle-orm";
 // (OpenAI-compatible chat completions; base URL + model overridable). Without
 // a key the route answers with the deterministic TEMPLATE and DISCLOSES it
 // via the returned `source` — never claiming AI provenance it does not have.
-export const commentaryAiConfigured = () => Boolean(process.env.COMMENTARY_AI_API_KEY?.trim())
+// Not exported: Next.js route validation allows only handlers + config exports
+// here; helper stays file-local (Batch 166 post-sync typecheck fix).
+const commentaryAiConfigured = () => Boolean(process.env.COMMENTARY_AI_API_KEY?.trim())
 
 async function callAiProvider(prompt: string): Promise<string> {
   const apiKey = process.env.COMMENTARY_AI_API_KEY!.trim()
