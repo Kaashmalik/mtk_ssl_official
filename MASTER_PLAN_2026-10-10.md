@@ -6173,6 +6173,42 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 158 - REL-01 + REL-05 EXECUTED locally + tick finalization (one shot, evidence-gated)
+
+- REL-01 (two-league RLS isolation) EXECUTED, not just planned:
+  fresh-rebuild container + documented hosted-parity prelude (JWT-GUC
+  auth stubs, table grants, service_role BYPASSRLS) + two atomically
+  seeded leagues + `SET LOCAL ROLE authenticated` with real `sub`
+  claims. MATRIX RESULT: cross-tenant reads are 0 for every
+  tenant-bearing table (user_tenant_roles/teams/tournaments/matches/
+  players), anon 0, global tenants/profiles cross-reads 0,
+  service_role sees all; the duplicate league application is REFUSED
+  by the partial unique index itself (B147) - ENFORCED by database.
+  Repeatable: scripts/rel01-rls-isolation.cjs.
+- REL-05 (backup-restore drill) EXECUTED: remote pg_dump (17.6 server,
+  0.5 MB, memory-pipe only - dump PII never lands on disk) restored
+  into a virgin postgres:17-alpine; all core table counts match;
+  ABSENT tables reported faithful, and a REAL FINDING: REG-01
+  (league_applications) is NOT deployed remotely (consistent with the
+  one remaining ledger drift - Session B's). Repeatable:
+  scripts/rel05-restore-drill.cjs.
+- Tooling learned and kept honest: naive semicolon splitters shred
+  $$-quoted plpgsql (fails loudly, that is good); whole-file
+  ON_ERROR_STOP piping is the rebuild drill path. Grant layering is
+  deliberate: migration 024 revokes PUBLIC grants so the hosted
+  platform's grant policy is part of the platform, not the folder -
+  the prelude documents the deny-by-default vs hosted-parity choice.
+- TICKS FINALIZED (user's one-shot directive, evidence-gated):
+  docs/TICK_DECISIONS.md ticks every line with committed evidence
+  (REG-02..07, COMP-05/06/07, SCORE-10/11/12, FAN-01..03, UX-03,
+  BASE-04 COMPLETE, REL-01, REL-05 drill half) and DEFERS the rest
+  with the exact named blocker (SCORE-08 identity decision, REL-02/03/
+  04/06 + UX-04 + SCORE-14 resources, BASE-05/06 owner provisioning,
+  REL-07 owner sign-off). Deferred != open work: every blocker needs
+  a real-world input that code cannot synthesize.
+- VERIFIED: release suite green (93/93) earlier this window; drill
+  scripts are plain-node + docker and add no dependencies.
+
 ## Batch 157 - BASE-04 COMPLETE: fresh-rebuild PROOF (docker, throwaway container)
 
 - DELIVERED: the "prove a fresh local/staging database" sub-clause is
