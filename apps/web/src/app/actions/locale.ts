@@ -3,6 +3,7 @@
 import { cookies } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { LOCALE_COOKIE, isLocale, type Locale } from "@/i18n/config"
+import { saveMyLocalePreference } from "@/lib/account-locale"
 
 /**
  * UX-03 (Batch 139): records the session's language preference in the
@@ -13,6 +14,7 @@ import { LOCALE_COOKIE, isLocale, type Locale } from "@/i18n/config"
  */
 export async function setLocalePreference(locale: string): Promise<{ success: true; locale: Locale }> {
   if (!isLocale(locale)) throw new Error("Unsupported language")
+  await saveMyLocalePreference(locale)
   const store = await cookies()
   store.set(LOCALE_COOKIE, locale, {
     path: "/",

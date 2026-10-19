@@ -23,6 +23,8 @@ const recordBallSchema = z.object({
   matchId: z.string().uuid(),
   inningsId: z.string().uuid(),
   clientOpId: z.string().trim().min(1).max(200),
+  queueAccountId: z.string().min(1).max(200).optional(),
+  queueTenantId: z.string().uuid().optional(),
   overNumber: z.number().int().min(0),
   ballNumber: z.number().int().min(1).max(6),
   runs: z.number().int().min(0).max(7),
@@ -77,6 +79,10 @@ export const recordBall = withAuth("match:score", withScoringFence(async (input:
   if (!userId) throw new Error("Unauthorized")
   const tenant = await requireTenant()
   const validated = recordBallSchema.parse(input)
+  if ((validated.queueAccountId !== undefined && validated.queueAccountId !== userId) ||
+      (validated.queueTenantId !== undefined && validated.queueTenantId !== tenant.id)) {
+    throw new Error("Saved delivery belongs to a different scoring account or league. Switch back to review it.")
+  }
 
   if (!validated.batsmanId || !validated.bowlerId) {
     throw new Error("Batsman and bowler are required")
@@ -204,6 +210,7 @@ export const getMatchForScoring = withAuth("match:read", async (matchId: string)
 
   return {
     tenantId: tenant.id,
+    queueScope: { accountId: userId, tenantId: tenant.id, matchId: match.id },
     canScore,
     match: {
       id: match.id,

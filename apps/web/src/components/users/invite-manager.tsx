@@ -44,6 +44,9 @@ const STATUS_BADGE: Record<string, string> = {
 
 /** Provider state, never a delivery guarantee except the webhook-reported events. */
 const DELIVERY_LABEL: Record<string, string> = {
+  queued: "Queued for dispatch (not delivered)",
+  retry_scheduled: "Retry scheduled (delivery unconfirmed)",
+  dead_lettered: "Dispatch stopped — review and resend",
   unconfigured: "Email not configured",
   provider_accepted: "Provider accepted (delivery unconfirmed)",
   delivered: "Delivered",
@@ -54,6 +57,7 @@ const DELIVERY_LABEL: Record<string, string> = {
 }
 
 function deliveryToast(state: string): string {
+  if (state === "queued") return "Invitation queued for dispatch. Delivery is not confirmed."
   if (state === "provider_accepted") return "Email provider accepted it; delivery is not confirmed"
   if (state === "unknown") return "Email outcome is unknown. Use the link; do not assume delivery."
   return "Email is unconfigured or rejected. Copy the link below."

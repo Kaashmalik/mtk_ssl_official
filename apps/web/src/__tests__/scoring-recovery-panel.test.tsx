@@ -38,8 +38,11 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+const SCOPE = { accountId: "account", tenantId: "00000000-0000-4000-8000-000000000001", matchId: "match" }
+
 function render() {
-  const html = renderToStaticMarkup(<ScoringRecoveryPanel matchId="match" onConfirmed={mocks.confirmed} />)
+  const html = renderToStaticMarkup(
+    <ScoringRecoveryPanel matchId="match" scope={SCOPE} onConfirmed={mocks.confirmed} />)
   return { html, button: mocks.buttons.find(button => button.label === "Confirm reviewed retry")! }
 }
 
@@ -59,7 +62,7 @@ describe("Saved delivery review controls (stubbed, not browser acceptance)", () 
     expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({ clientOpId: "op", handoverEpoch: 3, expectedRevision: 7,
       overNumber: 0, ballNumber: 1, review: { reason: "Compared against the official score", previousEpoch: 1, previousRevision: 2 } }))
     expect(mocks.confirmed.mock.invocationCallOrder[0]).toBeLessThan(mocks.remove.mock.invocationCallOrder[0])
-    expect(mocks.remove).toHaveBeenCalledExactlyOnceWith("op")
+    expect(mocks.remove).toHaveBeenCalledExactlyOnceWith("op", SCOPE)
     expect(mocks.reload).toHaveBeenCalledOnce()
   })
   it("retains saved work when the reviewed snapshot loses a race", async () => {

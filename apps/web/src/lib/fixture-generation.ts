@@ -114,6 +114,7 @@ export async function generateTournamentFixtures(clerkId: string, tenantId: stri
         teamBId: fixture.teamBId,
         matchNumber,
         matchType: fixture.matchType,
+        groupLabel: fixture.groupName,
         matchFormat,
         totalOvers: config.overs,
         status: "scheduled",

@@ -342,7 +342,7 @@ export class ScoringService {
         throw new ConflictException({ code: 'SCORING_REVISION_CONFLICT', currentRevision: match.scoringRevision ?? 0,
           message: `Expected delivery ${expectedOver}.${expectedBall}; refresh match state. Saved delivery coordinates cannot be silently changed.` });
       }
-      await requireDeliveryParticipants(tx, tenantId, match, innings.teamId, command);
+      const battingXICount = await requireDeliveryParticipants(tx, tenantId, match, innings.teamId, command);
 
       // 4. Determine ball properties from event
       const isWide = ballEvent.extras?.type === 'wide';
@@ -492,6 +492,7 @@ export class ScoringService {
         legalBalls: updatedInnings.totalBalls,
         matchTotalOvers: match.totalOvers ?? null,
         firstInningsTotalRuns: firstInnings?.totalRuns ?? null,
+        battingXICount,
       });
       // Reconcile the existing trigger-owned projection with the exact innings
       // delta in this transaction (older triggers omit extras during undo).

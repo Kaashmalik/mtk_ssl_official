@@ -57,7 +57,7 @@ function txObject() {
 
 beforeEach(() => {
   vi.resetAllMocks()
-  mocks.auth.mockResolvedValue({ userId: "clerk-owner" })
+  mocks.auth.mockResolvedValue({ userId: "clerk-owner", sessionClaims: { fva: [0, 0] } })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: OWNER, role: "league_owner" } })
   mocks.execute.mockResolvedValue([])
   mocks.insert.mockReturnValue({ values: mocks.values })
@@ -93,7 +93,7 @@ function setupInitiate() {
 
 /** Ali accepting a handover from the owner. */
 function setupAccept(transfer = pendingTransfer) {
-  mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
+  mocks.auth.mockResolvedValue({ userId: "clerk-ali", sessionClaims: { fva: [0, 0] } })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: ALI, role: "team_manager" } })
   mocks.transfer.mockResolvedValueOnce(transfer).mockResolvedValueOnce(transfer)
   mocks.league.mockResolvedValue(league)
@@ -111,7 +111,7 @@ const offer = { tenantId: A, recipientMembershipId: ALI_MEM, demotedRole: "team_
 
 function setupCancel(recipient = false) {
   if (recipient) {
-    mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
+    mocks.auth.mockResolvedValue({ userId: "clerk-ali", sessionClaims: { fva: [0, 0] } })
     mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: ALI, role: "scorer" } })
     mocks.user.mockResolvedValue(aliAccount)
     mocks.member.mockResolvedValue(aliMember)
@@ -532,7 +532,7 @@ describe("Ownership transfer cancellation", () => {
   })
 
   it("lets the named recipient decline the offer", async () => {
-    mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
+    mocks.auth.mockResolvedValue({ userId: "clerk-ali", sessionClaims: { fva: [0, 0] } })
     mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: ALI, role: "scorer" } })
     mocks.user.mockResolvedValue(aliAccount)
     mocks.member.mockResolvedValue(aliMember)

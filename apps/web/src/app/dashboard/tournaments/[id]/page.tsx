@@ -30,7 +30,8 @@ import { readTournamentPollManagement } from "@/lib/tournament-polls"
 import { PollManagementCard } from "@/components/tournaments/poll-management-card"
 import { readTournamentApplications, readTeamLiveApplication } from "@/lib/tournament-applications"
 import { TournamentApplicationCard } from "@/components/tournaments/tournament-application-card"
-import { computeStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
+import { computeStandings, computeGroupStandings, formatNetRunRate, type StandingsMatchInput } from "@/lib/standings"
+import { GroupStandings } from "@/components/tournaments/group-standings"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -161,7 +162,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
 
     standingsMatches.push({
       matchId: m.id, teamAId: m.teamAId, teamBId: m.teamBId,
-      status: m.status, winnerId: m.winnerId,
+      status: m.status, winnerId: m.winnerId, groupLabel: m.groupLabel,
       innings: [
         ...(teamAInn ? [{ teamId: m.teamAId, runs: teamAInn.totalRuns, balls: teamAInn.totalBalls }] : []),
         ...(teamBInn ? [{ teamId: m.teamBId, runs: teamBInn.totalRuns, balls: teamBInn.totalBalls }] : []),
@@ -193,6 +194,8 @@ export default async function TournamentDetailPage({ params }: { params: Promise
     teams: registeredTeams.map((team) => ({ id: team.id, name: team.name, shortName: team.shortName })),
     matches: standingsMatches,
   })
+
+  const groupStandings = computeGroupStandings({ teams: registeredTeams, matches: standingsMatches })
 
   const formattedStartDate = tournament.startDate
     ? new Date(tournament.startDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
@@ -371,6 +374,7 @@ export default async function TournamentDetailPage({ params }: { params: Promise
 
           {/* Standings Tab */}
           <TabsContent value="standings">
+            <GroupStandings groups={groupStandings} />
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Points Table</CardTitle>

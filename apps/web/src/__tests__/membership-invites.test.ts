@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.stubEnv("RESEND_API_KEY", "")
   vi.stubEnv("WEB_APP_URL", "https://app.example.test")
   vi.stubGlobal("fetch", mocks.fetch)
-  mocks.auth.mockResolvedValue({ userId: "clerk-ali" })
+  mocks.auth.mockResolvedValue({ userId: "clerk-ali", sessionClaims: { fva: [0, 0] } })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: OWNER, role: "league_owner" } })
   mocks.actor.mockResolvedValue(recipient)
   mocks.initial.mockResolvedValue(invite)
@@ -67,7 +67,7 @@ beforeEach(() => {
   mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet }); mocks.dbSet.mockReturnValue({ where: mocks.dbWhere }); mocks.dbWhere.mockResolvedValue(undefined)
 })
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
-function issuing() { mocks.lockedInvite.mockResolvedValue(null); mocks.auth.mockResolvedValue({ userId: "clerk-owner" }) }
+function issuing() { mocks.lockedInvite.mockResolvedValue(null); mocks.auth.mockResolvedValue({ userId: "clerk-owner", sessionClaims: { fva: [0, 0] } }) }
 const create = () => createInvite({ tenantId: A, email: " ALI@example.test ", role: "scorer" })
 
 describe("Verified recipient and transactional invitation acceptance", () => {
@@ -394,7 +394,7 @@ describe("Preview privacy and stale/invalid link behavior", () => {
 
 describe("Owner invitation resend with persisted dispatch state", () => {
   const resend = () => resendInvite({ tenantId: A, inviteId: INVITE })
-  beforeEach(() => { mocks.auth.mockResolvedValue({ userId: "clerk-owner" }) })
+  beforeEach(() => { mocks.auth.mockResolvedValue({ userId: "clerk-owner", sessionClaims: { fva: [0, 0] } }) })
   it("rotates the token, audits the resend and returns a fresh link without leaking the token", async () => {
     const result = await resend()
     expect(result.success).toBe(true)

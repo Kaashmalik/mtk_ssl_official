@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const mocks = vi.hoisted(() => ({ currentUser: vi.fn(), select: vi.fn() }))
-vi.mock("@clerk/nextjs/server", () => ({ currentUser: mocks.currentUser }))
+const mocks = vi.hoisted(() => ({ currentUser: vi.fn(), auth: vi.fn(), select: vi.fn() }))
+vi.mock("@clerk/nextjs/server", () => ({ currentUser: mocks.currentUser, auth: mocks.auth }))
 vi.mock("@mtk/database", async (original) => ({
   ...await original<typeof import("@mtk/database")>(), db: { select: mocks.select },
 }))
@@ -26,11 +26,18 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.unstubAllEnvs()
   mocks.currentUser.mockResolvedValue(provider("kaash0542@gmail.com"))
+  mocks.auth.mockResolvedValue({ userId: CLERK_ID, sessionClaims: { fva: [0, 0] } })
   selectReturning(dbRow("league_owner", true))
 })
 afterEach(() => { vi.unstubAllEnvs() })
 
 describe("isSuperAdmin fails closed on the platform-role check", () => {
+  it("does not downgrade a missing second factor to email-only administration", async () => {
+    selectReturning(dbRow("super_admin", true))
+    mocks.auth.mockResolvedValue({ userId: CLERK_ID, sessionClaims: { fva: [0, -1] } })
+    expect(await isSuperAdmin()).toBe(false)
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
   it("grants only an active platform super_admin row", async () => {
     selectReturning(dbRow("super_admin", true))
     expect(await isSuperAdmin()).toBe(true)

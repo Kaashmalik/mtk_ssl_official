@@ -1,76 +1,37 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import type { BrandPresentation } from "@/lib/brand-presentation";
 
-interface TenantBranding {
-  primaryColor?: string;
-  secondaryColor?: string;
-  accentColor?: string;
-  fontFamily?: string;
-  faviconUrl?: string;
-  customCss?: string;
-}
-
-export function TenantBrandingProvider({ branding }: { branding: TenantBranding | null }) {
-  const pathname = usePathname();
-
+/** Colors/fonts are server-rendered on the body. This owns only reversible browser metadata. */
+export function TenantBrandingProvider({ branding }: { branding: BrandPresentation | null }) {
   useEffect(() => {
-    if (!branding) return;
-
-    // Apply CSS variables for colors
-    const root = document.documentElement;
-    if (branding.primaryColor) {
-      root.style.setProperty("--primary", branding.primaryColor);
+    const originalTitle = document.title;
+    const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'));
+    const originals = links.map(link => ({ link, href: link.getAttribute("href") }));
+    let added: HTMLLinkElement | undefined;
+    if (branding?.appName) document.title = branding.appName;
+    if (branding?.faviconUrl) {
+      if (links.length) links.forEach(link => { link.href = branding.faviconUrl!; });
+      else { added = document.createElement("link"); added.rel = "icon"; added.href = branding.faviconUrl; document.head.appendChild(added); }
     }
-    if (branding.secondaryColor) {
-      root.style.setProperty("--secondary", branding.secondaryColor);
-    }
-    if (branding.accentColor) {
-      root.style.setProperty("--accent", branding.accentColor);
-    }
-    if (branding.fontFamily) {
-      root.style.setProperty("--font-family", branding.fontFamily);
-    }
-
-    // Apply favicon
-    if (branding.faviconUrl) {
-      const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;
-      if (link) {
-        link.href = branding.faviconUrl;
-      } else {
-        const newLink = document.createElement("link");
-        newLink.rel = "icon";
-        newLink.href = branding.faviconUrl;
-        document.head.appendChild(newLink);
+    return () => {
+      document.title = originalTitle;
+      for (const { link, href } of originals) {
+        if (href === null) link.removeAttribute("href"); else link.setAttribute("href", href);
       }
-    }
-
-    // Apply custom CSS
-    if (branding.customCss) {
-      const styleId = "tenant-custom-css";
-      let style = document.getElementById(styleId) as HTMLStyleElement;
-      if (!style) {
-        style = document.createElement("style");
-        style.id = styleId;
-        document.head.appendChild(style);
-      }
-      style.textContent = sanitizeCss(branding.customCss);
-    }
-  }, [branding, pathname]);
-
+      added?.remove();
+    };
+  }, [branding]);
   return null;
 }
 
+/** Legacy helper only; this provider does NOT treat regex filtering as a CSS sandbox. */
 export function sanitizeCss(css: string): string {
   if (!css) return "";
-  return css
-    .replace(/expression\s*\(.*?\)/gi, "")
-    .replace(/behavior\s*:/gi, "")
-    .replace(/-moz-binding/gi, "")
-    .replace(/@import\s+/gi, "")
-    .replace(/javascript\s*:/gi, "")
+  return css.replace(/expression\s*\(.*?\)/gi, "")
+    .replace(/behavior\s*:/gi, "").replace(/-moz-binding/gi, "")
+    .replace(/@import\s+/gi, "").replace(/javascript\s*:/gi, "")
     .replace(/url\s*\(\s*['"]?javascript:.*?\)/gi, "")
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
 }
-

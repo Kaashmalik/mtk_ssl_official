@@ -1,10 +1,13 @@
-import { currentUser } from "@clerk/nextjs/server"
+import { currentUser, auth } from "@clerk/nextjs/server"
+import { hasRecentSecondFactor } from "@mtk/database/lib/privileged-session-policy"
 import { db, users } from "@mtk/database"
 import { eq } from "drizzle-orm"
 
 export async function isSuperAdmin(): Promise<boolean> {
   const user = await currentUser()
   if (!user) return false
+  const session = await auth()
+  if (session.userId !== user.id || !hasRecentSecondFactor(session.sessionClaims)) return false
 
   const email = user.emailAddresses?.[0]?.emailAddress
   

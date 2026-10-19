@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers"
 import { DEFAULT_LOCALE, isLocale, LOCALE_COOKIE, negotiateLocale, type Locale } from "./config"
+import { readMyLocalePreference } from "@/lib/account-locale"
 
 /**
  * UX-03 (Batch 144): the request locale for SERVER-SIDE composition that is
@@ -15,6 +16,8 @@ export async function resolveRequestLocale(): Promise<Locale> {
     const store = await cookies()
     const cookieLocale = store.get(LOCALE_COOKIE)?.value
     if (isLocale(cookieLocale)) return cookieLocale
+    const saved = await readMyLocalePreference()
+    if (saved) return saved
     const headerLocale = negotiateLocale((await headers()).get("accept-language"))
     if (headerLocale) return headerLocale
     return DEFAULT_LOCALE

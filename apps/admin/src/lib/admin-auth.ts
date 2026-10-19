@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db, users } from "@mtk/database";
 import { eq } from "drizzle-orm";
+import { hasRecentSecondFactor } from "@mtk/database/lib/privileged-session-policy";
 
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL;
 
@@ -11,17 +12,17 @@ const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL;
  * reviewed-by columns reference `users.id`, never Clerk's `user_*` identifier.
  */
 export async function verifySuperAdmin(): Promise<string | null> {
-  const { userId } = await auth();
-  if (!userId) return null;
+  const { userId, sessionClaims } = await auth();
+  if (!userId || !hasRecentSecondFactor(sessionClaims)) return null;
 
   try {
     const [user] = await db
-      .select({ id: users.id, email: users.email, role: users.role })
+      .select({ id: users.id, email: users.email, role: users.role, isActive: users.isActive })
       .from(users)
       .where(eq(users.clerkId, userId))
       .limit(1);
 
-    if (!user) {
+    if (!user || !user.isActive) {
       return null;
     }
 

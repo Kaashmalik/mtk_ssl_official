@@ -57,6 +57,7 @@ interface InningsHistory {
 }
 
 export interface ScoringState {
+  queueScopeKey?: string;
   matchId: string;
   matchStatus: LiveMatchState["status"];
   matchUpdatedAt?: string;
@@ -354,6 +355,7 @@ export const useScoringStore = create<ScoringState>()(
       name: "scoring-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
+        queueScopeKey: state.queueScopeKey,
         matchId: state.matchId,
         handoverEpoch: state.handoverEpoch,
         scoringRevision: state.scoringRevision,

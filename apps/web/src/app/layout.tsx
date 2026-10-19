@@ -9,6 +9,9 @@ import { getLocaleDirection } from "@/i18n/config";
 import "./globals.css";
 import { Toaster } from "@mtk/ui/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
+import { TenantBrandingProvider } from "@/components/tenant-branding-provider";
+import { readRequestBrand } from "@/lib/request-brand";
+import { brandVariables } from "@/lib/brand-presentation";
 
 export const metadata: Metadata = {
   title: "Shakir Super League - Pakistan's #1 Cricket Platform",
@@ -38,11 +41,13 @@ export default async function RootLayout({
   // Accept-Language (no URL routing); Arabic renders right-to-left via the
   // dir attribute. Layout mirroring polish stays an explicitly open scope.
   const locale = await getLocale();
+  const branding = await readRequestBrand();
   return (
     <html lang={locale} dir={getLocaleDirection(locale)} suppressHydrationWarning>
-      <body className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}>
+      <body style={brandVariables(branding)} className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}>
         <NextIntlClientProvider>
         <Providers>
+          <TenantBrandingProvider branding={branding} />
           {children}
           <Toaster />
         </Providers>

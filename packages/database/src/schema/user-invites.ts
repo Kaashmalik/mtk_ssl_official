@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, index, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, index, integer, unique } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { users, userRoleEnum } from "./users";
@@ -11,6 +11,9 @@ import { users, userRoleEnum } from "./users";
  * signature-verified provider webhook.
  */
 export type InvitationEmailState =
+  | "queued"
+  | "retry_scheduled"
+  | "dead_lettered"
   | "unconfigured"
   | "provider_accepted"
   | "delivered"
@@ -65,6 +68,7 @@ export const userInvites = pgTable(
   (table) => ({
     tenantIdx: index("idx_user_invites_tenant").on(table.tenantId, table.status),
     emailIdx: index("idx_user_invites_email").on(table.email),
+    idTenantKey: unique("user_invites_id_tenant_key").on(table.id, table.tenantId),
   }),
 );
 

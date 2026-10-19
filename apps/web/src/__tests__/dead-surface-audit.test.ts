@@ -38,7 +38,7 @@ describe("dead-surface audit pin (Batch 130)", () => {
       .toContain('from "@/app/actions/tournaments"')
   })
 
-  it("users: the superseded roster read and the unwired expiry action are gone", () => {
+  it("users: the superseded roster read is gone and expiry has a real consumer", () => {
     const actions = source("app/actions/users.ts")
     expect(actions).not.toContain("getUsers")
     expect(actions).not.toContain("setUserMembershipExpiry")
@@ -47,6 +47,8 @@ describe("dead-surface audit pin (Batch 130)", () => {
     // The locked writer stays in the lib (SCORE-09 boundary, lib-tested);
     // only the unreachable HTTP surface was removed.
     expect(source("lib/member-management.ts")).toContain("setMemberExpiry")
+    expect(actions).toContain("updateMemberExpiry")
+    expect(source("components/users/member-expiry-form.tsx")).toContain("updateMemberExpiry")
   })
 
   it("fan anti-abuse: only the write delegates remain - reads go through the lib", () => {
@@ -87,7 +89,6 @@ describe("dead-surface audit tier 2: lib exports with no consumers (Batch 131)",
     ["lib/match-records.ts", "umpireMembership"],
     ["lib/member-directory-filters.ts", "memberDirectoryExpiryStates"],
     ["lib/member-management.ts", "memberEditableRoles"],
-    ["lib/member-management.ts", "memberExpiryChangeSchema"],
     ["lib/member-management.ts", "leagueMemberLimit"],
     ["lib/notification-dispatch.ts", "notificationPreferencesInputSchema"],
     ["lib/prize-records.ts", "PRIZE_MANAGER_BOUND"],

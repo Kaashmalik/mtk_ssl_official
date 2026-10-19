@@ -3,6 +3,22 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 159) - two LOCAL migrations, NOT applied remotely**
+> `20261019100000_invitation_email_jobs` (IAM-04): encrypted,
+> lease-queued invitation dispatch outbox (AES-256-GCM payload bound to
+> tenant/invite/token-hash, bounded leases, capped backoff, dead-letter
+> payload scrubbing, composite FK to a new UNIQUE (id, tenant_id) on
+> user_invites, widened user_invites_email_state CHECK with the three
+> queue states, RLS FORCED, grants to ssl/service_role ONLY). Runtime
+> stays OFF until INVITATION_EMAIL_QUEUE_READY=true AND a canonical
+> base64 32-byte INVITATION_EMAIL_ENCRYPTION_KEY (+ key id) exist in
+> the deployment; apply in a reviewed deployment BEFORE enabling.
+> `20261019110000_account_locale_preferences` (UX-03): per-account
+> persisted locale (en/bn/ar CHECK), RLS FORCED, grants to
+> ssl/service_role ONLY; runtime stays OFF until
+> ACCOUNT_LOCALE_PREFERENCES_READY=true. Both are additive, verified
+> by the schema/tests locally; neither has touched any remote project.
+
 > **19 October 2026 (Batch 156) - BASE-04 ledger reconciliation (verification-first)**
 > The `--db` deployed-schema gate ran against the live database for the
 > first time. Its reconcile is now NAME-AWARE (stamps differ between

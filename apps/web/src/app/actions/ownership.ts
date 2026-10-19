@@ -1,4 +1,5 @@
 "use server"
+import { requirePrivilegedSession } from "@/lib/privileged-session"
 
 import { randomUUID } from "crypto"
 import { auth } from "@clerk/nextjs/server"
@@ -80,6 +81,7 @@ export async function getOwnershipTransfer(expectedTenantId?: string) {
 export async function initiateOwnershipTransfer(input: OwnershipTransferInitiate) {
   const parsed = initiateInput.parse(input)
   const context = await requireOwner()
+  await requirePrivilegedSession(context.clerkId)
   if (parsed.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before saving.")
 
   const result = await db.transaction(async (tx) => {
@@ -170,6 +172,7 @@ export async function initiateOwnershipTransfer(input: OwnershipTransferInitiate
 export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
   const parsed = transferKey.parse(input)
   const context = await requireActor()
+  await requirePrivilegedSession(context.clerkId)
   if (parsed.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload before accepting.")
 
   const result = await db.transaction(async (tx) => {
@@ -293,6 +296,7 @@ export async function acceptOwnershipTransfer(input: OwnershipTransferResolve) {
 export async function cancelOwnershipTransfer(input: OwnershipTransferResolve) {
   const parsed = transferKey.parse(input)
   const context = await requireActor()
+  await requirePrivilegedSession(context.clerkId)
   if (parsed.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload before cancelling.")
 
   await db.transaction(async (tx) => {

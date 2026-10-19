@@ -18,12 +18,13 @@ import { describe, expect, it } from "vitest"
 const REPO_ROOT = join(import.meta.dirname, "..", "..", "..", "..")
 
 function readEnvVar(name: string): string | null {
+  if (process.env.LIVE_DB_ACCEPTANCE !== "1") return null
   const raw = readFileSync(join(REPO_ROOT, ".env"), "utf8")
   const match = raw.match(new RegExp(`^${name}=(.*)$`, "m"))
   return match ? match[1].trim() : null
 }
 
-const liveUrl = process.env.DATABASE_URL ?? readEnvVar("DATABASE_URL")
+const liveUrl = process.env.LIVE_DB_ACCEPTANCE === "1" ? process.env.DATABASE_URL ?? readEnvVar("DATABASE_URL") : null
 const optedIn = process.env.LIVE_DB_ACCEPTANCE === "1" && Boolean(liveUrl)
 
 if (optedIn && !process.env.DATABASE_URL) process.env.DATABASE_URL = liveUrl as string

@@ -136,6 +136,7 @@ export async function requireDeliveryParticipants(tx: ScoringTransaction, tenant
   // lock. Fail closed: an armed-but-unapproved match blocks play, and an
   // approved match only admits participants present on the ACTIVE declared XI.
   const xiLevel = xiEnforcementLevel(match);
+  let battingXICount: number | undefined;
   if (xiLevel === 'pendingApproval') {
     throw new BadRequestException('Playing XIs are declared but not yet approved by an official');
   }
@@ -151,6 +152,7 @@ export async function requireDeliveryParticipants(tx: ScoringTransaction, tenant
     if (!xiCoversParticipants(xiRows, participants)) {
       throw new BadRequestException('Delivery participant is outside the declared playing XI');
     }
+    battingXICount = new Set(xiRows.filter(row => row.teamId === battingTeamId).map(row => row.playerId)).size;
   }
   const ids = [...participants.keys()].sort();
   await tx.execute(sql`SELECT ${players.id} FROM ${players}
@@ -162,4 +164,5 @@ export async function requireDeliveryParticipants(tx: ScoringTransaction, tenant
       throw new BadRequestException('Player is not eligible for this side');
     }
   }
+  return battingXICount;
 }

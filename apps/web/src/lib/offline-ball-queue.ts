@@ -1,17 +1,11 @@
 "use client";
 
-/**
- * Offline ball queue for web scoring.
- *
- * Balls recorded while offline are persisted to IndexedDB and replayed in
- * order once connectivity returns. Each entry carries the clientOpId used by
- * match_balls for idempotency, so a replay after a partial failure cannot
- * double-count a ball.
- */
+import { queueItemInScope, scoringQueueKey, validQueueScope, type ScoringQueueScope } from "./scoring-queue-scope";
 
 const DB_NAME = "ssl-offline";
-const DB_VERSION = 1;
-const STORE = "pendingBalls";
+const DB_VERSION = 2;
+// The v1 pendingBalls store is deliberately retained and NEVER adopted by a new session.
+const STORE = "scopedPendingBalls";
 
 export interface QueuedBall {
   clientOpId: string;
@@ -20,16 +14,17 @@ export interface QueuedBall {
   payload: Record<string, unknown>;
   queuedAt: number;
   attempts: number;
+  accountId?: string;
+  tenantId?: string;
 }
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: "clientOpId" });
-        store.createIndex("matchId", "matchId", { unique: false });
+      if (!req.result.objectStoreNames.contains(STORE)) {
+        const store = req.result.createObjectStore(STORE, { keyPath: ["scopeKey", "clientOpId"] });
+        store.createIndex("scope", "scopeKey", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -37,57 +32,70 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function queueBall(ball: Omit<QueuedBall, "queuedAt" | "attempts">): Promise<void> {
+export async function queueBall(ball: Omit<QueuedBall, "queuedAt" | "attempts">, scope: ScoringQueueScope): Promise<void> {
+  const scopeKey = scoringQueueKey(scope);
+  if (ball.matchId !== scope.matchId || ball.payload.matchId !== scope.matchId) throw new Error("Saved delivery does not match its verified workspace");
   const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put({ ...ball, queuedAt: Date.now(), attempts: 0 });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const read = store.get([scopeKey, ball.clientOpId]);
+      read.onsuccess = () => {
+        if (read.result) {
+          // Do not rewrite a saved command's content, epoch, revision or retry history.
+          if (JSON.stringify(read.result.payload) !== JSON.stringify(ball.payload)) {
+            tx.abort();
+            reject(new Error("Saved operation changed. Review the original delivery before retrying."));
+          }
+          return;
+        }
+        store.put({ ...ball, ...scope, scopeKey, queuedAt: Date.now(), attempts: 0 });
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error("Delivery save was aborted"));
+    });
+  } finally { db.close(); }
 }
 
-export async function getQueuedBalls(matchId?: string): Promise<QueuedBall[]> {
+export async function getQueuedBalls(matchId: string, scope?: ScoringQueueScope | null): Promise<QueuedBall[]> {
+  if (!validQueueScope(scope) || scope.matchId !== matchId) return [];
   const db = await openDb();
-  const rows = await new Promise<QueuedBall[]>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readonly");
-    const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = () => resolve(req.result as QueuedBall[]);
-    req.onerror = () => reject(req.error);
-  });
-  db.close();
-  const filtered = matchId ? rows.filter((r) => r.matchId === matchId) : rows;
-  return filtered.sort((a, b) => a.queuedAt - b.queuedAt);
+  try {
+    const rows = await new Promise<QueuedBall[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).index("scope").getAll(scoringQueueKey(scope));
+      req.onsuccess = () => resolve(req.result as QueuedBall[]);
+      req.onerror = () => reject(req.error);
+    });
+    return rows.filter(row => queueItemInScope(row, scope)).sort((a, b) => a.queuedAt - b.queuedAt || a.clientOpId.localeCompare(b.clientOpId));
+  } finally { db.close(); }
 }
 
-export async function removeQueuedBall(clientOpId: string): Promise<void> {
+async function changeQueuedBall(clientOpId: string, scope: ScoringQueueScope, remove: boolean): Promise<void> {
+  const scopeKey = scoringQueueKey(scope);
   const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).delete(clientOpId);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const key = [scopeKey, clientOpId];
+      const req = store.get(key);
+      req.onsuccess = () => {
+        if (!req.result || !queueItemInScope(req.result, scope)) return;
+        if (remove) store.delete(key);
+        else store.put({ ...req.result, attempts: req.result.attempts + 1 });
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error("Queue change was aborted"));
+    });
+  } finally { db.close(); }
 }
 
-export async function incrementAttempts(clientOpId: string): Promise<void> {
-  const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    const store = tx.objectStore(STORE);
-    const get = store.get(clientOpId);
-    get.onsuccess = () => {
-      const row = get.result as QueuedBall | undefined;
-      if (row) store.put({ ...row, attempts: row.attempts + 1 });
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
-}
-
-export async function countQueuedBalls(matchId?: string): Promise<number> {
-  return (await getQueuedBalls(matchId)).length;
+export const removeQueuedBall = (clientOpId: string, scope: ScoringQueueScope) => changeQueuedBall(clientOpId, scope, true);
+export const incrementAttempts = (clientOpId: string, scope: ScoringQueueScope) => changeQueuedBall(clientOpId, scope, false);
+export async function countQueuedBalls(matchId: string, scope?: ScoringQueueScope | null): Promise<number> {
+  return (await getQueuedBalls(matchId, scope)).length;
 }

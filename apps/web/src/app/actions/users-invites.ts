@@ -13,6 +13,9 @@ import { claimInvite, findInviteByTokenHash, findPendingInvitePreview, findUserB
   revokePendingInvite, rotateInviteToken } from "@/lib/invite-records"
 import { renderInvitationEmail } from "@mtk/database/lib/email-templates"
 import { resolveRequestLocale } from "@/i18n/server-locale"
+import { requirePrivilegedSession } from "@/lib/privileged-session"
+import { enqueueInvitationEmail, invitationQueueEnabled } from "@/lib/invitation-email-queue"
+import { invitationQueueKeyId } from "@/lib/invitation-mail-crypto"
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const createInviteSchema = z.object({
@@ -24,6 +27,18 @@ const createInviteSchema = z.object({
 export type CreateInviteInput = z.infer<typeof createInviteSchema>
 export type { InvitationEmailState }
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex")
+
+function emailOutbox(tenantId: string, tokenHash: string, link: string, locale: string): Parameters<typeof issueInviteInLeague>[0]["queueEmail"] {
+  if (!invitationQueueEnabled()) return undefined
+  invitationQueueKeyId() // Refuse invalid encryption configuration BEFORE changing an invitation.
+  return async (tx, authority, invite) => {
+    const rendered = renderInvitationEmail({ locale,
+      inviterName: authority.issuer.displayName || "A league owner", leagueName: authority.league.name,
+      role: invite.role as "team_manager" | "captain" | "coach" | "scorer" | "player", link, expiresDays: Math.max(1, Math.ceil((invite.expiresAt.getTime() - Date.now()) / 86400000)) })
+    await enqueueInvitationEmail(tx, { tenantId, inviteId: invite.id, tokenHash,
+      to: invite.email, subject: rendered.subject, text: rendered.text })
+  }
+}
 
 async function requireManager(expectedTenantId: string) {
   z.string().uuid().parse(expectedTenantId)
@@ -66,20 +81,25 @@ async function sendInviteEmail(inviteId: string, idempotencyKey: string, to: str
 export async function createInvite(input: CreateInviteInput) {
   const validated = createInviteSchema.parse(input)
   const context = await requireManager(validated.tenantId)
+  await requirePrivilegedSession(context.clerkId)
   const teamId = validated.teamId ?? null
   assertSupportedInvitationScope(validated.role, teamId)
   const baseUrl = invitationBaseUrl() // Reject bad configuration before saving.
   const email = normalizeInvitationEmail(validated.email)
   const token = randomBytes(32).toString("base64url")
+  const tokenHash = hashToken(token)
+  const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
+  const locale = await resolveRequestLocale()
+  const queueEmail = emailOutbox(context.tenantId, tokenHash, link, locale)
   const result = await issueInviteInLeague({
     tenantId: context.tenantId, actorId: context.actorId, clerkId: context.clerkId,
-    email, role: validated.role, teamId, tokenHash: hashToken(token),
+    email, role: validated.role, teamId, tokenHash,
+    queueEmail,
     expiresAt: new Date(Date.now() + INVITE_TTL_MS),
     membershipExpiresAt: validated.membershipExpiresAt ? new Date(validated.membershipExpiresAt) : null,
   })
-  const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
-  const emailState = await sendInviteEmail(result.invite.id, `league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link, await resolveRequestLocale())
-  await recordEmailAttempt(result.invite.id, context.tenantId, emailState)
+  const emailState = queueEmail ? "queued" : await sendInviteEmail(result.invite.id, `league-invite/${result.invite.id}`, email, result.issuer.displayName || "A league owner", result.league.name, validated.role, link, locale)
+  if (!queueEmail) await recordEmailAttempt(result.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")
   return { success: true as const, invite: { id: result.invite.id, email, role: validated.role }, link, emailState }
 }
@@ -92,6 +112,7 @@ export async function getInvites(expectedTenantId: string) {
 export async function revokeInvite(input: { tenantId: string; inviteId: string }) {
   const validated = z.object({ tenantId: z.string().uuid(), inviteId: z.string().uuid() }).strict().parse(input)
   const context = await requireManager(validated.tenantId)
+  await requirePrivilegedSession(context.clerkId)
   // Classified replay: `changed: false` means the invite was ALREADY revoked —
   // the command replays as a pure read; the UI surfaces it honestly.
   const result = await revokePendingInvite({
@@ -111,18 +132,22 @@ export async function revokeInvite(input: { tenantId: string; inviteId: string }
 export async function resendInvite(input: { tenantId: string; inviteId: string }) {
   const validated = z.object({ tenantId: z.string().uuid(), inviteId: z.string().uuid() }).strict().parse(input)
   const context = await requireManager(validated.tenantId)
+  await requirePrivilegedSession(context.clerkId)
   const baseUrl = invitationBaseUrl() // Reject bad configuration before rotating the token.
   const token = randomBytes(32).toString("base64url")
+  const tokenHash = hashToken(token)
+  const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
+  const locale = await resolveRequestLocale()
+  const queueEmail = emailOutbox(context.tenantId, tokenHash, link, locale)
   const prepared = await rotateInviteToken({
     tenantId: context.tenantId, actorId: context.actorId, clerkId: context.clerkId,
-    inviteId: validated.inviteId, tokenHash: hashToken(token),
+    inviteId: validated.inviteId, tokenHash, queueEmail,
   })
-  const link = `${baseUrl}/accept-invite?token=${encodeURIComponent(token)}`
   // Distinct idempotency key per attempt so the provider does not dedupe a resend.
   const attempt = (prepared.invite.emailAttemptCount ?? 0) + 1
-  const emailState = await sendInviteEmail(prepared.invite.id, `league-invite/${prepared.invite.id}/r${attempt}`,
-    prepared.invite.email, prepared.issuer.displayName || "A league owner", prepared.league.name, prepared.invite.role, link, await resolveRequestLocale())
-  await recordEmailAttempt(prepared.invite.id, context.tenantId, emailState)
+  const emailState = queueEmail ? "queued" : await sendInviteEmail(prepared.invite.id, `league-invite/${prepared.invite.id}/r${attempt}`,
+    prepared.invite.email, prepared.issuer.displayName || "A league owner", prepared.league.name, prepared.invite.role, link, locale)
+  if (!queueEmail) await recordEmailAttempt(prepared.invite.id, context.tenantId, emailState)
   revalidatePath("/dashboard", "layout")
   return { success: true as const, invite: { id: prepared.invite.id, email: prepared.invite.email, role: prepared.invite.role }, link, emailState }
 }

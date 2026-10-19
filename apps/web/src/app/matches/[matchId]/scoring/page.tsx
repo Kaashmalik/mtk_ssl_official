@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+import { activateScoringScope } from "@/lib/activate-scoring-scope";
 import { useScoringStore, BallInput, type InningsState } from "@/stores/scoring-store";
 import { BallInputComponent } from "@/components/scoring/ball-input";
 import { LiveScorecard } from "@/components/scoring/live-scorecard";
@@ -64,6 +66,7 @@ interface PlayersData {
 function ScoringInterface() {
   const params = useParams();
   const matchId = params.matchId as string;
+  const { userId: signedInAccountId } = useAuth();
 
   const [matchData, setMatchData] = useState<MatchData | null>(null);
   const [playersData, setPlayersData] = useState<PlayersData | null>(null);
@@ -104,7 +107,8 @@ function ScoringInterface() {
   const [dbWriteFailed, setDbWriteFailed] = useState(false);
   const [sessionFenced, setSessionFenced] = useState(false);
   const [conflictMessage, setConflictMessage] = useState<string>();
-  const canWrite = !!matchData?.canScore && !sessionFenced;
+  const canWrite = !!matchData?.canScore && !sessionFenced &&
+    matchData.queueScope.accountId === signedInAccountId && matchData.match.id === matchId;
 
   const acknowledgeSavedBall = useCallback((result: { ballId: string; clientOpId: string | null; scoringRevision: number }) => {
     const state = useScoringStore.getState();
@@ -118,7 +122,8 @@ function ScoringInterface() {
   }, [matchId]);
 
   // Offline ball queue: replays persisted balls once the connection returns.
-  const offlineSync = useOfflineBallSync(matchId);
+  const queueScope = matchData?.queueScope;
+  const offlineSync = useOfflineBallSync(matchId, queueScope);
   const syncSavedBalls = useCallback(() => {
     if (!canWrite) return;
     return offlineSync.sync(async (input) => {
@@ -169,6 +174,8 @@ function ScoringInterface() {
 
         if (cancelled) return;
 
+        if (matchResult.queueScope.accountId !== signedInAccountId) throw new Error("Scoring account changed. Reload the session.");
+        activateScoringScope(matchResult.queueScope);
         setMatchData(matchResult as MatchData);
         setPlayersData(playersResult as PlayersData);
         // Apply DB metadata even when an initial socket snapshot arrived first.
@@ -186,13 +193,13 @@ function ScoringInterface() {
 
     loadMatchData();
     return () => { cancelled = true; };
-  }, [matchId, setMatchId]);
+  }, [matchId, setMatchId, signedInAccountId]);
 
   // ─── Persist ball to DB (with retry) ────────────────────────
   const refreshOfflineQueue = offlineSync.refresh;
 
   const persistBallToDB = useCallback(async () => {
-    if (!matchData || !canWrite) return;
+    if (!matchData || !canWrite || !queueScope) return;
 
     const state = useScoringStore.getState();
     const inningsKey = state.currentInnings === 1 ? "innings1" :
@@ -269,6 +276,8 @@ function ScoringInterface() {
       handoverEpoch: state.handoverEpoch,
       expectedRevision: useScoringStore.getState()[inningsKey]?.balls.find(ball => ball.id === lastBall.id)?.expectedRevision
         ?? pendingDeliveryRevision(useScoringStore.getState()),
+      queueAccountId: queueScope.accountId,
+      queueTenantId: queueScope.tenantId,
     };
 
     // Save the operation before the first request. A reload or lost response
@@ -277,7 +286,7 @@ function ScoringInterface() {
       await queueBall({
         clientOpId: ballInput.clientOpId,
         matchId: state.matchId, inningsId, payload: { ...ballInput },
-      });
+      }, queueScope);
     } catch (error) {
       console.error("Could not save delivery before submission:", error);
       setDbWriteFailed(true);
@@ -298,7 +307,7 @@ function ScoringInterface() {
         if (useScoringStore.getState().matchId === state.matchId) {
           useScoringStore.getState().acknowledgeBall(lastBall.id, acknowledgement.ballId, ballInput.clientOpId, acknowledgement.scoringRevision);
         }
-        await removeQueuedBall(ballInput.clientOpId);
+        await removeQueuedBall(ballInput.clientOpId, queueScope);
         await refreshOfflineQueue();
         setDbWriteFailed(false);
         return; // Success
@@ -328,7 +337,7 @@ function ScoringInterface() {
       duration: 6000,
     });
     setDbWriteFailed(true);
-  }, [matchData, refreshOfflineQueue, canWrite]);
+  }, [matchData, queueScope, refreshOfflineQueue, canWrite]);
 
   // ─── Handle Undo with DB persistence ───────────────────────
   const handleUndo = useCallback(async () => {
@@ -353,7 +362,7 @@ function ScoringInterface() {
             if (useScoringStore.getState().matchId !== state.matchId) return;
             useScoringStore.getState().observeScoringRevision(result.scoringRevision);
             confirmed = true;
-            if (lastBall.clientOpId) await removeQueuedBall(lastBall.clientOpId);
+            if (lastBall.clientOpId && queueScope) await removeQueuedBall(lastBall.clientOpId, queueScope);
             const snapshot = await getMatchForScoring(state.matchId);
             if (useScoringStore.getState().matchId !== state.matchId) return;
             const innings = snapshot.innings.find((value) => value.id === currentInningsState.inningsId);
@@ -377,7 +386,7 @@ function ScoringInterface() {
         });
       }
     }
-  }, [canWrite]);
+  }, [canWrite, queueScope]);
 
   // ─── Voice Command ─────────────────────────────────────────
   const handleVoiceCommand = useCallback(async (input: BallInput) => {
@@ -525,7 +534,7 @@ function ScoringInterface() {
         <Card className="p-3 space-y-2 text-sm" role="alert">
           <p>{conflictMessage ?? HANDOVER_RESYNC_COPY} Saved deliveries have not been discarded or reauthorized.</p>
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Reload session</Button>
-          <ScoringRecoveryPanel matchId={matchId} onConfirmed={acknowledgeSavedBall} />
+          <ScoringRecoveryPanel matchId={matchId} scope={queueScope} onConfirmed={acknowledgeSavedBall} />
         </Card>
       )}
 

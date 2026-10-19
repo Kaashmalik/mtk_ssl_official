@@ -4,7 +4,7 @@ import { assignScorer } from "@/app/actions/matches"
 import { removeMember } from "@/app/actions/users"
 
 const mocks = vi.hoisted(() => ({ transaction: vi.fn(), context: vi.fn(), revalidate: vi.fn() }))
-vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: "clerk" }) }))
+vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: "clerk", sessionClaims: { fva: [0, 0] } }) }))
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
 vi.mock("@/lib/rbac-server", () => ({ requirePermissionServer: async () => {}, resolveActiveTenantId: async () => TENANT }))
 vi.mock("@/app/actions/tenants", () => ({ getMyTenant: vi.fn() }))

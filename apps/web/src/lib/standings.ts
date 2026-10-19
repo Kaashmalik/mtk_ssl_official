@@ -1,8 +1,8 @@
 /**
- * Competition standings (points table) — rules version 1 (COMP-05).
+ * Competition standings (points table) — rules version 2 (COMP-05).
  *
  * Pure, database-free computation shared by the owner dashboard and the
- * public tournament page. Rule v1:
+ * public tournament page. Rule v2:
  *  - A fixture is "played" when its status is `completed` or `no_result`.
  *    Abandoned/scheduled/live fixtures are not yet results and are excluded
  *    (rescheduling is COMP-07).
@@ -13,8 +13,7 @@
  *    rows exist (partial/voided innings must not skew the rate). Teams with
  *    no innings evidence have no NRR and sort last within their points.
  *  - Tie-breakers: points → NRR → wins → name (alphabetical).
- *  - Group-wise standings need a group column on matches, which does not
- *    exist yet; computation is tournament-wide.
+ *  - Group tables admit only teams and fixtures assigned to that group.
  */
 
 export const STANDINGS_RULE_VERSION = 2
@@ -82,7 +81,7 @@ export function computeStandings(input: {
 
   for (const match of input.matches) {
     if (input.group != null && match.groupLabel !== input.group) continue
-  if (match.teamAId === match.teamBId) continue // never a valid fixture
+    if (match.teamAId === match.teamBId) continue // never a valid fixture
     const teamA = rows.get(match.teamAId)
     const teamB = rows.get(match.teamBId)
     if (!teamA || !teamB) continue // ignore cross-tenant/legacy pairings
@@ -132,6 +131,23 @@ export function computeStandings(input: {
     || b.netRunRate - a.netRunRate
     || b.won - a.won
     || a.name.localeCompare(b.name))
+}
+
+/** Preserve legacy unlabelled fixtures; never invent a historical group. */
+export function computeGroupStandings(input: {
+  teams: StandingsTeamInput[]
+  matches: StandingsMatchInput[]
+}): { label: string; rows: StandingsRow[] }[] {
+  const labels = [...new Set(input.matches.map(match => match.groupLabel).filter(
+    (label): label is string => typeof label === "string" && label.trim().length > 0,
+  ))].sort((a, b) => a.localeCompare(b))
+  return labels.map(label => {
+    const fixtures = input.matches.filter(match => match.groupLabel === label)
+    const ids = new Set(fixtures.flatMap(match => [match.teamAId, match.teamBId]))
+    return { label, rows: computeStandings({
+      teams: input.teams.filter(team => ids.has(team.id)), matches: fixtures, group: label,
+    }) }
+  })
 }
 
 /** Broadcast convention: signed, three decimals; exactly zero stays unsigned. */

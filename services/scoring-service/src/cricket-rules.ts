@@ -6,10 +6,9 @@ import { inningsShouldClose, type InningsClosureResult } from '@mtk/database/lib
  * lives here - computed from the JUST-UPDATED innings row inside the same
  * transaction, never from stale reads.
  *
- * HONESTY (recorded, not faked): all-out assumes a full XI when no
- * declared-XI count is supplied (battingXICount null); short-declared-XI
- * closure follows the XI-declaration wiring (playing-xi policy exists;
- * wiring the count into this call is the recorded follow-up). Strike
+ * Legacy, ungated matches assume a full XI when no declared count exists.
+ * Armed matches pass the distinct active batting-side count from the SAME
+ * locked participant validation that admitted the delivery. Strike
  * rotation is client-owned today - batters are not tracked SoT-side, so
  * this module deliberately does NOT pretend to advise the next batter.
  */

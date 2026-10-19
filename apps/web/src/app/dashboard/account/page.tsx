@@ -47,6 +47,7 @@ export default async function AccountPage() {
     <div className="max-w-2xl space-y-6 p-4">
       <h1 className="text-2xl font-bold tracking-tight">Your account</h1>
       <Link href="/dashboard" className="inline-flex min-h-11 items-center underline">Back to dashboard</Link>
+      <Link href="/dashboard/account/security" className="inline-flex min-h-11 items-center underline">Account security and multi-factor verification</Link>
       {!hubResult.ok ? (
         <section className="rounded-2xl border bg-card p-5 shadow-sm">
           <h2 className="text-lg font-semibold">Your public career</h2>

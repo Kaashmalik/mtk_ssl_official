@@ -304,7 +304,7 @@ describe('Declared playing-XI delivery gate (COMP-06)', () => {
     mock.query.matchPlayingXis.findMany.mockResolvedValue(approvedXis());
     await expect(requireDeliveryParticipants(tx, TENANT,
       { ...match, xiRequired: true, xiApprovedAt: new Date(Date.now() - 1_000) }, TEAM_A, command))
-      .resolves.toBeUndefined();
+      .resolves.toBe(new Set(approvedXis().filter(row => row.teamId === TEAM_A).map(row => row.playerId)).size);
     const options = mock.query.matchPlayingXis.findMany.mock.calls[0][0];
     const params = dialect.sqlToQuery(options.where).params;
     expect(params).toContain(TENANT);
@@ -318,7 +318,7 @@ describe('Declared playing-XI delivery gate (COMP-06)', () => {
     await expect(requireDeliveryParticipants(tx, TENANT,
       { ...match, xiRequired: true, xiApprovedAt: new Date(Date.now() - 1_000) }, TEAM_A, {
         ...command, wicket: { type: 'run_out', playerId: NONSTRIKER, fielderId: FIELDER },
-      })).resolves.toBeUndefined();
+      })).resolves.toBe(new Set(approvedXis().filter(row => row.teamId === TEAM_A).map(row => row.playerId)).size);
   });
 
   it.each([

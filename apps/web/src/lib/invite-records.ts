@@ -135,6 +135,7 @@ export async function issueInviteInLeague(input: {
   expiresAt: Date
   /** Optional membership bound proposed at invite time; must strictly postdate now. */
   membershipExpiresAt: Date | null
+  queueEmail?: (tx: Tx, authority: InviteAuthority, invite: Pick<Invite, "id" | "expiresAt" | "email" | "role">) => Promise<void>
 }): Promise<InviteAuthority & { invite: { id: string } }> {
   const { tenantId, actorId, clerkId, email, role, teamId, tokenHash, expiresAt, membershipExpiresAt } = input
   if (membershipExpiresAt !== null && !(membershipExpiresAt.getTime() > Date.now())) {
@@ -164,6 +165,7 @@ export async function issueInviteInLeague(input: {
       teamId, tokenHash, status: "pending", invitedBy: actorId, expiresAt, membershipExpiresAt,
     }).returning({ id: userInvites.id })
     if (!invite) throw new Error("Could not save invitation")
+    await input.queueEmail?.(tx, authority, { id: invite.id, expiresAt, email, role })
     await auditInvite(tx, tenantId, actorId, "INVITE_CREATE", { inviteId: invite.id, role, teamId,
       membershipExpiresAt: membershipExpiresAt ? membershipExpiresAt.toISOString() : null })
     return { invite, ...authority }
@@ -221,6 +223,7 @@ export async function rotateInviteToken(input: {
   clerkId: string
   inviteId: string
   tokenHash: string
+  queueEmail?: (tx: Tx, authority: InviteAuthority, invite: Pick<Invite, "id" | "expiresAt" | "email" | "role">) => Promise<void>
 }): Promise<InviteAuthority & { invite: Invite }> {
   const { tenantId, actorId, clerkId, inviteId, tokenHash } = input
   return db.transaction(async tx => {
@@ -243,6 +246,7 @@ export async function rotateInviteToken(input: {
       eq(userInvites.id, invite.id), eq(userInvites.tenantId, tenantId), eq(userInvites.status, "pending"),
     )).returning({ id: userInvites.id })
     if (!updated) throw new Error("Invitation changed. Reload before resending.")
+    await input.queueEmail?.(tx, authority, invite)
     await auditInvite(tx, tenantId, actorId, "INVITE_RESEND", { inviteId: invite.id, role: invite.role, teamId: invite.teamId })
     return { invite, ...authority }
   })

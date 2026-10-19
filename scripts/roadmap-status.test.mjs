@@ -30,8 +30,8 @@ test("refuses missing or empty checklists", () => {
 test("all current roadmap IDs are classified exactly once", () => {
   const result = roadmapStatus(readFileSync(new URL("../docs/SAAS_MASTER_PLAN_2026-10-12.md", import.meta.url), "utf8"));
   assert.equal(result.total, 79);
-  assert.equal(result.checked, 19);
-  assert.equal(result.open, 60);
+  assert.equal(result.checked, 26);
+  assert.equal(result.open, 53);
   assert.equal(result.groups.reduce((sum, group) => sum + group.open, 0), result.open);
   assert.equal(new Set(result.groups.flatMap(group => group.ids)).size, result.open);
 });

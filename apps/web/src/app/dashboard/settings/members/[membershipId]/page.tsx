@@ -9,6 +9,7 @@ import { getMemberDetails } from "@/app/actions/users"
 import { readMemberAssignments } from "@/lib/member-assignments"
 import { membershipExpiryDisplay } from "@/lib/membership-display"
 import { UserListTable } from "@/components/users/user-list-table"
+import { MemberExpiryForm } from "@/components/users/member-expiry-form"
 
 export default async function MemberDetailsPage({ params }: { params: Promise<{ membershipId: string }> }) {
   noStore()
@@ -39,6 +40,10 @@ export default async function MemberDetailsPage({ params }: { params: Promise<{ 
       {provenance && <span className="text-muted-foreground">{provenance}</span>}
       {" "}Expiry is independent of suspension: an expired membership is not reactivated by clearing the status.
     </p>
+    {!member.protectedAccess && member.id !== actorId && !["league_owner", "super_admin"].includes(member.role) && (
+      <MemberExpiryForm key={`${membershipId}/${member.version}`} tenantId={tenantId} membershipId={membershipId}
+        version={member.version} expiresAt={member.expiresAt ? new Date(member.expiresAt).toISOString() : null} />
+    )}
     <UserListTable key={`${tenantId}/${membershipId}`} initialUsers={[member]} assignments={assignments} directoryMode currentUserId={actorId} tenantId={tenantId} tenantName={tenantName} />
     <p className="text-sm text-muted-foreground">Listed assignments do not grant additional roles or prove identity verification.</p>
   </div>

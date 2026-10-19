@@ -31,7 +31,7 @@ export const memberRemovalSchema = memberKey.strict()
  * clears it, making the membership unbounded again. The instant must be in the
  * future at submission time; the DB CHECK additionally keeps it after creation.
  */
-const memberExpiryChangeSchema = memberKey.extend({
+export const memberExpiryChangeSchema = memberKey.extend({
   expiresAt: z.string().datetime({ offset: true }).nullable(),
 }).strict()
 export type MemberRoleChange = z.infer<typeof memberRoleChangeSchema>
@@ -142,8 +142,10 @@ export async function toggleMemberStatus(input: MemberStatusChange, context: Mem
  * cleared explicitly.
  */
 export async function setMemberExpiry(input: MemberExpiryChange, context: MemberManagementContext) {
+  input = memberExpiryChangeSchema.parse(input)
   if (input.tenantId !== context.tenantId) throw new Error("Workspace changed. Reload members before saving.")
   const requestedExpiry = input.expiresAt === null ? null : parseMembershipExpiry(input.expiresAt)
+  if (input.expiresAt !== null && !requestedExpiry) throw new Error("Invalid membership expiry")
   if (requestedExpiry && requestedExpiry.getTime() <= Date.now()) {
     throw new Error("Expiry must be in the future; suspend the member instead")
   }

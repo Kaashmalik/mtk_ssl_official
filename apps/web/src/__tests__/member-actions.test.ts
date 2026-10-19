@@ -26,7 +26,7 @@ const key = { tenantId: A, membershipId: MEMBER, expectedVersion: 2 }
 const dialect = new PgDialect()
 beforeEach(() => {
   vi.resetAllMocks()
-  mocks.auth.mockResolvedValue({ userId: "clerk-owner" })
+  mocks.auth.mockResolvedValue({ userId: "clerk-owner", sessionClaims: { fva: [0, 0] } })
   mocks.context.mockResolvedValue({ status: "ready", context: { tenantId: A, actorId: OWNER, role: "league_owner" } })
   mocks.member.mockResolvedValueOnce(target).mockResolvedValueOnce(actorMember).mockResolvedValueOnce(target)
   mocks.user.mockResolvedValueOnce({ id: OWNER, clerkId: "clerk-owner", isActive: true }).mockResolvedValueOnce({ id: ALI, role: "player", isActive: true })

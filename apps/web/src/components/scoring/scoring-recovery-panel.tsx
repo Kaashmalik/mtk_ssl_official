@@ -7,12 +7,13 @@ import { unwrapScoringFenceResult } from "@/lib/scoring-fence"
 import { reviewedDelivery } from "@/lib/scoring-recovery"
 import type { ScoringPageSnapshot } from "@/lib/scoring-hydration"
 import { Button, Card } from "@mtk/ui"
+import type { ScoringQueueScope } from "@/lib/scoring-queue-scope"
 
 type Acknowledgement = { ballId: string; clientOpId: string | null; scoringRevision: number }
 
 /** No discard/overwrite button: review authorizes only an ordinary canonical retry. */
-export function ScoringRecoveryPanel({ matchId, onConfirmed }: {
-  matchId: string; onConfirmed: (result: Acknowledgement) => void
+export function ScoringRecoveryPanel({ matchId, scope, onConfirmed }: {
+  matchId: string; scope?: ScoringQueueScope; onConfirmed: (result: Acknowledgement) => void
 }) {
   const [review, setReview] = useState<{ first?: QueuedBall; snapshot: ScoringPageSnapshot }>()
   const [reason, setReason] = useState("")
@@ -27,14 +28,16 @@ export function ScoringRecoveryPanel({ matchId, onConfirmed }: {
     setReview(undefined)
     setChecked(false)
     try {
-      const [snapshot, queue] = await Promise.all([getMatchForScoring(matchId), getQueuedBalls(matchId)])
+      const snapshot = await getMatchForScoring(matchId)
+      if (!scope || JSON.stringify(snapshot.queueScope) !== JSON.stringify(scope)) throw new Error("Scoring workspace changed")
+      const queue = await getQueuedBalls(matchId, scope)
       if (generation !== requestGeneration.current) return
       setReview({ first: queue[0], snapshot })
     } catch {
       if (generation !== requestGeneration.current) return
       setError("Could not load the authorized score and saved deliveries. Nothing has been changed.")
     } finally { if (generation === requestGeneration.current) setBusy(false) }
-  }, [matchId])
+  }, [matchId, scope])
   useEffect(() => { void load(); return () => { requestGeneration.current++ } }, [load])
 
   const item = review?.first
@@ -68,7 +71,8 @@ export function ScoringRecoveryPanel({ matchId, onConfirmed }: {
           // Canonical acknowledgement first. If local cleanup fails, a retry
           // uses the same operation ID and dedupes instead of scoring twice.
           onConfirmed(result)
-          await removeQueuedBall(item.clientOpId)
+          if (!scope) throw new Error("Verified scoring workspace required")
+          await removeQueuedBall(item.clientOpId, scope)
           window.location.reload()
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : "Review was not confirmed. The delivery is still saved.")

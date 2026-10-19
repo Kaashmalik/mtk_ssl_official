@@ -8,12 +8,14 @@ import { hasPermission } from "@/lib/rbac"
 import {
   updateMemberRole, toggleMemberStatus, removeLeagueMember,
   memberRoleChangeSchema, memberStatusChangeSchema, memberRemovalSchema,
+  memberExpiryChangeSchema, setMemberExpiry,
 } from "@/lib/member-management"
 import type { MemberRoleChange, MemberStatusChange, MemberRemoval } from "@/lib/member-management"
 import { readMemberDirectory, readMemberDetails } from "@/lib/member-directory"
 import { memberDirectoryRequest, memberDetailRequest, type MemberDirectoryRequest, type MemberDetailRequest } from "@/lib/member-directory-filters"
 import { setMyDisplayTimeZone } from "@/lib/account-preferences"
 import { setMyDisplayName } from "@/lib/profile-records"
+import { requirePrivilegedSession } from "@/lib/privileged-session"
 
 export type { MemberRoleChange, MemberStatusChange, MemberRemoval }
 
@@ -51,6 +53,7 @@ export async function getMemberDetails(input: MemberDetailRequest) {
 export async function updateUserRole(input: MemberRoleChange) {
   const parsed = memberRoleChangeSchema.parse(input)
   const context = await requireMemberManager()
+  await requirePrivilegedSession(context.clerkId)
   const result = await updateMemberRole(parsed, context)
   revalidatePath("/dashboard", "layout")
   return result
@@ -60,6 +63,7 @@ export async function updateUserRole(input: MemberRoleChange) {
 export async function toggleUserStatus(input: MemberStatusChange) {
   const parsed = memberStatusChangeSchema.parse(input)
   const context = await requireMemberManager()
+  await requirePrivilegedSession(context.clerkId)
   const result = await toggleMemberStatus(parsed, context)
   revalidatePath("/dashboard", "layout")
   return result
@@ -73,9 +77,20 @@ export async function toggleUserStatus(input: MemberStatusChange) {
 export async function removeMember(input: MemberRemoval) {
   const parsed = memberRemovalSchema.parse(input)
   const context = await requireMemberManager()
+  await requirePrivilegedSession(context.clerkId)
   const result = await removeLeagueMember(parsed, context)
   revalidatePath("/dashboard", "layout")
   return result
+}
+
+/** Identity/league resolved here, target/version/owner protections rechecked under lock. */
+export async function updateMemberExpiry(input: unknown) {
+  const parsed = memberExpiryChangeSchema.parse(input)
+  const context = await requireMemberManager()
+  await requirePrivilegedSession(context.clerkId)
+  const member = await setMemberExpiry(parsed, context)
+  revalidatePath("/dashboard", "layout")
+  return { success: true as const, member }
 }
 
 const displayTimeZoneSchema = z.object({ timeZone: z.string().nullable() })

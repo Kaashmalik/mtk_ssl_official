@@ -16,7 +16,8 @@ import { AwardDisputeAffordance, AwardDisputePendingNotice } from "@/components/
 import { TournamentPollCard } from "@/components/shared/tournament-poll-card"
 import { TournamentShareCard } from "@/components/shared/tournament-share-card"
 import { MilestoneCards } from "@/components/tournaments/milestone-cards"
-import { computeStandings, type StandingsMatchInput } from "@/lib/standings"
+import { computeStandings, computeGroupStandings, type StandingsMatchInput } from "@/lib/standings"
+import { GroupStandings } from "@/components/tournaments/group-standings"
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft", registration: "Registration Open", live: "Live", completed: "Completed", cancelled: "Cancelled",
@@ -79,6 +80,7 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     teamAId: matches.teamAId,
     teamBId: matches.teamBId,
     winnerId: matches.winnerId,
+    groupLabel: matches.groupLabel,
     result: matches.result,
   }
   const tournamentMatchesRaw = await db.select(matchColumns).from(matches)
@@ -102,7 +104,7 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     const teamBInn = innings.find(inn => inn.teamId === m.teamBId)
     standingsInputs.push({
       matchId: m.id, teamAId: m.teamAId, teamBId: m.teamBId,
-      status: m.status, winnerId: m.winnerId,
+      status: m.status, winnerId: m.winnerId, groupLabel: m.groupLabel,
       innings: [
         ...(teamAInn ? [{ teamId: m.teamAId, runs: teamAInn.totalRuns, balls: teamAInn.totalBalls }] : []),
         ...(teamBInn ? [{ teamId: m.teamBId, runs: teamBInn.totalRuns, balls: teamBInn.totalBalls }] : []),
@@ -132,6 +134,8 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     teams: registeredTeams.map((team) => ({ id: team.id, name: team.name, shortName: team.shortName })),
     matches: standingsInputs,
   })
+
+  const groupStandings = computeGroupStandings({ teams: registeredTeams, matches: standingsInputs })
 
   // Official award gallery (PUB-04): only ACTIVE, organizer-declared awards of
   // this already-published tournament. Fan favorites do not exist in this data.
@@ -241,7 +245,8 @@ export default async function PublicTournamentPage({ params }: { params: Promise
         </div>
       )}
 
-{standings.length > 0 && (
+      <GroupStandings groups={groupStandings} />
+      {standings.length > 0 && (
                 <Card>
                   <CardHeader><CardTitle>Points Table</CardTitle></CardHeader>
                   <CardContent className="px-0 sm:px-6">
