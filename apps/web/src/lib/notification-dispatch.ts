@@ -258,20 +258,38 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
     }
   }
 
-  // PUSH settle (B162): one bounded Expo API call after commit; the partial
-  // outcome is summarized on the row rather than silently treated as full
-  // success or full failure.
+  // PUSH settle (B162/B163): one bounded Expo API call after commit; the
+  // partial outcome is summarized on the row rather than silently treated as
+  // full success or full failure. Accepted tickets keep their receipt ids and
+  // the token each id belongs to, so the B163 receipts chase can map a late
+  // per-device verdict (e.g. DeviceNotRegistered) back to its token.
   if (result.written && "push" in result && result.push) {
     const { push: delivery } = result
     const outcome = await sendPushToTokens(delivery.tokens, delivery.content)
-    const data = outcome.state === "provider_accepted"
-      ? { dedupKey: parsed.dedupKey, deliveryState: "provider_accepted" as const, tokenCount: delivery.tokenCount, ok: outcome.ok }
-      : {
+    let data: Record<string, unknown>
+    if (outcome.state === "provider_accepted") {
+      // receiptTokens pairs 1:1 with receiptIds (the token each accepted
+      // ticket belongs to, same order) so the B163 receipts chase can map a
+      // late per-device verdict back to its token. If any ok ticket came
+      // WITHOUT an id, alignment is impossible - omit the pairing rather
+      // than store a lie.
+      const aligned = outcome.receiptIds.length === outcome.ok
+      data = {
+        dedupKey: parsed.dedupKey,
+        deliveryState: "provider_accepted" as const,
+        tokenCount: delivery.tokenCount,
+        ok: outcome.ok,
+        receiptIds: outcome.receiptIds,
+        ...(aligned ? { receiptTokens: outcome.receiptIds.map((_, i) => delivery.tokens[i]) } : {}),
+      }
+    } else {
+      data = {
         dedupKey: parsed.dedupKey,
         deliveryState: "provider_refused" as const,
         tokenCount: delivery.tokenCount,
         deliveryError: outcome.error,
       }
+    }
     try {
       await db.update(notifications)
         .set({ data })

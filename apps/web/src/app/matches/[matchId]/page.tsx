@@ -9,6 +9,8 @@ import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { ShareButton } from "@/components/share/share-button"
 import { PrintButton } from "@/components/share/print-button"
+import { AiSummaryCard } from "@/components/matches/ai-summary-card"
+import { matchSummaryAiReady } from "@/lib/match-summary-ai"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedMatch, readPublishedMatchTeams } from "@/lib/public-visibility"
 import type { FanReactionType } from "@mtk/database/lib/fan-reaction-policy"
@@ -367,6 +369,14 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           </CardContent>
         </Card>
       )}
+
+      {/* FAN-04 (B163): the gated AI summary. The server ships this client
+          card ONLY when MATCH_SUMMARY_AI_READY is enabled - an ungated
+          deployment never loads the code, never makes the request. The card
+          always renders its AI/derived label with the never-fabricated
+          notice; it derives from the same official rows and never changes
+          official scores. */}
+      {recap && matchSummaryAiReady() && <AiSummaryCard matchId={matchId} />}
 
       {innings.length === 0 ? (
         <Card>

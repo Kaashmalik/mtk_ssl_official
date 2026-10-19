@@ -115,6 +115,31 @@ describe("PUB-06 (Batch 133): official-record public surfaces gate minor NAMES",
     expect(policy).toContain("derivedNotice:")
   })
 
+  // FAN-04 (Batch 163): the gated, labeled AI match summary. B143 left this
+  // clause honestly open ("stays unbuilt and gated rather than a label
+  // pretending review") - the build keeps those gates: the page ships the
+  // client card ONLY behind recap && matchSummaryAiReady(); the route 404s
+  // before ANY read while ungated and never mutates official rows; the card
+  // renders NOTHING on a failed fetch (honest absence) and never without the
+  // AI/derived label plus the never-fabricated notice.
+  it("the AI match summary stays gated, read-only, labeled, and honest", () => {
+    const page = read("app/matches/[matchId]/page.tsx")
+    expect(page).toContain("recap && matchSummaryAiReady() && <AiSummaryCard")
+    const route = read("app/api/matches/[matchId]/ai-summary/route.ts")
+    // Fail-closed: the readiness guard precedes the context resolution.
+    expect(route).toContain("if (!matchSummaryAiReady()) return")
+    expect(route.indexOf("if (!matchSummaryAiReady()) return")).toBeLessThan(route.indexOf("const ctx = await getPublicTenantContext()"))
+    // Facts only: the route derives from the same recap fold and the same
+    // minor-name gate, and it NEVER writes an official record.
+    expect(route).toContain("deriveMatchRecap({")
+    expect(route).toContain("applyMinorNameGate")
+    expect(route).not.toMatch(/\.(insert|update|delete)\(/)
+    const card = read("components/matches/ai-summary-card.tsx")
+    expect(card).toContain("AI-generated")
+    expect(card).toContain("never changes official")
+    expect(card).toContain("if (!state) return null")
+  })
+
   // UX-03 (Batch 145): RTL mirror discipline on the LOCALIZED surfaces.
   // The public match page and the dashboard header render in Arabic
   // (dir=rtl since Batch 139). Directional utilities (mr-2, text-left,

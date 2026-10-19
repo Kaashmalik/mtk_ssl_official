@@ -395,12 +395,13 @@ describe("B162: notification PUSH channel", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ data: [{ status: "ok" }, { status: "ok" }] }),
+      json: async () => ({ data: [{ status: "ok", receiptId: "rct-1" }, { status: "ok", receiptId: "rct-2" }] }),
     }))
     vi.stubGlobal("fetch", fetchMock)
     const { tx, inserts } = txWith(pushSpecs([TOKEN, `${TOKEN}2`]))
     mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
-    mocks.update.mockImplementation(() => ({ set: () => ({ where: async () => {} }) }))
+    const updates: any[] = []
+    mocks.update.mockImplementation((() => ({ set: (s: unknown) => { updates.push(s); return { where: async () => {} } } })) as any)
 
     const result = await dispatchNotificationToMember(PUSH_INPUT)
     expect(result.written).toBe(true)
@@ -416,8 +417,17 @@ describe("B162: notification PUSH channel", () => {
     const messages = JSON.parse(String(init.body)) as Array<{ to: string; data: Record<string, string> }>
     expect(messages).toHaveLength(2)
     expect(messages[0].data).toEqual({ type: "award_declared", tenantId: LEAGUE, dedupKey: "award:push-1" })
-    // Post-commit settle recorded the honest, complete state.
+    // Post-commit settle recorded the honest, complete state — B163 adds the
+    // receipt ids AND their 1:1 token pairing so the receipts cron can map a
+    // late per-device verdict back to its token.
     expect(mocks.update).toHaveBeenCalledTimes(1)
+    expect(updates[0].data).toMatchObject({
+      dedupKey: "award:push-1",
+      deliveryState: "provider_accepted",
+      ok: 2,
+      receiptIds: ["rct-1", "rct-2"],
+      receiptTokens: [TOKEN, `${TOKEN}2`],
+    })
   })
 
   it("records a PARTIAL failure as provider_refused with the exact counts", async () => {
