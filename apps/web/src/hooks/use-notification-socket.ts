@@ -22,7 +22,7 @@ interface UseNotificationSocketOptions {
 
 /**
  * Connects to the notification-service WebSocket gateway at
- * `NEXT_PUBLIC_NOTIFICATION_WS_URL` (falls back to localhost:4008) and joins
+ * `NEXT_PUBLIC_NOTIFICATION_WS_URL` (unset in production = disabled; localhost fallback only in development) and joins
  * the user's personal room.  The connection is established only when a Clerk
  * user is signed in.
  *
@@ -44,8 +44,21 @@ export function useNotificationSocket({
   }, [onNotification])
 
   const connect = useCallback((userId: string, internalUserId?: string) => {
-    const wsUrl =
-      process.env.NEXT_PUBLIC_NOTIFICATION_WS_URL ?? "http://localhost:4008"
+    const wsUrl = process.env.NEXT_PUBLIC_NOTIFICATION_WS_URL
+
+    // Batch 174: never dial a guessed host. When the URL is unset on a
+    // production deployment there IS no notification server to reach - the
+    // previous localhost:4008 fallback made the browser hammer an impossible
+    // address on every page (console error spam). Notifications remain fully
+    // functional via polling/fallbacks; the socket is an enhancement only.
+    if (!wsUrl || (/^https?:\/\/(localhost|127\.0\.0\.1)/.test(wsUrl) && process.env.NODE_ENV === "production")) {
+      const disabled = {
+        on: () => disabled,
+        emit: () => disabled,
+        disconnect: () => disabled,
+      } as unknown as Socket
+      return disabled
+    }
 
     const socket = io(wsUrl, {
       path: "/socket.io",
