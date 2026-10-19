@@ -75,11 +75,16 @@ export default clerkMiddleware(async (auth, request: NextRequest) => {
       "";
     const subdomain = tenantSlugFromHost(host);
 
+    // Batch 173 FIX (deploy blocker, found live): `auth` here is the v6
+    // ClerkAuthObject - a callable. `auth.sessionClaims` on the UNRESOLVED
+    // object is undefined for EVERY request, so every protected route 307'd
+    // to /sign-in even for fully signed-in users (and the sign-in page then
+    // refuses to render for an authenticated client -> black screen).
+    // Resolving `await auth()` is the documented v6 pattern.
+    const { userId } = await auth();
+
     // Rate limiting for mutation requests (POST, PUT, PATCH, DELETE)
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-      const authData = auth as unknown as { sessionClaims?: { sub?: string } };
-      const userId = authData.sessionClaims?.sub;
-
       // Fallback to IP address if no userId is present
       const ip =
         request.headers.get("x-forwarded-for") ||
@@ -131,10 +136,6 @@ export default clerkMiddleware(async (auth, request: NextRequest) => {
     // Handle authentication for protected routes
     const scoringPath = /^\/matches\/[^/]+\/scoring/.test(path);
     if (!isPublicRoute(request) || scoringPath) {
-      // ClerkMiddlewareAuth doesn't expose userId directly in types
-      // We use sessionClaims?.sub as the user identifier
-      const authData = auth as unknown as { sessionClaims?: { sub?: string } };
-      const userId = authData.sessionClaims?.sub;
       if (!userId) {
         // API routes must answer with JSON status codes, never an HTML redirect.
         // The handler performs its own authorization and returns the real reason.
