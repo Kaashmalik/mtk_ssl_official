@@ -66,4 +66,17 @@ describe("email template policy (Batch 144, UX-03 localized emails)", () => {
     expect(rendered.text).toContain("12 34")
     expect(rendered.text).toContain("10")
   })
+
+  it("B162 (PREM-02): the subject carries the published brand appName, sanitized, with the platform fallback", () => {
+    // Branding reaches ONLY the subject; the approved body copy is untouched.
+    const branded = renderInvitationEmail({ ...BASE, locale: "en", appName: "Delta League" })
+    expect(branded.subject).toBe(`You have been invited to join ${BASE.leagueName} on Delta League`)
+    const fallback = renderInvitationEmail({ ...BASE, locale: "en" })
+    expect(fallback.subject).toBe(`You have been invited to join ${BASE.leagueName} on SSL`)
+    expect(branded.text).toBe(fallback.text)
+    // A hostile appName is flattened - it can never split the subject line.
+    const hostile = renderInvitationEmail({ ...BASE, locale: "en", appName: "X\nBcc: victim@x" })
+    expect(hostile.subject).not.toMatch(/[\r\n]/)
+    expect(hostile.subject).toContain("on X Bcc: victim@x")
+  })
 })

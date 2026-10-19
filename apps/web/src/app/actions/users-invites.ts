@@ -12,6 +12,8 @@ import { claimInvite, findInviteByTokenHash, findPendingInvitePreview, findUserB
   issueInviteInLeague, readLeagueInvites, recordEmailAttempt,
   revokePendingInvite, rotateInviteToken } from "@/lib/invite-records"
 import { renderInvitationEmail } from "@mtk/database/lib/email-templates"
+import { getTenantBranding } from "@/lib/tenant"
+import { brandPresentation } from "@/lib/brand-presentation"
 import { resolveRequestLocale } from "@/i18n/server-locale"
 import { requirePrivilegedSession } from "@/lib/privileged-session"
 import { enqueueInvitationEmail, invitationQueueEnabled } from "@/lib/invitation-email-queue"
@@ -32,8 +34,13 @@ function emailOutbox(tenantId: string, tokenHash: string, link: string, locale: 
   if (!invitationQueueEnabled()) return undefined
   invitationQueueKeyId() // Refuse invalid encryption configuration BEFORE changing an invitation.
   return async (tx, authority, invite) => {
+    // B162 (PREM-02): the invitation's subject carries the league's published
+    // brand appName (sanitized + bounded inside the template), falling back
+    // to the platform name when nothing is published.
+    const brand = brandPresentation(await getTenantBranding(tenantId))
     const rendered = renderInvitationEmail({ locale,
       inviterName: authority.issuer.displayName || "A league owner", leagueName: authority.league.name,
+      appName: brand?.appName,
       role: invite.role as "team_manager" | "captain" | "coach" | "scorer" | "player", link, expiresDays: Math.max(1, Math.ceil((invite.expiresAt.getTime() - Date.now()) / 86400000)) })
     await enqueueInvitationEmail(tx, { tenantId, inviteId: invite.id, tokenHash,
       to: invite.email, subject: rendered.subject, text: rendered.text })

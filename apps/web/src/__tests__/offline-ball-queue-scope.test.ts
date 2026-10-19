@@ -71,7 +71,17 @@ describe("scoped offline ball queue (SCORE-09)", () => {
     await expect(getQueuedBalls(MATCH, { accountId: "a", tenantId: LEAGUE, matchId: "other-match" })).resolves.toEqual([])
     await queueBall(base({ clientOpId: "op-2" }), ALI)
     await queueBall(base({ clientOpId: "op-1" }), ALI)
-    const order = (await getQueuedBalls(MATCH, ALI)).map(row => row.clientOpId)
-    expect(order).toEqual(["op-1", "op-2"])
+    const rows = await getQueuedBalls(MATCH, ALI)
+    // The REAL contract is FIFO by queuedAt with a deterministic clientOpId
+    // tiebreak inside one millisecond - NOT a specific label order that a
+    // wall-clock tick between the two awaits would flip (the source of a
+    // rare suite flake). Assert the ordering property itself.
+    const times = rows.map((row) => row.queuedAt)
+    expect([...times].sort((a, b) => a - b)).toEqual(times)
+    expect(rows.map((row) => row.clientOpId).sort()).toEqual(["op-1", "op-2"])
+    if (rows[0].queuedAt === rows[1].queuedAt) {
+      // Same millisecond: the tiebreak, not the clock, decides - lexical.
+      expect(rows[0].clientOpId).toBe("op-1")
+    }
   })
 })

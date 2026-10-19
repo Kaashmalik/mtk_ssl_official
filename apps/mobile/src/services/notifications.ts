@@ -1,7 +1,8 @@
+import * as Device from "expo-device";
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 import i18n from "@/lib/i18n";
-
-const API_URL = Constants.expoConfig?.extra?.apiUrl || process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
+import { authedFetch } from "@/lib/app-api";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -10,59 +11,70 @@ const getNotifications = () => {
 };
 
 /**
- * Resolve the signed-in user's platform identity.
- * push_tokens.user_id is NOT NULL, so registration must carry an identity.
+ * B162: register this device's Expo push token with the platform.
+ *
+ * SCORE-08 discipline: the device talks ONLY to the web app's mobile intake
+ * (`/api/mobile/push/register`), authenticated with the Clerk session bearer
+ * token via authedFetch - never an ad-hoc API, and never a client-asserted
+ * user id (the server takes the identity from the verified session). The
+ * server's per-league consent + quiet-hours gates decide whether a token is
+ * ever USED; registration here only makes delivery possible.
+ *
+ * Returns the token on success, null when registration could not complete
+ * (no session, unconfigured URL, or a refused payload) - callers treat null
+ * as "push unavailable", never as an error to retry-spam.
  */
-async function resolveUserIdentity(): Promise<{ userId?: string; clerkId?: string } | null> {
-  try {
-    const { supabase } = await import("@/lib/supabase");
-    const { data } = await supabase.auth.getSession();
-    const user = data?.session?.user;
-    if (!user) return null;
-    return { userId: user.id };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Register device for push notifications
- */
-export async function registerForPushNotifications() {
+export async function registerForPushNotifications(): Promise<string | null> {
   if (isExpoGo) {
     return null;
   }
   try {
     const Notifications = getNotifications();
-    const token = await Notifications.getExpoPushTokenAsync({
-      projectId: Constants.expoConfig?.extra?.eas?.projectId,
-    });
-
-    const identity = await resolveUserIdentity();
-    if (!identity) {
+    const projectId =
+      process.env.EXPO_PUBLIC_PROJECT_ID || Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) {
       // eslint-disable-next-line no-console
-      console.warn("Push registration skipped: no signed-in user identity");
-      return token.data;
+      console.warn("Push registration skipped: no EAS project id configured");
+      return null;
     }
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
+    if (!token?.data) return null;
 
-    // Send token to backend
-    await fetch(`${API_URL}/notifications/register`, {
+    const response = await authedFetch("/api/mobile/push/register", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
-        ...identity,
         token: token.data,
-        platform: Constants.platform?.os === "ios" ? "ios" : "android",
+        platform: Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : null,
+        deviceId: Constants.sessionId ? String(Constants.sessionId).slice(0, 128) : null,
+        active: true,
       }),
     });
-
+    if (!response.ok) {
+      // eslint-disable-next-line no-console
+      console.warn("Push registration refused:", response.status);
+      return null;
+    }
     return token.data;
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error("Error registering for push notifications:", error);
+    console.warn("Push registration unavailable:", error);
     return null;
+  }
+}
+
+/**
+ * Deregister this device's token (e.g. on sign-out): the server soft-deletes
+ * so the token can never fan a notification to a signed-out device.
+ */
+export async function deregisterPushNotifications(token: string): Promise<boolean> {
+  try {
+    const response = await authedFetch("/api/mobile/push/register", {
+      method: "DELETE",
+      body: JSON.stringify({ token }),
+    });
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 

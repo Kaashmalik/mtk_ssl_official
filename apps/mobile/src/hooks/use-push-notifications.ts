@@ -3,6 +3,7 @@ import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { useRouter } from "expo-router";
+import { registerForPushNotifications } from "@/services/notifications";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -123,16 +124,6 @@ async function registerForPushNotificationsAsync() {
     return;
   }
 
-  const projectId = process.env.EXPO_PUBLIC_PROJECT_ID;
-  if (!projectId) {
-    warn("EXPO_PUBLIC_PROJECT_ID not set, skipping push token registration");
-    return;
-  }
-
-  const token = await Notifications.getExpoPushTokenAsync({ projectId });
-
-  log("Push token:", token.data);
-
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
       name: "default",
@@ -142,6 +133,8 @@ async function registerForPushNotificationsAsync() {
     });
   }
 
-  return token.data;
+  // B162: token fetch + server registration happen in the push service, which
+  // rides the Clerk-authenticated mobile intake (never a client-asserted id).
+  await registerForPushNotifications();
 }
 

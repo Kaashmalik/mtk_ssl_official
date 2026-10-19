@@ -57,15 +57,17 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 EXPO_PUBLIC_PROJECT_ID=your_expo_project_id
 ```
 
-### Authenticated scoring (Batch 160, SCORE-08/09)
+### Authenticated scoring + push registration (Batch 160/162, SCORE-08/09)
 
 Scoring writes are account-bound; anonymous delivery submission does not exist.
-Two additional variables are required before the scoring console and offline
-sync activate:
+Push registration likewise rides the SAME authenticated transport — the device
+talks only to the web app's mobile intake, never a separate API or the scoring
+service. Two additional variables are required before the scoring console,
+offline sync and push registration activate:
 
 ```env
-# Web app base URL — the ONLY endpoint the device posts deliveries to
-# (never the scoring service directly).
+# Web app base URL — the ONLY endpoint the device posts deliveries and push
+# tokens to (never the scoring service directly, never a legacy API host).
 EXPO_PUBLIC_APP_URL=http://localhost:3000
 # Clerk publishable key of the SAME Clerk instance as the web app.
 EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_or_live_...
@@ -77,6 +79,15 @@ offline-queued deliveries sync through `/api/mobile/scoring/ball` with the
 session bearer token only for the signed-in account that recorded them.
 Without them the app browses normally and scoring shows an honest
 "sign-in not configured" note instead of pretending to record.
+
+Push notifications (Batch 162): after the OS permission is granted on a real
+(non-Expo-Go) device, the Expo push token is registered server-side via
+`POST /api/mobile/push/register` with the Clerk session bearer token — the
+identity comes from the verified session, never from the client. Whether a
+token is ever USED is decided server-side per league by the member's push
+consent + quiet hours, and only in deployments where the push flag is enabled.
+The legacy `EXPO_PUBLIC_SUPABASE_*` / `EXPO_PUBLIC_API_URL` variables are no
+longer part of the push path.
 
 ## Development
 

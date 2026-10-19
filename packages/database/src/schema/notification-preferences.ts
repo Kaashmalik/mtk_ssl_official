@@ -25,6 +25,9 @@ export const notificationPreferences = pgTable(
     // FAN-02 email consent (B161). Fail-closed: absent/false. Delivery ALSO
     // requires the channel to be wired server-side; consent alone never sends.
     emailEnabled: boolean("email_enabled").default(false).notNull(),
+    // FAN-02 push consent (B162). Fail-closed: absent/false. Device tokens
+    // live in push_tokens (user-scoped); THIS column is the per-league consent.
+    pushEnabled: boolean("push_enabled").default(false).notNull(),
     // Quiet window [start, end) in wall-clock minutes of day (0-1439).
     quietStartMinute: smallint("quiet_start_minute"),
     quietEndMinute: smallint("quiet_end_minute"),

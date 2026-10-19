@@ -66,24 +66,24 @@ const ROLE_LABELS: Record<EmailLocale, Record<RoleKey, string>> = {
 const INVITATION_TEMPLATES: Record<
   EmailLocale,
   {
-    subject: (v: { leagueName: string }) => string
+    subject: (v: { leagueName: string; siteName: string }) => string
     body: (v: { inviterName: string; leagueName: string; roleLabel: string; link: string; expiresDays: number }) => string
   }
 > = {
   en: {
-    subject: (v) => `You have been invited to join ${v.leagueName} on SSL`,
+    subject: (v) => `You have been invited to join ${v.leagueName} on ${v.siteName}`,
     body: (v) =>
       `${v.inviterName} invited you to join "${v.leagueName}" as ${v.roleLabel}.\n\nAccept: ${v.link}\n\nExpires in ${v.expiresDays} days. Verify the invited email through your sign-in provider before accepting.`,
   },
   // MACHINE-DRAFTED bn translation - HUMAN REVIEW before localized launch.
   bn: {
-    subject: (v) => `${v.leagueName}-এ SSL-এ যোগ দেওয়ার আমন্ত্রণ`,
+    subject: (v) => `${v.leagueName}-এ ${v.siteName}-এ যোগ দেওয়ার আমন্ত্রণ`,
     body: (v) =>
       `${v.inviterName} আপনাকে "${v.leagueName}"-এ ${v.roleLabel} হিসেবে যোগ দিতে আমন্ত্রণ জানিয়েছেন।\n\nগ্রহণ করুন: ${v.link}\n\n${v.expiresDays} দিনে মেয়াদ শেষ হবে। গ্রহণ করার আগে আপনার সাইন-ইন প্রোভাইডারের মাধ্যমে আমন্ত্রিত ইমেইল যাচাই করুন।`,
   },
   // MACHINE-DRAFTED ar translation - HUMAN REVIEW before localized launch.
   ar: {
-    subject: (v) => `دعوة للانضمام إلى ${v.leagueName} على SSL`,
+    subject: (v) => `دعوة للانضمام إلى ${v.leagueName} على ${v.siteName}`,
     body: (v) =>
       `${v.inviterName} يدعوكم للانضمام إلى "${v.leagueName}" بصفة ${v.roleLabel}.\n\nالقبول: ${v.link}\n\nتنتهي الصلاحية بعد ${v.expiresDays} أيام. تحققوا من البريد المدعو عبر مزود تسجيل الدخول قبل القبول.`,
   },
@@ -96,6 +96,13 @@ export interface InvitationEmailInput {
   role: string
   link: string
   expiresDays: number
+  /**
+   * B162 (PREM-02): subject branding. The published brand appName with a
+   * hard-coded fallback; NEVER a raw string - it passes plainEmailLine and a
+   * length bound before touching a template. Bodies keep their approved
+   * copy; only the subject names the brand.
+   */
+  appName?: string
 }
 
 export function renderInvitationEmail(input: InvitationEmailInput): { subject: string; text: string } {
@@ -103,12 +110,14 @@ export function renderInvitationEmail(input: InvitationEmailInput): { subject: s
   const role = input.role as RoleKey
   const roleLabel = ROLE_LABELS[locale][role]
   if (!roleLabel) throw new Error("Unknown invitation role")
+  const siteName = plainEmailLine(input.appName ?? "").slice(0, 40) || "SSL"
   const vars = {
     inviterName: plainEmailLine(input.inviterName),
     leagueName: plainEmailLine(input.leagueName),
     roleLabel,
     link: plainEmailLine(input.link),
     expiresDays: Math.trunc(input.expiresDays),
+    siteName,
   }
   return { subject: INVITATION_TEMPLATES[locale].subject(vars), text: INVITATION_TEMPLATES[locale].body(vars) }
 }

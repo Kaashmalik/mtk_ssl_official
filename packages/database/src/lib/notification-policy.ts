@@ -27,6 +27,8 @@ export type NotificationPreferencesInput = {
   inAppEnabled: boolean
   /** B161: email consent. Absent = fail-closed (never email). */
   emailEnabled?: boolean
+  /** B162: push consent. Absent = fail-closed (never push). */
+  pushEnabled?: boolean
   quietStartMinute: number | null
   quietEndMinute: number | null
   timeZone: string | null
@@ -128,6 +130,9 @@ export function memberDeliveryDecision(input: {
     return { channel, allowed: false, reason: "consent_off" }
   }
   if (channel === "email" && prefs.emailEnabled !== true) {
+    return { channel, allowed: false, reason: "consent_off" }
+  }
+  if (channel === "push" && prefs.pushEnabled !== true) {
     return { channel, allowed: false, reason: "consent_off" }
   }
   if (channel !== "in_app") {

@@ -3,6 +3,16 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **19 October 2026 (Batch 162) - one LOCAL migration, NOT applied remotely**
+> `20261019130000_notification_push_preference` (FAN-02 push channel):
+> `notification_preferences.push_enabled` boolean NOT NULL DEFAULT false -
+> the per-member PUSH consent column. Purely additive; the column alone
+> wires nothing (push stays channel_unwired until a deployment sets
+> NOTIFICATION_PUSH_READY=true with an EXPO_ACCESS_TOKEN, AND the member has
+> flipped consent on, AND the member has at least one active registered
+> device token). Apply in a reviewed deployment before wiring the push
+> channel. Reuses the existing push_tokens table (no schema change there).
+
 > **19 October 2026 (Batch 161) - one LOCAL migration, NOT applied remotely**
 > `20261019120000_notification_email_preference` (FAN-02 email channel):
 > `notification_preferences.email_enabled` boolean NOT NULL DEFAULT false -

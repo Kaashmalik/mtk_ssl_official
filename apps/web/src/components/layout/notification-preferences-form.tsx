@@ -10,6 +10,7 @@ import { toast } from "sonner"
 export type NotificationPreferencesValues = {
   inAppEnabled: boolean
   emailEnabled?: boolean
+  pushEnabled?: boolean
   quietStartMinute: number | null
   quietEndMinute: number | null
   timeZone: string | null
@@ -46,6 +47,7 @@ export function NotificationPreferencesForm({
   const quietOn = initial?.quietStartMinute != null && initial?.quietEndMinute != null
   const [inAppEnabled, setInAppEnabled] = useState(initial?.inAppEnabled ?? true)
   const [emailEnabled, setEmailEnabled] = useState(initial?.emailEnabled ?? false)
+  const [pushEnabled, setPushEnabled] = useState(initial?.pushEnabled ?? false)
   const [quietEnabled, setQuietEnabled] = useState(quietOn)
   const [startMinute, setStartMinute] = useState(initial?.quietStartMinute ?? 22 * 60)
   const [endMinute, setEndMinute] = useState(initial?.quietEndMinute ?? 7 * 60)
@@ -58,6 +60,7 @@ export function NotificationPreferencesForm({
         const result = await saveNotificationPreferences({
           inAppEnabled,
           emailEnabled,
+          pushEnabled,
           quietEnabled,
           quietStartMinute: startMinute,
           quietEndMinute: endMinute,
@@ -106,6 +109,23 @@ export function NotificationPreferencesForm({
           type="checkbox"
           checked={emailEnabled}
           onChange={(e) => setEmailEnabled(e.target.checked)}
+          className="mt-1 h-4 w-4"
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Label htmlFor="pref-push" className="font-medium">Push (mobile app)</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Device notifications for updates in leagues you follow. Quiet hours
+            apply here too; registering a device never by itself starts sends.
+          </p>
+        </div>
+        <input
+          id="pref-push"
+          type="checkbox"
+          checked={pushEnabled}
+          onChange={(e) => setPushEnabled(e.target.checked)}
           className="mt-1 h-4 w-4"
         />
       </div>

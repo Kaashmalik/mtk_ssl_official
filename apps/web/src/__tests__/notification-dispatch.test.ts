@@ -170,7 +170,7 @@ describe("Tournament-follower fan-out (FAN-02)", () => {
 })
 
 describe("Notification preferences save (FAN-02)", () => {
-  const VALID = { inAppEnabled: true, emailEnabled: false, quietStartMinute: 1320, quietEndMinute: 420, timeZone: "Asia/Karachi" }
+  const VALID = { inAppEnabled: true, emailEnabled: false, pushEnabled: false, quietStartMinute: 1320, quietEndMinute: 420, timeZone: "Asia/Karachi" }
 
   it("inserts the first preference set", async () => {
     const { tx, inserts, updates } = txWith([[]])
@@ -337,6 +337,142 @@ describe("B161: notification EMAIL channel", () => {
     const result = await dispatchNotificationToMember(EMAIL_INPUT)
     expect(result).toEqual({ written: false, reason: "no_recipient" })
     expect(inserts).toHaveLength(0)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+})
+
+describe("B162: notification PUSH channel", () => {
+  const PUSH_INPUT = {
+    tenantId: LEAGUE, memberId: MEMBER, type: "award_declared",
+    title: "Award declared", body: "Best Batsman was declared.", dedupKey: "award:push-1",
+    channel: "push" as const,
+  }
+  const TOKEN = "ExponentPushToken[abcdefghijklmnop]"
+  const P_VALID = { inAppEnabled: true, emailEnabled: false, pushEnabled: false, quietStartMinute: 1320, quietEndMinute: 420, timeZone: "Asia/Karachi" }
+
+  const pushSpecs = (tokens: string[]) => [
+    [{ ...PREFS, pushEnabled: true }],   // prefs: consented, no quiet window
+    [],                                  // not a duplicate
+    tokens.map((t) => ({ token: t })),   // active device tokens
+  ]
+
+  it("refuses push for an unconsented member and writes NOTHING", async () => {
+    vi.stubEnv("NOTIFICATION_PUSH_READY", "true")
+    vi.stubEnv("EXPO_ACCESS_TOKEN", "expo_test_token")
+    const { tx, inserts } = txWith([[{ ...PREFS }]]) // row predates the field
+    mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
+    const result = await dispatchNotificationToMember(PUSH_INPUT)
+    expect(result).toEqual({ written: false, reason: "consent_off" })
+    expect(inserts).toHaveLength(0)
+  })
+
+  it("reads channel_unwired while the deployment has not enabled push", async () => {
+    vi.stubEnv("NOTIFICATION_PUSH_READY", "false")
+    const { tx, inserts } = txWith(pushSpecs([TOKEN]))
+    mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
+    const result = await dispatchNotificationToMember(PUSH_INPUT)
+    expect(result).toEqual({ written: false, reason: "channel_unwired" })
+    expect(inserts).toHaveLength(0)
+  })
+
+  it("refuses with no_recipient when the member has no active device token", async () => {
+    vi.stubEnv("NOTIFICATION_PUSH_READY", "true")
+    vi.stubEnv("EXPO_ACCESS_TOKEN", "expo_test_token")
+    const { tx, inserts } = txWith(pushSpecs([]))
+    mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
+    const result = await dispatchNotificationToMember(PUSH_INPUT)
+    expect(result).toEqual({ written: false, reason: "no_recipient" })
+    expect(inserts).toHaveLength(0)
+  })
+
+  it("writes the ledger with tokenCount and records full provider acceptance", async () => {
+    vi.stubEnv("NOTIFICATION_PUSH_READY", "true")
+    vi.stubEnv("EXPO_ACCESS_TOKEN", "expo_test_token")
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ status: "ok" }, { status: "ok" }] }),
+    }))
+    vi.stubGlobal("fetch", fetchMock)
+    const { tx, inserts } = txWith(pushSpecs([TOKEN, `${TOKEN}2`]))
+    mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
+    mocks.update.mockImplementation(() => ({ set: () => ({ where: async () => {} }) }))
+
+    const result = await dispatchNotificationToMember(PUSH_INPUT)
+    expect(result.written).toBe(true)
+    expect(result.sendState).toBe("provider_accepted")
+    const row = inserts[0] as any
+    expect(row.channel).toBe("push")
+    expect(row.data).toEqual({ dedupKey: "award:push-1", deliveryState: "queued", tokenCount: 2 })
+    // One bounded Expo API call carrying both tokens and the deep-link data.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe("https://exp.host/--/api/v2/push/send")
+    expect(init.headers).toMatchObject({ Authorization: "Bearer expo_test_token" })
+    const messages = JSON.parse(String(init.body)) as Array<{ to: string; data: Record<string, string> }>
+    expect(messages).toHaveLength(2)
+    expect(messages[0].data).toEqual({ type: "award_declared", tenantId: LEAGUE, dedupKey: "award:push-1" })
+    // Post-commit settle recorded the honest, complete state.
+    expect(mocks.update).toHaveBeenCalledTimes(1)
+  })
+
+  it("records a PARTIAL failure as provider_refused with the exact counts", async () => {
+    vi.stubEnv("NOTIFICATION_PUSH_READY", "true")
+    vi.stubEnv("EXPO_ACCESS_TOKEN", "expo_test_token")
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ status: "ok" }, { status: "error", message: "DeviceNotRegistered" }] }),
+    })))
+    const { tx } = txWith(pushSpecs([TOKEN, `${TOKEN}2`]))
+    mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
+    const updates: any[] = []
+    mocks.update.mockImplementation((() => ({ set: (s: unknown) => { updates.push(s); return { where: async () => {} } } })) as any)
+
+    const result = await dispatchNotificationToMember(PUSH_INPUT)
+    expect(result.sendState).toBe("provider_refused")
+    expect(updates[0].data.deliveryState).toBe("provider_refused")
+    expect(updates[0].data.deliveryError).toBe("expo_partial_1of2")
+  })
+
+  it("keeps receipt-count mismatches and network failures refused, never optimistic", async () => {
+    vi.stubEnv("NOTIFICATION_PUSH_READY", "true")
+    vi.stubEnv("EXPO_ACCESS_TOKEN", "expo_test_token")
+    const updates: any[] = []
+    mocks.update.mockImplementation((() => ({ set: (s: unknown) => { updates.push(s); return { where: async () => {} } } })) as any)
+
+    // Receipt count does not match the sent messages (two tokens, one receipt).
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [{ status: "ok" }] }) })))
+    const a = txWith(pushSpecs([TOKEN, `${TOKEN}2`]))
+    mocks.transaction.mockImplementationOnce(async (fn: any) => fn(a.tx))
+    expect((await dispatchNotificationToMember(PUSH_INPUT)).sendState).toBe("provider_refused")
+    expect(updates[0].data.deliveryError).toBe("expo_receipt_count_mismatch")
+
+    // Network failure: nothing may pretend the send happened.
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline") }))
+    const b = txWith(pushSpecs([TOKEN]))
+    mocks.transaction.mockImplementationOnce(async (fn: any) => fn(b.tx))
+    expect((await dispatchNotificationToMember(PUSH_INPUT)).sendState).toBe("provider_refused")
+    expect(updates[1].data.deliveryError).toBe("network_unknown")
+  })
+
+  it("persists push consent in the same version-checked upsert (replay + change)", async () => {
+    const { tx, updates } = txWith([[{ ...P_VALID, pushEnabled: true }]])
+    mocks.transaction.mockImplementation(async (fn: any) => fn(tx))
+    const same = await saveNotificationPreferencesForMember(LEAGUE, MEMBER, { ...P_VALID, pushEnabled: true })
+    expect(same.changed).toBe(false)
+    expect(updates).toHaveLength(0)
+
+    const { tx: t2, updates: u2 } = txWith([[{ ...P_VALID, pushEnabled: false }]])
+    mocks.transaction.mockImplementation(async (fn: any) => fn(t2))
+    const flipped = await saveNotificationPreferencesForMember(LEAGUE, MEMBER, { ...P_VALID, pushEnabled: true })
+    expect(flipped.changed).toBe(true)
+    expect(flipped.previous).toMatchObject({ pushEnabled: false })
+    expect(u2).toHaveLength(1)
   })
 
   afterEach(() => {

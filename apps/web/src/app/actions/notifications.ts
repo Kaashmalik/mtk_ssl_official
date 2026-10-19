@@ -64,6 +64,8 @@ export async function saveNotificationPreferences(input: {
   inAppEnabled: boolean
   /** B161: email consent; delivery also requires the deployment-wired channel. */
   emailEnabled: boolean
+  /** B162: push consent; delivery also requires the deployment-wired channel. */
+  pushEnabled: boolean
   quietEnabled: boolean
   quietStartMinute: number
   quietEndMinute: number
@@ -73,6 +75,7 @@ export async function saveNotificationPreferences(input: {
   const result = await saveNotificationPreferencesForMember(context.tenantId, context.actorId, {
     inAppEnabled: input.inAppEnabled,
     emailEnabled: input.emailEnabled,
+    pushEnabled: input.pushEnabled,
     quietStartMinute: input.quietEnabled ? input.quietStartMinute : null,
     quietEndMinute: input.quietEnabled ? input.quietEndMinute : null,
     timeZone: input.quietEnabled ? input.timeZone : null,

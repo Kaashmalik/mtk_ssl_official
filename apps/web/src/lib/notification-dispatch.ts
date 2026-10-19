@@ -1,4 +1,4 @@
-import { db, notifications, notificationPreferences, fanFollows, users, tenants } from "@mtk/database"
+import { db, notifications, notificationPreferences, fanFollows, users, tenants, pushTokens } from "@mtk/database"
 import { and, eq, gte, sql, desc } from "drizzle-orm"
 import { z } from "zod"
 import { memberDeliveryDecision, MINUTE_OF_DAY_MAX } from "@mtk/database/lib/notification-policy"
@@ -6,6 +6,7 @@ import { isValidTimeZone } from "./time-policy"
 import { getTenantBranding } from "./tenant"
 import { brandPresentation, type BrandPresentation } from "./brand-presentation"
 import { buildNotificationEmail, notificationEmailFrom, notificationEmailReady, type NotificationEmail } from "./notification-email"
+import { notificationPushReady, sendPushToTokens } from "./push-delivery"
 
 /**
  * FAN-02 notification dispatch (locked writer).
@@ -15,14 +16,14 @@ import { buildNotificationEmail, notificationEmailFrom, notificationEmailReady, 
  * allows the channel NOW — nothing is written "for later delivery", because a
  * row that promises a send no one performs would be a fabricated delivery.
  *
- * Channels: `in_app` always. Email (B161) only when the member consented
- * (notification_preferences.email_enabled) AND the deployment wired the
- * channel (NOTIFICATION_EMAIL_READY + RESEND_API_KEY) — consent without
- * wiring reads channel_unwired and writes nothing. The provider attempt
- * happens AFTER the consent transaction commits (provider HTTP never holds
- * the row lock) and its outcome is recorded honestly on the row:
- * `provider_accepted` means the provider took the message, never that a
- * human read it. Push/sms remain honestly unwired.
+ * Channels: `in_app` always. Email (B161) and push (B162) only when the
+ * member consented (notification_preferences.email_enabled / push_enabled)
+ * AND the deployment wired the channel. Consent without wiring reads
+ * channel_unwired and writes nothing. The provider attempt happens AFTER the
+ * consent transaction commits (provider HTTP never holds the row lock) and
+ * its outcome is recorded honestly on the row: `provider_accepted` means the
+ * provider took the message, never that a device showed it or a human read
+ * it. SMS remains honestly unwired.
  */
 
 /** Duplicate fan-outs for the same fact inside this window are suppressed. */
@@ -38,14 +39,14 @@ const dispatchInputSchema = z.object({
   title: z.string().min(1).max(160),
   body: z.string().max(500),
   dedupKey: z.string().min(8).max(120),
-  channel: z.enum(["in_app", "email"]).default("in_app"),
+  channel: z.enum(["in_app", "email", "push"]).default("in_app"),
 })
 
 export type DispatchResult = {
   written: boolean
   /** Always present: `ok` on a write, otherwise the honest refusal reason. */
   reason: "ok" | "consent_off" | "quiet_hours" | "channel_unwired" | "deduplicated" | "no_recipient"
-  /** EMAIL only: the honest, post-commit provider outcome (never "delivered"). */
+  /** EMAIL/PUSH only: the honest, post-commit provider outcome (never "delivered"). */
   sendState?: "provider_accepted" | "provider_refused"
 }
 
@@ -55,6 +56,13 @@ type EmailDeliveryContext = {
   leagueName: string
   brand: BrandPresentation | null
   email: NotificationEmail
+}
+
+type PushDeliveryContext = {
+  rowId: string
+  tokens: string[]
+  content: { title: string; body: string; type: string; tenantId: string; dedupKey: string }
+  tokenCount: number
 }
 
 /**
@@ -68,12 +76,13 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
   const quietCutoff = new Date(now.getTime() - DEDUP_WINDOW_HOURS * 3_600_000)
 
   const result = await db.transaction(async (tx): Promise<
-    DispatchResult & { email?: EmailDeliveryContext }
+    DispatchResult & { email?: EmailDeliveryContext; push?: PushDeliveryContext }
   > => {
     const [prefs] = await tx
       .select({
         inAppEnabled: notificationPreferences.inAppEnabled,
         emailEnabled: notificationPreferences.emailEnabled,
+        pushEnabled: notificationPreferences.pushEnabled,
         quietStartMinute: notificationPreferences.quietStartMinute,
         quietEndMinute: notificationPreferences.quietEndMinute,
         timeZone: notificationPreferences.timeZone,
@@ -86,11 +95,16 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
       .for("update")
       .limit(1)
 
+    const wiring = parsed.channel === "email"
+      ? { email: notificationEmailReady() }
+      : parsed.channel === "push"
+        ? { push: notificationPushReady() }
+        : undefined
     const decision = memberDeliveryDecision({
       channel: parsed.channel,
       prefs: prefs ?? null,
       now,
-      wiring: parsed.channel === "email" ? { email: notificationEmailReady() } : undefined,
+      wiring,
     })
     if (!decision.allowed) return { written: false, reason: decision.reason }
 
@@ -121,8 +135,10 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
       return { written: true, reason: "ok" }
     }
 
-    // EMAIL: an active account with a real address is required; consent was
-    // already proven above by the same policy that gates the channel.
+    // EMAIL (B161): an active account with a real address is required;
+    // consent was already proven above by the same policy that gates the
+    // channel.
+    if (parsed.channel === "email") {
     const [account] = await tx
       .select({ email: users.email })
       .from(users)
@@ -159,6 +175,47 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
       reason: "ok",
       email: { rowId: row.id, to: account.email, leagueName: tenant?.name ?? "", brand, email },
     }
+    }
+
+  // PUSH (B162): consent + wiring already proven; still need at least one
+  // active device token. The ledger row carries tokenCount so the bounded
+  // fan-out is inspectable.
+  const deviceRows = await tx
+    .select({ token: pushTokens.token })
+    .from(pushTokens)
+    .where(and(
+      eq(pushTokens.userId, parsed.memberId),
+      eq(pushTokens.isActive, true),
+    ))
+    .limit(10)
+  if (deviceRows.length === 0) return { written: false, reason: "no_recipient" }
+
+  const [pushRow] = await tx.insert(notifications).values({
+    tenantId: parsed.tenantId,
+    userId: parsed.memberId,
+    type: parsed.type,
+    channel: "push",
+    title: parsed.title,
+    body: parsed.body,
+    data: { dedupKey: parsed.dedupKey, deliveryState: "queued", tokenCount: deviceRows.length },
+  }).returning({ id: notifications.id })
+
+  return {
+    written: true,
+    reason: "ok",
+    push: {
+      rowId: pushRow.id,
+      tokens: deviceRows.map((d) => d.token),
+      content: {
+        title: parsed.title,
+        body: parsed.body,
+        type: parsed.type,
+        tenantId: parsed.tenantId,
+        dedupKey: parsed.dedupKey,
+      },
+      tokenCount: deviceRows.length,
+    },
+  }
   })
 
   // Provider HTTP happens strictly AFTER the consent transaction has committed.
@@ -199,6 +256,32 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
         .where(eq(notifications.id, delivery.rowId))
       return { written: true, reason: "ok", sendState: "provider_refused" }
     }
+  }
+
+  // PUSH settle (B162): one bounded Expo API call after commit; the partial
+  // outcome is summarized on the row rather than silently treated as full
+  // success or full failure.
+  if (result.written && "push" in result && result.push) {
+    const { push: delivery } = result
+    const outcome = await sendPushToTokens(delivery.tokens, delivery.content)
+    const data = outcome.state === "provider_accepted"
+      ? { dedupKey: parsed.dedupKey, deliveryState: "provider_accepted" as const, tokenCount: delivery.tokenCount, ok: outcome.ok }
+      : {
+        dedupKey: parsed.dedupKey,
+        deliveryState: "provider_refused" as const,
+        tokenCount: delivery.tokenCount,
+        deliveryError: outcome.error,
+      }
+    try {
+      await db.update(notifications)
+        .set({ data })
+        .where(eq(notifications.id, delivery.rowId))
+    } catch {
+      // The send DID happen; only the ledger update failed. The honest state
+      // stays "unknown outcome" on the wire — never overwritten to accepted.
+      return { written: true, reason: "ok", sendState: outcome.state }
+    }
+    return { written: true, reason: "ok", sendState: outcome.state }
   }
 
   return { written: result.written, reason: result.reason }
@@ -254,6 +337,8 @@ const notificationPreferencesInputSchema = z.object({
   inAppEnabled: z.boolean(),
   /** B161: email consent; dispatch additionally requires the wired channel. */
   emailEnabled: z.boolean().default(false),
+  /** B162: push consent; dispatch additionally requires the wired channel. */
+  pushEnabled: z.boolean().default(false),
   quietStartMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   quietEndMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   timeZone: z.string().min(1).max(64).nullable(),
@@ -282,6 +367,7 @@ export type NotificationPreferencesWriteResult = {
   previous: {
     inAppEnabled: boolean
     emailEnabled: boolean
+    pushEnabled: boolean
     quietStartMinute: number | null
     quietEndMinute: number | null
     timeZone: string | null
@@ -316,6 +402,7 @@ export async function saveNotificationPreferencesForMember(
       ? {
         inAppEnabled: existing.inAppEnabled,
         emailEnabled: existing.emailEnabled,
+        pushEnabled: existing.pushEnabled,
         quietStartMinute: existing.quietStartMinute,
         quietEndMinute: existing.quietEndMinute,
         timeZone: existing.timeZone,
@@ -325,6 +412,7 @@ export async function saveNotificationPreferencesForMember(
     const changed = previous == null
       || previous.inAppEnabled !== prefs.inAppEnabled
       || previous.emailEnabled !== prefs.emailEnabled
+      || previous.pushEnabled !== prefs.pushEnabled
       || previous.quietStartMinute !== prefs.quietStartMinute
       || previous.quietEndMinute !== prefs.quietEndMinute
       || previous.timeZone !== prefs.timeZone
@@ -335,6 +423,7 @@ export async function saveNotificationPreferencesForMember(
         .set({
           inAppEnabled: prefs.inAppEnabled,
           emailEnabled: prefs.emailEnabled,
+          pushEnabled: prefs.pushEnabled,
           quietStartMinute: prefs.quietStartMinute,
           quietEndMinute: prefs.quietEndMinute,
           timeZone: prefs.timeZone,
@@ -350,6 +439,7 @@ export async function saveNotificationPreferencesForMember(
         userId: memberId,
         inAppEnabled: prefs.inAppEnabled,
         emailEnabled: prefs.emailEnabled,
+        pushEnabled: prefs.pushEnabled,
         quietStartMinute: prefs.quietStartMinute,
         quietEndMinute: prefs.quietEndMinute,
         timeZone: prefs.timeZone,

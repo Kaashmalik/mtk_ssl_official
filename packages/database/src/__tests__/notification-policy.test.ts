@@ -12,7 +12,7 @@ const UTC_0130 = new Date("2026-10-17T01:30:00Z") // 01:30 UTC, 06:30 Karachi.
 const KARACHI = "Asia/Karachi"
 
 function prefs(overrides: Partial<NotificationPreferencesInput> = {}): NotificationPreferencesInput {
-  return { inAppEnabled: true, emailEnabled: true, quietStartMinute: null, quietEndMinute: null, timeZone: null, ...overrides }
+  return { inAppEnabled: true, emailEnabled: true, pushEnabled: true, quietStartMinute: null, quietEndMinute: null, timeZone: null, ...overrides }
 }
 
 describe("parseQuietWindow", () => {
@@ -121,6 +121,35 @@ describe("memberDeliveryDecision", () => {
       now: UTC_NOON,
       wiring: { email: true },
     })).toEqual({ channel: "email", allowed: false, reason: "consent_off" })
+  })
+
+  it("B162: push consent behaves exactly like email consent - fail-closed, wiring-separate", () => {
+    // Preferences predating the field (no pushEnabled) never push.
+    expect(memberDeliveryDecision({
+      channel: "push",
+      prefs: { ...prefs({ timeZone: KARACHI }), pushEnabled: undefined },
+      now: UTC_NOON,
+    })).toEqual({ channel: "push", allowed: false, reason: "consent_off" })
+    // Consent alone is STILL not enough - wiring stays off by default.
+    expect(memberDeliveryDecision({
+      channel: "push",
+      prefs: prefs({ pushEnabled: true }),
+      now: UTC_NOON,
+    })).toEqual({ channel: "push", allowed: false, reason: "channel_unwired" })
+    // A deployment that wires push may send, and only inside quiet hours.
+    expect(memberDeliveryDecision({
+      channel: "push",
+      prefs: prefs({ pushEnabled: true }),
+      now: UTC_NOON,
+      wiring: { push: true },
+    })).toEqual({ channel: "push", allowed: true, reason: "ok" })
+    // Quiet hours still gate the wired push channel in the member's zone.
+    expect(memberDeliveryDecision({
+      channel: "push",
+      prefs: prefs({ pushEnabled: true, timeZone: KARACHI, quietStartMinute: 17 * 60, quietEndMinute: 18 * 60 }),
+      now: UTC_NOON, // 17:00 Karachi - inside the window
+      wiring: { push: true },
+    })).toEqual({ channel: "push", allowed: false, reason: "quiet_hours" })
   })
 
   it("honors in-app consent", () => {
