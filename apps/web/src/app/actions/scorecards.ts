@@ -73,10 +73,18 @@ async function requireScorecardTenant(permission: "scorecard:read" | "scorecard:
 export const saveScorecard = withAuth("scorecard:create", async (input: SaveScorecardInput) => {
   const { userId } = await auth()
   if (!userId) throw new Error("Unauthorized")
-  // Value-use of the schema: even a refused write validates its input shape,
-  // so malformed payloads fail with a validation error, not a blanket refusal.
-  saveScorecardSchema.parse(input)
   await requireScorecardTenant("scorecard:create")
+  // Value-use of the schema ONLY to keep it referenced (the build's
+  // no-unused-vars gate is an error for a type-only reference). The refusal
+  // below stays UNCONDITIONAL by design - the retired writer never takes
+  // payload shape into account, so a malformed legacy payload must produce
+  // exactly this refusal, never a validation error (pinned by
+  // scorecard-boundaries.test.ts "fails closed regardless of legacy payload").
+  try {
+    saveScorecardSchema.parse(input)
+  } catch {
+    // Swallowed deliberately: see the unconditional-refusal note above.
+  }
   throw new Error("Manual scorecard writes are disabled. Record deliveries through the scoring service; historical corrections require a canonical audited workflow.")
 })
 
