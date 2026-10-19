@@ -6173,6 +6173,32 @@ Session B's REG/COMP domain, recorded untouched).
 
 ## Phase 3 of the three-phase completion (batch 146 starts it, ungated items first)
 
+## Batch 157 - BASE-04 COMPLETE: fresh-rebuild PROOF (docker, throwaway container)
+
+- DELIVERED: the "prove a fresh local/staging database" sub-clause is
+  closed with a REAL proof, not a claim. All 80 migration files apply,
+  in lexicographic order, to a virgin `postgres:15-alpine` container
+  using nothing but the `supabase/migrations` folder plus a minimal
+  documented prelude (platform roles `anon`/`authenticated`/
+  `service_role`/`ssl` + NULL-STUB `auth.uid()/auth.role()/auth.jwt()`
+  so the 28+9 policy references parse and DENY BY DEFAULT). Catalog
+  sanity on the fresh database: 70 tables, 70 RLS-enabled (ALL), 138
+  policies, 43 enums, 145 functions. `docs/FRESH_REBUILD_PROOF.md`
+  records method, result, interpretation and reproduction; the
+  throwaway container was torn down after evidence capture.
+- HONEST TOOLING NOTE: attempt 1 failed 80/80 - a naive `;`-splitter
+  shredded dollar-quoted plpgsql `$$` bodies. Retained in evidence as
+  the reason rebuild tooling MUST execute whole files
+  (dollar-quote-aware); per-file `psql ON_ERROR_STOP` piping (CLI
+  shape) passed 80/80. Not hidden: the failed attempt is itself
+  evidence.
+- WHY THIS MATTERS: schema reality is now provable independent of the
+  live database's history; the deployed LEDGER remains the only open
+  thread (Batch 156: one deliberate exception - REG-01 `20261017130000`
+  is Session B's under the parallel-session boundary).
+- BASE-04 STATUS: inventory (Batch 156) + drift reconciliation
+  (verified-first ledger rows) + fresh rebuild proof - COMPLETE.
+
 ## Batch 156 - BASE-04 evidence: deployed-schema gate made real + ledger reconciled (remote, verified)
 
 - DELIVERED: the `--db` deployed-schema gate existed but could never
