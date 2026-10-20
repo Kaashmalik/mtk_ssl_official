@@ -10,6 +10,7 @@ module.exports = function (api) {
           root: ["./src"],
           alias: {
             "@": "./src",
+            "@mtk/contracts": "../../packages/contracts/src",
           },
         },
       ],

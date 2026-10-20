@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/clerk-expo";
 import { useOfflineStore } from "@/store/offline-store";
 import { appApiUrl } from "@/lib/app-api";
 import { isScoringAcknowledgement } from "@/lib/scoring-ack";
+import { queuedDeliveryToCommand } from "@mtk/contracts";
 
 /**
  * SCORE-08/09: flushes queued offline deliveries THROUGH THE AUTHENTICATED
@@ -68,30 +69,22 @@ export function useOfflineSync() {
 
         for (const ball of pendingBalls) {
           try {
-            if (!ball.inningsId || !ball.batsmanId || !ball.bowlerId) {
-              // Unsatisfiable entries can never pass the canonical gate; stop
-              // and surface rather than silently looping forever.
-              logSyncError(new Error(`Delivery ${ball.id} is missing required scoring identifiers`));
+            // ENH-03-02: THE one queued-delivery → command adapter. The old
+            // hand-rolled body used nested `extras`/`wicket` objects that the
+            // intake schema silently stripped, so an offline wicket arrived
+            // as "not out" and a wide arrived as one invented legal run. The
+            // mapper emits the exact contract command; a stated refusal marks
+            // the entry un-syncable with its reason instead of looping.
+            const mapped = queuedDeliveryToCommand(ball);
+            if (!mapped.ok) {
+              logSyncError(new Error(`Delivery ${ball.id} cannot sync: ${mapped.reason}`));
               break;
             }
 
-            let extras: { type: string; runs: number } | undefined;
-            if (ball.isWide) extras = { type: "wide", runs: Math.max(1, ball.runs) };
-            else if (ball.isNoBall) extras = { type: "noball", runs: Math.max(1, ball.runs) };
-            else if (ball.isBye) extras = { type: "bye", runs: ball.runs };
-            else if (ball.isLegBye) extras = { type: "legbye", runs: ball.runs };
-
-            const wicket = ball.isWicket && ball.wicketType
-              ? { type: ball.wicketType, playerId: ball.batsmanId } : undefined;
             const res = await fetch(`${base}/api/mobile/scoring/ball`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-              body: JSON.stringify({
-                clientOpId: ball.id, matchId: ball.matchId, inningsId: ball.inningsId,
-                overNumber: ball.over, ballNumber: ball.ball, runs: ball.runs,
-                batsmanId: ball.batsmanId, bowlerId: ball.bowlerId, extras, wicket,
-                handoverEpoch: ball.handoverEpoch, expectedRevision: ball.expectedRevision,
-              }),
+              body: JSON.stringify(mapped.command),
             });
 
             if (res.status === 409) {

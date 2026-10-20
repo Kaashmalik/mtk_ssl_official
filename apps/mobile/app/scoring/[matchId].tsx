@@ -137,11 +137,18 @@ function AuthenticatedScoring() {
       return;
     }
     if (runType.kind === "wicket" && !runType.wicketType) {
-      setPendingWicket(true); // the dismissal type is part of the official record — never guessed
+      setPendingWicket(true); // the dismissal type is part of the official record - never guessed
       return;
     }
-    const runs = runType.kind === "runs" ? runType.value : 1;
-    const isWicket = runType.kind === "wicket";
+    // ENH-03-02 canonical queued semantics (validated by @mtk/contracts):
+    // - a plain wide/no-ball/bye/leg-bye is worth exactly 1 and carries its
+    //   extras flag, so the official record never invents batter runs or a
+    //   legal ball out of a flat `runs: 1`;
+    // - a wicket delivery scores 0 runs unless a richer control says
+    //   otherwise (run-out + completed runs stay a web scoring-screen flow);
+    // - batter runs obey the server's command ceiling (0..7 - the old grid
+    //   offered 8, which the official record refuses as invalid_command and
+    //   which then jammed the offline queue forever).
     const record: BallData = {
       id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       matchId: hydrated.match.id,
@@ -149,9 +156,13 @@ function AuthenticatedScoring() {
       innings: innings.inningsNumber,
       over: overs,
       ball: ballThisOver + 1,
-      runs,
-      isWicket,
-      wicketType: isWicket ? runType.wicketType : undefined,
+      runs: runType.kind === "runs" ? runType.value : runType.kind === "wicket" ? 0 : 1,
+      isWicket: runType.kind === "wicket",
+      wicketType: runType.kind === "wicket" ? runType.wicketType : undefined,
+      isWide: runType.kind === "wide",
+      isNoBall: runType.kind === "noball",
+      isBye: runType.kind === "bye",
+      isLegBye: runType.kind === "legbye",
       batsmanId,
       bowlerId,
       handoverEpoch: hydrated.match.handoverEpoch,
@@ -196,7 +207,11 @@ function AuthenticatedScoring() {
         {[0, 1, 2].map((row) => (
           <View key={row} style={styles.row}>
             {[0, 1, 2].map((col) => {
+              // ENH-03-02: the server command ceiling is 7 (UI-8-vs-server-7
+              // resolved) - the ninth cell renders as a spacer, never a
+              // queueable 8-run delivery that the official record refuses.
               const value = row * 3 + col;
+              if (value > 7) return <View key={col} style={styles.gridButton} />;
               return (
                 <TouchableOpacity
                   key={col}
@@ -211,14 +226,16 @@ function AuthenticatedScoring() {
           </View>
         ))}
         <View style={styles.row}>
-          {(["wide", "noball", "bye"] as const).map((kind) => (
+          {(["wide", "noball", "bye", "legbye"] as const).map((kind) => (
             <TouchableOpacity
               key={kind}
               style={styles.gridButton}
               disabled={!batsmanId || !bowlerId}
               onPress={() => localRecord({ kind })}
             >
-              <Text style={styles.buttonText}>{kind === "wide" ? "WD" : kind === "noball" ? "NB" : "B"}</Text>
+              <Text style={styles.buttonText}>
+                {kind === "wide" ? "WD" : kind === "noball" ? "NB" : kind === "legbye" ? "LB" : "B"}
+              </Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity

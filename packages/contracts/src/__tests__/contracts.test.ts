@@ -21,6 +21,7 @@ import {
   isMatchPublished,
   isTournamentPublished,
   nextPageCursor,
+  queuedDeliveryToCommand,
   recordBallCommandSchema,
   toCursorPage,
 } from "../index"
@@ -123,6 +124,86 @@ describe("scoring command", () => {
     })
     expect(parsed.review?.reason).toContain("leg bye")
     expect(parsed.review?.previousEpoch).toBe(1)
+  })
+
+  it("is STRICT (ENH-03-02): the old offline-flush body with nested extras/wicket objects is REFUSED, never silently stripped", () => {
+    // Exactly the body `use-offline-sync.ts` used to POST: nested service-
+    // shaped objects the previous lenient schema dropped on the floor, so a
+    // queued wicket arrived as "not out" and a wide as one invented legal run.
+    const LEGACY_FLUSH_BODY = {
+      ...REAL_FIXTURE,
+      extras: { type: "wide", runs: 1 },
+      wicket: { type: "bowled", playerId: REAL_FIXTURE.batsmanId },
+    }
+    const result = recordBallCommandSchema.safeParse(LEGACY_FLUSH_BODY)
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.code === "unrecognized_keys")).toBe(true)
+    }
+  })
+})
+
+describe("queued delivery adapter (ENH-03-02)", () => {
+  const QUEUED_BALL = {
+    id: "m-lw3xyz-abc123",
+    matchId: "01a155d6-3723-7b9f-bcd6-673926ddeee0",
+    inningsId: "01a155d7-0000-7000-8000-000000000000",
+    over: 3,
+    ball: 4,
+    runs: 0,
+    batsmanId: "01980000-0000-7000-8000-000000000001",
+    bowlerId: "01980000-0000-7000-8000-000000000002",
+    isWicket: true,
+    wicketType: "bowled",
+    handoverEpoch: 2,
+    expectedRevision: 41,
+  }
+
+  it("maps an offline wicket to a command that KEEPS the dismissal (the intent the old flush lost)", () => {
+    const mapped = queuedDeliveryToCommand(QUEUED_BALL)
+    expect(mapped.ok).toBe(true)
+    if (mapped.ok) {
+      expect(mapped.command.isWicket).toBe(true)
+      expect(mapped.command.wicketType).toBe("bowled")
+      expect(mapped.command.runs).toBe(0)
+      expect(mapped.command.clientOpId).toBe("m-lw3xyz-abc123")
+      expect(mapped.command.overNumber).toBe(3)
+      expect(mapped.command.ballNumber).toBe(4)
+      expect(mapped.command.handoverEpoch).toBe(2)
+      expect(mapped.command.expectedRevision).toBe(41)
+    }
+  })
+
+  it("maps every extras kind to its flattened boolean, never to a bare runs value", () => {
+    for (const flag of ["isWide", "isNoBall", "isBye", "isLegBye"] as const) {
+      const mapped = queuedDeliveryToCommand({ ...QUEUED_BALL, isWicket: false, wicketType: null, runs: 1, [flag]: true })
+      expect(mapped.ok).toBe(true)
+      if (mapped.ok) {
+        expect(mapped.command[flag]).toBe(true)
+        expect(mapped.command.runs).toBe(1)
+      }
+    }
+  })
+
+  it("derives isFour/isSix from batter runs so web and native agree without a client flag", () => {
+    const four = queuedDeliveryToCommand({ ...QUEUED_BALL, isWicket: false, wicketType: null, runs: 4 })
+    const six = queuedDeliveryToCommand({ ...QUEUED_BALL, isWicket: false, wicketType: null, runs: 6 })
+    const single = queuedDeliveryToCommand({ ...QUEUED_BALL, isWicket: false, wicketType: null, runs: 1 })
+    expect(four.ok && four.command.isFour && !four.command.isSix).toBe(true)
+    expect(six.ok && six.command.isSix && !six.command.isFour).toBe(true)
+    expect(single.ok && !single.command.isFour && !single.command.isSix).toBe(true)
+  })
+
+  it("refuses unsyncable entries with a stated reason instead of looping forever", () => {
+    expect(queuedDeliveryToCommand({ ...QUEUED_BALL, inningsId: null })).toMatchObject({ ok: false, reason: "missing_innings_id" })
+    expect(queuedDeliveryToCommand({ ...QUEUED_BALL, bowlerId: null })).toMatchObject({ ok: false, reason: "missing_participants" })
+    expect(queuedDeliveryToCommand({ ...QUEUED_BALL, wicketType: null })).toMatchObject({ ok: false, reason: "wicket_requires_type" })
+  })
+
+  it("enforces the server's runs ceiling at the adapter, so a stale UI value of 8 can never jam the queue", () => {
+    const mapped = queuedDeliveryToCommand({ ...QUEUED_BALL, isWicket: false, wicketType: null, runs: 8 })
+    expect(mapped.ok).toBe(false)
+    if (!mapped.ok) expect(mapped.reason).toContain("invalid_command: runs")
   })
 })
 

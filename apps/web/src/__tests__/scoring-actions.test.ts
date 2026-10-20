@@ -147,7 +147,16 @@ describe("Scoring action explicit command bridge", () => {
 
   it.each(["record", "undo", "create", "complete"])("forwards only the session-resolved actor for %s", async (operation) => {
     if (operation === "record") {
-      await recordBall({ ...input(), actorId: "forged" } as RecordBallInput)
+      // ENH-03-02 strict boundary: a forged `actorId` is no longer stripped
+      // and silently forwarded-clean - the whole command is REFUSED before
+      // any authority resolution or proxy call, so no client-supplied
+      // identity can ride in on a delivery at all.
+      await expect(recordBall({ ...input(), actorId: "forged" } as RecordBallInput)).rejects.toThrow()
+      expect(mocks.proxy).not.toHaveBeenCalled()
+
+      // A VALID command still proves the actor is only ever the
+      // session-resolved one - never anything the client supplied.
+      await recordBall(input())
       expect(mocks.proxy.mock.calls[0][2]).toBe(ACTOR)
       expect(mocks.proxy.mock.calls[0][0]).not.toHaveProperty("actorId")
     } else if (operation === "undo") {
