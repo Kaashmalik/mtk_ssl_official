@@ -1,6 +1,7 @@
 import { eq, and, type SQL, type AnyColumn, count as countFn } from "drizzle-orm";
 import { db } from "../client";
 import { requireTenantContext } from "../tenant-context";
+import { assertWritableFields } from "./write-guards";
 
 /**
  * The Drizzle methods (.from(), .insert(), .update(), .delete()) require a
@@ -111,6 +112,7 @@ export abstract class TenantScopedRepository {
 
   /** Insert a row. The `tenantId` field is force-set from context. */
   async insert<T = unknown>(values: Record<string, unknown>): Promise<T[]> {
+    assertWritableFields(values);
     return db
       .insert(this.table)
       .values({
@@ -128,9 +130,12 @@ export abstract class TenantScopedRepository {
 
   /**
    * Update rows matching `id` within the current tenant.
+   * Identity keys (`tenantId`, `id`) are refused - a tenant-scoped update can
+   * never move a row across tenants or re-key it (ENH-01-04).
    * Returns the updated row (or null if not found / wrong tenant).
    */
   async updateById<T = unknown>(id: string, values: Record<string, unknown>): Promise<T | null> {
+    assertWritableFields(values);
     const rows = (await db
       .update(this.table)
       .set(values)
