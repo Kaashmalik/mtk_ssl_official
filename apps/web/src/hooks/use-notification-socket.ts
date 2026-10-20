@@ -43,7 +43,7 @@ export function useNotificationSocket({
     onNotificationRef.current = onNotification
   }, [onNotification])
 
-  const connect = useCallback((userId: string, internalUserId?: string) => {
+  const connect = useCallback(() => {
     const wsUrl = process.env.NEXT_PUBLIC_NOTIFICATION_WS_URL
 
     // Batch 174: never dial a guessed host. When the URL is unset on a
@@ -63,18 +63,14 @@ export function useNotificationSocket({
     const socket = io(wsUrl, {
       path: "/socket.io",
       transports: ["websocket", "polling"],
-      query: internalUserId ? { userId: internalUserId } : undefined,
+      // ENH-01-04: the notification gateway QUARANTINED client-declared room
+      // joining (an arbitrary userId/tenantId used to subscribe to private
+      // feeds). Until an authenticated room-derivation flow exists, the
+      // socket delivers nothing and the bell relies on its polling fallback;
+      // we deliberately send no identity.
       reconnectionAttempts: 5,
       reconnectionDelay: 2000,
       timeout: 5000,
-    })
-
-    socket.on("connect", () => {
-      // If we have the internal userId via query, the server already put us
-      // in the room. If we only have the Clerk ID we join after connect.
-      if (!internalUserId && userId) {
-        socket.emit("join", { userId })
-      }
     })
 
     socket.on("notification", (payload: NotificationPayload) => {
@@ -92,7 +88,7 @@ export function useNotificationSocket({
     if (!isLoaded || !user?.id) return
 
     // Only connect once per mount; disconnect on unmount.
-    const socket = connect(user.id)
+    const socket = connect()
     socketRef.current = socket
 
     return () => {

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { PlatformContact } from "@/components/support/platform-contact"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Badge } from "@mtk/ui/components/ui/badge"
@@ -502,10 +503,10 @@ export function BillingPageClient({ tenant, clerkUserId: _clerkUserId }: Billing
               ⏱ Your request will be reviewed within 24–48 hours. You&apos;ll get a confirmation on your billing page.
             </p>
             <p className="text-blue-700 text-xs">
-              Questions about payment? Message MTK on WhatsApp at{" "}
-              <a className="font-semibold underline" href="https://wa.me/923038111297" target="_blank" rel="noreferrer">03038111297</a>.
-              Send your league name and plan; SSL will activate paid features only after payment verification.
+              Questions about payment? Reach MTK on WhatsApp — send your league name and plan; SSL will activate paid
+              features only after payment verification.
             </p>
+            <PlatformContact context={{ topic: "billing" }} className="mt-2" />
           </div>
         </CardContent>
       </Card>

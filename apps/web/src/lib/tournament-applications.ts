@@ -68,11 +68,37 @@ const activeMembershipIn = async (
 }
 
 /** The submission surface: the tournament must still be able to gain teams. */
-function tournamentAcceptsApplications(tournament: { status: string }): { ok: true } | { ok: false; reason: string } {
+function tournamentAcceptsApplications(tournament: {
+  status: string
+  registrationOpen?: boolean
+  registrationStart?: Date | string | null
+  registrationEnd?: Date | string | null
+}): { ok: true } | { ok: false; reason: string } {
   if (tournament.status === "completed" || tournament.status === "cancelled") {
     return { ok: false, reason: "This tournament has ended - applications are closed" }
   }
+  // The flag and the window are the same gate the direct-registration path
+  // enforces (registration-management.ts): applications never outlive them.
+  if (tournament.registrationOpen !== true) {
+    return { ok: false, reason: "Registration is closed for this tournament" }
+  }
+  const now = new Date()
+  const start = toTime(tournament.registrationStart)
+  if (start !== null && start > now.getTime()) return { ok: false, reason: "Registration has not opened yet" }
+  const end = toTime(tournament.registrationEnd)
+  if (end !== null && end < now.getTime()) return { ok: false, reason: "The registration deadline has passed" }
   return { ok: true }
+}
+
+const toTime = (value: Date | string | null | undefined): number | null => {
+  if (!value) return null
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime()
+  return Number.isNaN(time) ? null : time
+}
+
+/** A tx.execute row from the FOR UPDATE reread (postgres-js rows arrays). */
+function isStatusRow(row: unknown): row is { status: string } {
+  return typeof (row as { status?: unknown } | undefined)?.status === "string"
 }
 
 export async function readTeamLiveApplication(tournamentId: string, teamId: string) {
@@ -102,7 +128,14 @@ export async function submitTournamentApplication(
 
   return db.transaction(async (tx) => {
     const [tournament] = await tx
-      .select({ id: tournaments.id, tenantId: tournaments.tenantId, status: tournaments.status })
+      .select({
+        id: tournaments.id,
+        tenantId: tournaments.tenantId,
+        status: tournaments.status,
+        registrationOpen: tournaments.registrationOpen,
+        registrationStart: tournaments.registrationStart,
+        registrationEnd: tournaments.registrationEnd,
+      })
       .from(tournaments)
       .where(eq(tournaments.id, tournamentId))
       .limit(1)
@@ -114,11 +147,14 @@ export async function submitTournamentApplication(
     // team's current manager, plus an ACTIVE league membership - both in
     // the application's OWN league.
     const [team] = await tx
-      .select({ id: teams.id, managerId: teams.managerId, isActive: teams.isActive })
+      .select({ id: teams.id, tenantId: teams.tenantId, managerId: teams.managerId, isActive: teams.isActive })
       .from(teams)
       .where(eq(teams.id, teamId))
       .limit(1)
     if (!team || !team.isActive) throw new Error("Team not found")
+    // Both resources in one league: a team pointer from another tenant never
+    // pairs with this tournament (both-resource tenant check).
+    if (team.tenantId !== tournament.tenantId) throw new Error("This team belongs to a different league")
     if (team.managerId !== account.id) throw new Error("Forbidden: only the team's manager can apply")
     await activeMembershipIn(tx, account.id, tournament.tenantId)
 
@@ -204,19 +240,25 @@ export async function withdrawTournamentApplication(
       throw new Error("Forbidden: only the team's manager can withdraw this application")
     }
 
-    await tx.execute(sql`SELECT ${tournamentApplications.id} FROM ${tournamentApplications}
+    // read committed: the row read above was NOT locked, so a concurrent
+    // decision could have committed between the snapshot and this lock. What
+    // the FOR UPDATE hands back is the committed truth - transitions consume
+    // this reread, never the snapshot, so terminal history cannot be
+    // overwritten (CHECK-backed by tournament_applications_resolution_check).
+    const [locked] = await tx.execute(sql`SELECT ${tournamentApplications.status} FROM ${tournamentApplications}
       WHERE ${tournamentApplications.id} = ${application.id} FOR UPDATE`)
-    if (!isLiveStatus(application.status)) {
+    const liveStatus = isStatusRow(locked) ? locked.status : application.status
+    if (!isLiveStatus(liveStatus)) {
       // Terminal: a withdrawal replay is a pure read.
       return { withdrawn: true, changed: false }
     }
-    const target = memberMove(application.status, "withdraw")
+    const target = memberMove(liveStatus, "withdraw")
     if (!target) throw new Error("Only a live application can be withdrawn")
     // The member resolved it: a leave time, NO decider (CHECK shape).
     await tx
       .update(tournamentApplications)
       .set({ status: target, decidedAt: new Date(), updatedAt: new Date() })
-      .where(eq(tournamentApplications.id, application.id))
+      .where(and(eq(tournamentApplications.id, application.id), eq(tournamentApplications.status, liveStatus)))
     await tx.insert(auditLogs).values({
       requestId: randomUUID(),
       tenantId: application.tenantId,
@@ -225,7 +267,7 @@ export async function withdrawTournamentApplication(
       method: "TOURNAMENT_APPLICATION_WITHDRAWN",
       path: "/dashboard/tournaments",
       statusCode: "200",
-      payload: { resourceId: application.id, teamId: application.teamId, from: application.status },
+      payload: { resourceId: application.id, teamId: application.teamId, from: liveStatus },
     })
     return { withdrawn: true, changed: true }
   }, { isolationLevel: "read committed" })
@@ -255,22 +297,28 @@ export async function decideTournamentApplication(
       .from(userTenantRoles)
       .where(and(eq(userTenantRoles.userId, account.id), eq(userTenantRoles.tenantId, application.tenantId)))
       .limit(1)
-    if (!member || member.status !== "active" || member.role !== "league_owner") {
+    // Effective membership (SCORE-09): a suspended or expired owner role no
+    // longer carries review authority - same rule as activeMembershipIn.
+    if (!member || !membershipGrantsAccess(member) || member.role !== "league_owner") {
       throw new Error("Forbidden: only the league owner can decide applications")
     }
 
-    await tx.execute(sql`SELECT ${tournamentApplications.id} FROM ${tournamentApplications}
+    // read committed: same locked reread as the withdrawal path - the
+    // snapshot above may be stale; a concurrent withdrawal/decision that
+    // committed before this lock wins and the replay is a pure read.
+    const [locked] = await tx.execute(sql`SELECT ${tournamentApplications.status} FROM ${tournamentApplications}
       WHERE ${tournamentApplications.id} = ${application.id} FOR UPDATE`)
-    if (!isLiveStatus(application.status)) {
+    const liveStatus = isStatusRow(locked) ? locked.status : application.status
+    if (!isLiveStatus(liveStatus)) {
       // Terminal: a decision replay is a pure read (history is not re-decided).
-      return { decided: true, status: application.status, changed: false }
+      return { decided: true, status: liveStatus, changed: false }
     }
-    const next = ownerMove(application.status, decision as OwnerDecision)
+    const next = ownerMove(liveStatus, decision as OwnerDecision)
     if (!next) throw new Error("Only a live application can be decided")
     await tx
       .update(tournamentApplications)
       .set({ status: next, decidedAt: new Date(), decidedBy: account.id, updatedAt: new Date() })
-      .where(eq(tournamentApplications.id, application.id))
+      .where(and(eq(tournamentApplications.id, application.id), eq(tournamentApplications.status, liveStatus)))
     await tx.insert(auditLogs).values({
       requestId: randomUUID(),
       tenantId: application.tenantId,
@@ -279,7 +327,7 @@ export async function decideTournamentApplication(
       method: `TOURNAMENT_APPLICATION_${decision.toUpperCase()}`,
       path: "/dashboard/tournaments",
       statusCode: "200",
-      payload: { resourceId: application.id, decision, from: application.status },
+      payload: { resourceId: application.id, decision, from: liveStatus },
     })
     return { decided: true, status: next, changed: true }
   }, { isolationLevel: "read committed" })

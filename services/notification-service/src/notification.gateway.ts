@@ -14,16 +14,16 @@ import { Server, Socket } from 'socket.io';
 /**
  * WebSocket gateway for real-time in-app notifications.
  *
- * Clients connect and JOIN a personal room keyed by `userId` (the application's
- * internal UUID, not the Clerk ID).  When `NotificationService.persistInApp()`
- * creates a new notification it calls `emitToUser()` on this gateway which
- * forwards the payload to every socket in that room.
+ * ENH-01-04 (QUARANTINE): rooms were previously joinable by ANY client-
+ * declared `userId`/`tenantId` (handshake query or join events), which let a
+ * socket listen to arbitrary private notification feeds. All client-driven
+ * room joining is removed - rooms are a server-side emit target only, until
+ * an authenticated room-derivation flow replaces joining. Connected sockets
+ * therefore receive nothing today; the web bell already degrades to polling.
  *
- * This is a read/broadcast-only gateway — mutations still go through the HTTP
- * controller.  Authentication is left intentionally lightweight (userId supplied
- * by the client) because the notifications are additive and low-value; a bad
- * actor can at most receive their own or someone else's bell count, not
- * manipulate data.  The real write controls are RBAC on the server actions.
+ * `persistInApp()` still calls `emitToUser()` / `emitToTenant()`; with no
+ * room members those emits fan out to nobody until the authenticated flow
+ * lands (P06 decision delivery).
  *
  * Port: shares the HTTP server at port 4008 (Socket.io path `/notifications`).
  * This avoids opening a second port, which the plan explicitly rejects.
@@ -54,13 +54,11 @@ export class NotificationGateway
   }
 
   handleConnection(client: Socket): void {
-    const userId = client.handshake.query['userId'];
-    if (typeof userId === 'string' && userId.trim()) {
-      // Join a personal room so emitToUser() can target this specific user
-      client.join(`user:${userId.trim()}`);
-      this.logger.debug(`Client connected: ${client.id} → room user:${userId.trim()}`);
-    } else {
-      this.logger.debug(`Client connected without userId: ${client.id}`);
+    // Quarantined (ENH-01-04): the handshake query is NEVER trusted for room
+    // placement. Identity must come from an authenticated derivation before
+    // any private room is joined.
+    if (client.handshake.query['userId']) {
+      this.logger.warn(`Client ${client.id} sent a client-declared userId; room joining is quarantined`);
     }
   }
 
@@ -69,23 +67,32 @@ export class NotificationGateway
   }
 
   /**
-   * Allow a connected client to (re-)join a user room after connection.
-   * Useful when the userId becomes available post-auth (e.g. Clerk's useUser hook).
+   * QUARANTINED (ENH-01-04): refuses the legacy client-declared join. Kept as
+   * an explicit handler so legacy clients get a no-op instead of an implicit
+   * crash, and so the contract is visible in tests.
    */
   @SubscribeMessage('join')
   handleJoin(
     @MessageBody() data: { userId: string },
     @ConnectedSocket() client: Socket,
   ): void {
-    if (typeof data?.userId === 'string' && data.userId.trim()) {
-      client.join(`user:${data.userId.trim()}`);
-      this.logger.debug(`Client ${client.id} joined room user:${data.userId.trim()}`);
-    }
+    this.logger.warn(`Client ${client.id} requested room join for "${data?.userId ?? ''}"; refused (quarantined)`);
+  }
+
+  /** QUARANTINED with the user join: tenant rooms need auth derivation first. */
+  @SubscribeMessage('joinTenant')
+  handleJoinTenant(
+    @MessageBody() data: { tenantId: string },
+    @ConnectedSocket() client: Socket,
+  ): void {
+    this.logger.warn(`Client ${client.id} requested tenant room "${data?.tenantId ?? ''}"; refused (quarantined)`);
   }
 
   /**
    * Emit a notification event to all sockets in the user's personal room.
-   * Called by `NotificationService.persistInApp()` after each successful insert.
+   * Called by `NotificationService.persistInApp()` after each successful
+   * insert. Server-side only: no client can place itself into this room
+   * while joining is quarantined (ENH-01-04).
    *
    * @param userId  The application-internal user UUID (not Clerk ID).
    * @param payload The notification data to broadcast.
@@ -106,8 +113,8 @@ export class NotificationGateway
   }
 
   /**
-   * Emit a tenant-wide notification to all connected sockets in a tenant room.
-   * Clients join tenant rooms via `joinTenant` event after authenticating.
+   * Emit a tenant-wide notification to the tenant room. Server-side only for
+   * the same quarantine reason; no client-driven tenant subscription exists.
    */
   emitToTenant(
     tenantId: string,
@@ -119,16 +126,5 @@ export class NotificationGateway
   ): void {
     if (!this.server) return;
     this.server.to(`tenant:${tenantId}`).emit('notification', payload);
-  }
-
-  /** Allow clients to subscribe to tenant-wide notifications. */
-  @SubscribeMessage('joinTenant')
-  handleJoinTenant(
-    @MessageBody() data: { tenantId: string },
-    @ConnectedSocket() client: Socket,
-  ): void {
-    if (typeof data?.tenantId === 'string' && data.tenantId.trim()) {
-      client.join(`tenant:${data.tenantId.trim()}`);
-    }
   }
 }

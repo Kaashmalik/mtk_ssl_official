@@ -16,7 +16,7 @@ export default async function LeagueApplicationPage() {
   const owned = await getMyOwnedTenant()
   if (owned) redirect("/dashboard")
 
-  const { application } = await getMyLeagueApplication()
+  const { application, replies } = await getMyLeagueApplication()
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -31,7 +31,7 @@ export default async function LeagueApplicationPage() {
         </div>
       </MotionWrapper>
       <MotionWrapper variant="fadeInUp" delay={0.1}>
-        <LeagueApplicationForm initialApplication={application} />
+        <LeagueApplicationForm initialApplication={application} initialReplies={replies} />
       </MotionWrapper>
     </div>
   )

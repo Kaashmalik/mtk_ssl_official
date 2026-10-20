@@ -12,6 +12,10 @@ export default defineConfig({
       { find: /^@mtk\/database$/, replacement: path.resolve(__dirname, "../../packages/database/src/index.ts") },
       { find: /^@mtk\/database\//, replacement: path.resolve(__dirname, "../../packages/database/src") + "/" },
       { find: /^@mtk\/ui\//, replacement: path.resolve(__dirname, "../../packages/ui/src") + "/" },
+      // Native modules from apps/mobile source exercised in tests: the
+      // storage engine behind the persisted offline store (offline-sync
+      // barrier suite) is a no-op in-memory implementation.
+      { find: /^@react-native-async-storage\/async-storage$/, replacement: path.resolve(__dirname, "./src/__tests__/stubs/async-storage.ts") },
     ],
   },
 })

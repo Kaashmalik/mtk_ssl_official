@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "next-themes";
 import { LanguageProvider } from "@/hooks/use-language";
 import { PWARegister } from "@/components/pwa-register";
+import { AuthCacheGuard } from "@/components/pwa/auth-cache-guard";
 import { createContext, useContext } from "react";
 
 /**
@@ -61,6 +62,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ClerkProvider publishableKey={publishableKey}>
       <ClerkReadyContext.Provider value={true}>
         {themed}
+        {/* Sign-out/account switch purge (ENH-01-02); inside ClerkProvider. */}
+        <AuthCacheGuard />
       </ClerkReadyContext.Provider>
     </ClerkProvider>
   );

@@ -11,14 +11,39 @@ import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@mtk/ui";
 
+/**
+ * ENH-02-03: the EXACT tenant API DTO — field-for-field what
+ * GET /api/tenants/[id] now returns (camelCase, JSON-safe). The old
+ * interface invented snake_case fields (`is_active`, `created_at`,
+ * `tenant_branding[0].logo_url`, a `users` array the API never sent), so the
+ * page read `undefined` for every one of them and rendered wrong states.
+ */
 interface Tenant {
-  id: string; name: string; slug: string; custom_domain: string;
-  plan: string; is_active: boolean; created_at: string;
-  tenant_branding: { logo_url: string; primary_color: string; secondary_color: string; app_name: string; hide_ssl_branding: boolean }[];
-  tournaments: { id: string; name: string; status: string }[];
-  teams: { id: string; name: string }[];
-  users: { id: string; email: string }[];
-  venues: { id: string; name: string }[];
+  id: string;
+  name: string;
+  slug: string;
+  customDomain: string | null;
+  plan: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  branding: {
+    logoUrl: string | null;
+    primaryColor: string | null;
+    secondaryColor: string | null;
+    appName: string | null;
+    hideSslBranding: boolean;
+  } | null;
+  members: Array<{
+    userId: string;
+    role: string;
+    status: string;
+    displayName: string | null;
+    email: string;
+  }>;
+  tournaments: Array<{ id: string; name: string; status: string }>;
+  teams: Array<{ id: string; name: string }>;
+  venues: Array<{ id: string; name: string }>;
 }
 
 const PLAN_VARIANT: Record<string, "secondary" | "default" | "destructive" | "outline"> = {
@@ -74,7 +99,7 @@ export function TenantDetail() {
             <p className="text-muted-foreground flex items-center gap-2 flex-wrap">
               {tenant.slug}
               <Badge variant={PLAN_VARIANT[tenant.plan] ?? "outline"} className="capitalize">{tenant.plan}</Badge>
-              {tenant.is_active
+              {tenant.isActive
                 ? <Badge className="bg-green-500">Active</Badge>
                 : <Badge variant="secondary">Inactive</Badge>}
             </p>
@@ -89,7 +114,7 @@ export function TenantDetail() {
         {[
           { icon: Trophy, color: "blue", count: tenant.tournaments?.length || 0, label: "Tournaments" },
           { icon: Users2, color: "green", count: tenant.teams?.length || 0, label: "Teams" },
-          { icon: Users, color: "purple", count: tenant.users?.length || 0, label: "Users" },
+          { icon: Users, color: "purple", count: tenant.members?.length || 0, label: "Members" },
           { icon: MapPin, color: "orange", count: tenant.venues?.length || 0, label: "Venues" },
         ].map(({ icon: Icon, color, count, label }) => (
           <Card key={label}>
@@ -109,6 +134,7 @@ export function TenantDetail() {
       <Tabs defaultValue="overview" className="space-y-4">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="tournaments">Tournaments</TabsTrigger>
           <TabsTrigger value="teams">Teams</TabsTrigger>
           <TabsTrigger value="branding">Branding</TabsTrigger>
@@ -121,13 +147,39 @@ export function TenantDetail() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-sm text-muted-foreground">Created</div>
-                  <div>{new Date(tenant.created_at).toLocaleDateString()}</div>
+                  <div>{new Date(tenant.createdAt).toLocaleDateString()}</div>
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground">Custom Domain</div>
-                  <div>{tenant.custom_domain || "-"}</div>
+                  <div>{tenant.customDomain || "-"}</div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="members">
+          <Card>
+            <CardHeader><CardTitle>Members (authoritative roles)</CardTitle></CardHeader>
+            <CardContent>
+              {!tenant.members?.length ? (
+                <div className="text-center py-8 text-muted-foreground">No members yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {tenant.members.map((member) => (
+                    <div key={member.userId} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50">
+                      <div>
+                        <div className="font-medium">{member.displayName || member.email}</div>
+                        <div className="text-sm text-muted-foreground">{member.email}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="capitalize">{member.role.replace(/_/g, " ")}</Badge>
+                        <Badge variant={member.status === "active" ? "secondary" : "destructive"} className="capitalize">{member.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -185,37 +237,27 @@ export function TenantDetail() {
           <Card>
             <CardHeader><CardTitle>White Label Configuration</CardTitle></CardHeader>
             <CardContent>
-              {tenant.tenant_branding?.[0] ? (
+              {tenant.branding ? (
                 <div className="space-y-4">
-                  {tenant.tenant_branding[0].logo_url && (
+                  {tenant.branding.logoUrl && (
                     <div>
                       <div className="text-sm text-muted-foreground mb-2">Logo</div>
-                      <img src={tenant.tenant_branding[0].logo_url} alt="Logo" className="w-32 h-32 object-contain rounded-lg border" />
+                      <img src={tenant.branding.logoUrl} alt="Logo" className="w-32 h-32 object-contain rounded-lg border" />
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="text-sm text-muted-foreground">Primary Color</div>
-                      <div className="w-20 h-8 rounded border mt-1" style={{ backgroundColor: tenant.tenant_branding[0].primary_color || "#000" }} />
+                      <div className="w-20 h-8 rounded border mt-1" style={{ backgroundColor: tenant.branding.primaryColor || "#000" }} />
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Secondary Color</div>
-                      <div className="w-20 h-8 rounded border mt-1" style={{ backgroundColor: tenant.tenant_branding[0].secondary_color || "#000" }} />
+                      <div className="w-20 h-8 rounded border mt-1" style={{ backgroundColor: tenant.branding.secondaryColor || "#fff" }} />
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">App Name</div>
-                    <div>{tenant.tenant_branding[0].app_name || tenant.name}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">Hide SSL Branding</div>
-                    <Badge variant={tenant.tenant_branding[0].hide_ssl_branding ? "default" : "secondary"}>
-                      {tenant.tenant_branding[0].hide_ssl_branding ? "Yes" : "No"}
-                    </Badge>
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">No custom branding configured.</div>
+                <div className="text-center py-8 text-muted-foreground">No branding configured.</div>
               )}
             </CardContent>
           </Card>

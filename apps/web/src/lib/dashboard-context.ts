@@ -18,13 +18,23 @@ export type DashboardContext = {
 }
 export type DashboardAccess =
   | { status: "ready"; context: DashboardContext }
-  | { status: "no-tenant" | "denied" | "unavailable" }
+  | {
+      status: "no-tenant" | "denied" | "unavailable"
+      /**
+       * ENH-02-01: `provisioning` = the Clerk session is verified but the
+       * webhook-created local row has not landed yet. This is deliberately
+       * NOT `denied`: the account was never judged, and a fresh sign-up must
+       * get truthful recovery instead of "you do not have active access".
+       */
+    }
+  | { status: "provisioning" }
 
 /** A host-selected tenant is not proof of membership. Authorize before any metrics. */
 export async function getDashboardContext(clerkId: string): Promise<DashboardAccess> {
   try {
     const actor = await db.query.users.findFirst({ where: eq(users.clerkId, clerkId) })
-    if (!actor || actor.isActive !== true) return { status: "denied" }
+    if (!actor) return { status: "provisioning" }
+    if (actor.isActive !== true) return { status: "denied" }
     const requestTenant = await getTenantFromRequest(true)
     // Same host-first selection as the shared resolver, but do not swallow errors
     // and silently switch workspaces during an outage.

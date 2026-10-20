@@ -312,3 +312,82 @@ export const rollbackTenantBranding = withAuth("settings:manage", async () => {
   revalidatePath("/dashboard")
   return { success: true, changed: true }
 })
+
+const joinLeagueAsFanSchema = z.object({
+  slug: z
+    .string()
+    .min(2, "League URL must be at least 2 characters")
+    .max(60, "League URL must be 60 characters or fewer")
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers, and hyphens only"),
+})
+
+/**
+ * ENH-02-03: the fan-only joining command.
+ *
+ * A follower asks to become a member with `role: "fan"` and NOTHING more —
+ * no operational rights (staff invites/scorer grants are separate, deliberate
+ * writes and are deliberately NOT reused here), no ownership change, no
+ * bounded-expiry delegation. The command is idempotent and truthful: an
+ * account that already has ANY membership row for the league keeps it
+ * untouched and the answer says so; a parallel request that lost the
+ * insert race is detected through the empty conflict-tolerant RETURNING and
+ * re-read from the table.
+ */
+export async function joinLeagueAsFan(input: z.infer<typeof joinLeagueAsFanSchema>) {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+
+  const { slug } = joinLeagueAsFanSchema.parse(input)
+
+  const [dbUser] = await db
+    .select({ id: users.id, isActive: users.isActive })
+    .from(users)
+    .where(eq(users.clerkId, userId))
+    .limit(1)
+  if (!dbUser || dbUser.isActive !== true) throw new Error("Your account is inactive")
+
+  const [league] = await db
+    .select({ id: tenants.id, slug: tenants.slug, isActive: tenants.isActive })
+    .from(tenants)
+    .where(eq(tenants.slug, slug))
+    .limit(1)
+  if (!league || league.isActive !== true) {
+    throw new Error("This league was not found or is not open for followers.")
+  }
+
+  const [existing] = await db
+    .select({ role: userTenantRoles.role, status: userTenantRoles.status })
+    .from(userTenantRoles)
+    .where(and(eq(userTenantRoles.userId, dbUser.id), eq(userTenantRoles.tenantId, league.id)))
+    .limit(1)
+  if (existing) return { joined: false as const, role: existing.role }
+
+  const [inserted] = await db
+    .insert(userTenantRoles)
+    .values({
+      userId: dbUser.id,
+      tenantId: league.id,
+      role: "fan",
+      status: "active",
+      // A follower membership is unbounded and self-requested by definition:
+      // there is no delegating owner and no expiry.
+      expiresAt: null,
+      delegatedByUserId: null,
+      isPrimary: false,
+    })
+    .onConflictDoNothing({ target: [userTenantRoles.userId, userTenantRoles.tenantId] })
+    .returning()
+
+  if (!inserted) {
+    // A parallel join won the race; surface the row that is actually there.
+    const [winner] = await db
+      .select({ role: userTenantRoles.role })
+      .from(userTenantRoles)
+      .where(and(eq(userTenantRoles.userId, dbUser.id), eq(userTenantRoles.tenantId, league.id)))
+      .limit(1)
+    return { joined: false as const, role: winner?.role ?? "fan" }
+  }
+
+  revalidatePath("/dashboard")
+  return { joined: true as const, role: inserted.role }
+}

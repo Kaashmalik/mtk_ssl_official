@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { syncFlushHead } from "../lib/sync-flush-head";
 
 export interface BallData {
   id: string;
@@ -79,8 +80,12 @@ export const useOfflineStore = create<OfflineStore>()(
           pendingBalls: state.pendingBalls.filter((ball) => !ball.synced),
         })),
       getPendingBalls: (matchId, accountId) => {
-        return get().pendingBalls.filter(
-          (ball) => inScope(ball, matchId, accountId) && !ball.conflicted
+        // ENH-01-04 (SCORE-14 conflict-head barrier): the queue is causal
+        // order, so a conflicted entry fences everything behind it until
+        // review resolves it. It is NOT skipped here - skipping let the next
+        // sync tick flush later deliveries on top of an unresolved conflict.
+        return syncFlushHead(
+          get().pendingBalls.filter((ball) => inScope(ball, matchId, accountId))
         );
       },
       getConflictedBalls: (matchId, accountId) => {

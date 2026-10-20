@@ -41,7 +41,7 @@ class InMemoryBucket {
     this.refillInterval = windowMs / limit;
   }
 
-  consume(): { remaining: number; reset: number } {
+  consume(): { allowed: boolean; remaining: number; reset: number } {
     const now = Date.now();
     const elapsed = now - this.lastRefilled;
     const refilled = Math.floor(elapsed / this.refillInterval);
@@ -54,6 +54,7 @@ class InMemoryBucket {
     if (this.tokens >= 1) {
       this.tokens -= 1;
       return {
+        allowed: true,
         remaining: this.tokens,
         reset: Math.ceil(
           this.lastRefilled + this.refillInterval * (this.limit - this.tokens)
@@ -61,7 +62,10 @@ class InMemoryBucket {
       };
     }
 
-    return { remaining: 0, reset: Math.ceil(this.lastRefilled + this.refillInterval) };
+    // ENH-01-04: an exhausted bucket REFUSES. The refusal must stay visible
+    // (allowed: false) - a bare remaining:0 was previously mapped to
+    // success:true, so the in-memory fallback never throttled anything.
+    return { allowed: false, remaining: 0, reset: Math.ceil(this.lastRefilled + this.refillInterval) };
   }
 }
 
@@ -79,9 +83,9 @@ function rateLimitMemory(
     memoryBuckets.set(bucketKey, bucket);
   }
 
-  const { remaining, reset } = bucket.consume();
+  const { allowed, remaining, reset } = bucket.consume();
   return {
-    success: remaining >= 0,
+    success: allowed,
     remaining,
     reset,
     limit,

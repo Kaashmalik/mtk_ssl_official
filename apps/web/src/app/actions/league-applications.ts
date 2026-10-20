@@ -8,13 +8,17 @@ import {
   users,
   tenants,
   leagueApplications,
+  leagueApplicationReplies,
   auditLogs,
   LEAGUE_APPLICATION_ACTIVE_STATES,
+  describeLeagueReplyRefusal,
+  leagueApplicationReplyTarget,
   leagueApplicationTransition,
+  normalizeLeagueReplyBody,
   type LeagueApplication,
   type LeagueApplicationState,
 } from "@mtk/database"
-import { and, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 
 /**
@@ -66,6 +70,19 @@ export interface LeagueApplicationView {
   reviewedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * ENH-02-02: one persisted reply in the applicant's thread under an
+ * information request. JSON-safe for the client; the server derives
+ * `authorSide` (never the client).
+ */
+export interface LeagueApplicationReplyView {
+  id: string
+  applicationId: string
+  authorSide: string
+  body: string
+  createdAt: string
 }
 
 const STALE = "This application changed in another window. Reload before continuing."
@@ -350,18 +367,24 @@ export async function withdrawLeagueApplication(input: { expectedVersion: number
 /**
  * The caller's latest application (any state) for the apply screen. Terminal
  * states are still returned so the applicant can read a rejection reason; the
- * page hides the form when a league is already owned.
+ * page hides the form when a league is already owned. ENH-02-02: the persisted
+ * reply thread of that application comes back with it, oldest first — the
+ * thread belongs to the application, so a fresh/none application carries no
+ * thread.
  */
-export async function getMyLeagueApplication(): Promise<{ application: LeagueApplicationView | null }> {
+export async function getMyLeagueApplication(): Promise<{
+  application: LeagueApplicationView | null
+  replies: LeagueApplicationReplyView[]
+}> {
   const { userId } = await auth()
-  if (!userId) return { application: null }
+  if (!userId) return { application: null, replies: [] }
 
   const [dbUser] = await db
     .select({ id: users.id, isActive: users.isActive })
     .from(users)
     .where(eq(users.clerkId, userId))
     .limit(1)
-  if (!dbUser || dbUser.isActive !== true) return { application: null }
+  if (!dbUser || dbUser.isActive !== true) return { application: null, replies: [] }
 
   const [application] = await db
     .select()
@@ -370,5 +393,98 @@ export async function getMyLeagueApplication(): Promise<{ application: LeagueApp
     .orderBy(desc(leagueApplications.createdAt))
     .limit(1)
 
-  return { application: application ? toView(application) : null }
+  if (!application) return { application: null, replies: [] }
+
+  const thread = await db
+    .select()
+    .from(leagueApplicationReplies)
+    .where(eq(leagueApplicationReplies.applicationId, application.id))
+    .orderBy(asc(leagueApplicationReplies.createdAt))
+    .limit(200)
+
+  return { application: toView(application), replies: thread.map(toReplyView) }
+}
+
+function toReplyView(reply: typeof leagueApplicationReplies.$inferSelect): LeagueApplicationReplyView {
+  return {
+    id: reply.id,
+    applicationId: reply.applicationId,
+    authorSide: reply.authorSide,
+    body: reply.body,
+    createdAt: reply.createdAt.toISOString(),
+  }
+}
+
+const replySchema = z.object({
+  applicationId: z.string().uuid(),
+  // Raw bound only; the real discipline (trim/length) is the shared policy's.
+  body: z.string().min(1).max(4000),
+})
+
+/**
+ * ENH-02-02: persist one applicant reply under an information request.
+ *
+ * The thread opens ONLY while the platform has explicitly requested
+ * information (`needs_information`) and only the application's owner can
+ * post — ownership and identity are ONE guard predicate locked under the
+ * applicant's row lock (the same serialization point as every applicant
+ * write). A reply is additive: it never moves the state machine, bumps the
+ * version, or clears the review reason. Decisions stay the reviewer's
+ * audited moves.
+ */
+export async function replyLeagueApplication(
+  input: z.infer<typeof replySchema>,
+): Promise<{ reply: LeagueApplicationReplyView }> {
+  const parsed = replySchema.safeParse(input)
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Invalid reply")
+
+  const normalized = normalizeLeagueReplyBody(parsed.data.body)
+  if ("refusal" in normalized) throw new Error(describeLeagueReplyRefusal(normalized.refusal))
+
+  const applicant = await resolveApplicant()
+
+  const inserted = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${eq(users.id, applicant.id)} FOR UPDATE`)
+
+    const [target] = await tx
+      .select()
+      .from(leagueApplications)
+      .where(and(
+        eq(leagueApplications.id, parsed.data.applicationId),
+        eq(leagueApplications.applicantId, applicant.id),
+      ))
+      .for("update")
+      .limit(1)
+    if (!target) throw new Error("You do not have an application matching that reference.")
+
+    const targetSurface = leagueApplicationReplyTarget(target.state)
+    if (targetSurface === "terminal") throw new Error(describeLeagueReplyRefusal("terminal"))
+    if (targetSurface !== "open") throw new Error(describeLeagueReplyRefusal("not_requested"))
+
+    const [reply] = await tx
+      .insert(leagueApplicationReplies)
+      .values({
+        applicationId: target.id,
+        authorId: applicant.id,
+        authorSide: "applicant",
+        body: normalized.body,
+      })
+      .returning()
+
+    await tx.insert(auditLogs).values({
+      requestId: randomUUID(),
+      tenantId: null,
+      actorId: applicant.id,
+      actorRole: applicant.role,
+      method: "LEAGUE_APPLICATION_REPLY",
+      path: "/dashboard/league/apply",
+      statusCode: "200",
+      payload: { applicationId: target.id, replyId: reply.id },
+    })
+
+    return reply
+  })
+
+  revalidatePath("/dashboard/league/apply")
+  return { reply: toReplyView(inserted) }
 }
