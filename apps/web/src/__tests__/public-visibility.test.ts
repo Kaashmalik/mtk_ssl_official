@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
+import { minorPublicDecision as policyMinorPublicDecision } from "@mtk/database/lib/minor-consent-policy"
 import { matches, tournaments, playerSeasonStats, matchInnings, teams, players, users, battingScorecards, bowlingScorecards, fieldingScorecards, matchPlayingXis, tournamentAwards } from "@mtk/database"
 import { AWARD_CATEGORY_LABELS, PUBLIC_AWARD_LIMIT } from "@mtk/database/lib/award-policy"
 import { PUBLIC_LEADERBOARD_FORMATS } from "@/lib/leaderboard-filters"
@@ -8,6 +9,7 @@ import {
   readPublishedMatchTeams, matchHasInnings, readPublicBattingLeaderboard,
   readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions,
   readPublishedTournamentAwards, readPublicWicketkeepingLeaderboard, PUBLIC_LEADERBOARD_LIMIT,
+  minorConsentPublicSql,
 } from "@/lib/public-visibility"
 
 const mocks = vi.hoisted(() => ({ select: vi.fn(), queries: [] as any[], state: {} as any }))
@@ -437,5 +439,45 @@ describe("Records by competition and published-competition options (PUB-03)", ()
     expect(record.table).toBe(tournaments)
     expect(record.params[0]).toBe(TENANT)
     expect(record.limit).toBe(100)
+  })
+})
+
+describe("minor-consent SQL twin (ENH-01-01)", () => {
+  const NOW = new Date("2026-10-20T12:00:00Z")
+  const dialectTwin = new PgDialect()
+  const normalized = (text: string) => text.replace(/\s+/g, " ").toLowerCase().trim()
+
+  it("renders exactly the fail-closed minorPublicDecision formula", () => {
+    const emitted = normalized(dialectTwin.sqlToQuery(minorConsentPublicSql).sql)
+    // The twin of minorPublicDecision must read: no recorded DOB is never a
+    // minor (visible); an adult (DOB <= today-18y, 18th birthday included)
+    // is visible; a proven minor is visible ONLY with consent already
+    // effective (consent <= now() - a future instant is not consent).
+    // (Expected text mirrors drizzle's rendering: quoted table, bare column.)
+    expect(emitted).toBe(
+      normalized(`(
+        "players".date_of_birth is null
+        or "players".date_of_birth <= (current_date - interval '18 years')
+        or ("players".guardian_consent_at is not null and "players".guardian_consent_at <= now())
+      )`),
+    )
+  })
+
+  it("keeps the SQL formula aligned with the pinned TS boundary matrix", () => {
+    // What the formula above MUST express, re-derived from the shared policy
+    // (packages/database/src/__tests__/minor-consent-policy.test.ts):
+    const decision = (dob: string, consent: string | null) =>
+      policyMinorPublicDecision(dob, consent, NOW).visible
+    // 18th birthday today: adult, visible WITHOUT consent (strict `>` would
+    // misread this row as a minor; `<=` is the adult side of the boundary).
+    expect(decision("2008-10-20", null)).toBe(true)
+    // One day younger: proven minor, withheld without consent...
+    expect(decision("2008-10-21", null)).toBe(false)
+    // ...published only by an already-effective consent...
+    expect(decision("2008-10-21", "2026-06-01T00:00:00Z")).toBe(true)
+    // ...never by a future consent instant.
+    expect(decision("2008-10-21", "2027-01-01T00:00:00Z")).toBe(false)
+    // Missing DOB: never guessed into a minor.
+    expect(policyMinorPublicDecision(null, null, NOW)).toEqual({ visible: true, basis: "not_provable" })
   })
 })
