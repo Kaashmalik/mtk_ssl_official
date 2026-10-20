@@ -2,10 +2,18 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from "next/server";
 import { verifySuperAdmin } from "@/lib/admin-auth";
-import { db, tenants, tenantBranding, tournaments, teams, venues } from "@mtk/database";
-import { eq } from "drizzle-orm";
+import { db, tenants, tenantBranding, tournaments, teams, venues, userTenantRoles, users } from "@mtk/database";
+import { asc, eq } from "drizzle-orm";
 
 // GET /api/tenants/[id] - Get tenant details
+//
+// ENH-02-03: the payload is now an EXACT DTO. It used to spread raw drizzle
+// rows (camelCase) under snake_case keys the detail page expected
+// (tenant_branding as an array, is_active, created_at, logo_url, ...), so the
+// console read undefined for every one of those fields. Every field below is
+// a deliberate, camelCase, JSON-safe projection, and the member roster rides
+// on the authoritative user_tenant_roles rows (ISO-06), not a retired
+// users.tenantIds array.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -28,32 +36,60 @@ export async function GET(
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
 
-    const brandingData = await db
-      .select()
+    const [branding] = await db
+      .select({
+        logoUrl: tenantBranding.logoUrl,
+        primaryColor: tenantBranding.primaryColor,
+        secondaryColor: tenantBranding.secondaryColor,
+        appName: tenantBranding.appName,
+        hideSslBranding: tenantBranding.hideSslBranding,
+      })
       .from(tenantBranding)
-      .where(eq(tenantBranding.tenantId, id));
+      .where(eq(tenantBranding.tenantId, id))
+      .limit(1);
+
+    const membersData = await db
+      .select({
+        userId: userTenantRoles.userId,
+        role: userTenantRoles.role,
+        status: userTenantRoles.status,
+        displayName: users.displayName,
+        email: users.email,
+      })
+      .from(userTenantRoles)
+      .innerJoin(users, eq(userTenantRoles.userId, users.id))
+      .where(eq(userTenantRoles.tenantId, id))
+      .orderBy(asc(userTenantRoles.createdAt));
 
     const tournamentsData = await db
-      .select()
+      .select({ id: tournaments.id, name: tournaments.name, status: tournaments.status })
       .from(tournaments)
       .where(eq(tournaments.tenantId, id));
 
     const teamsData = await db
-      .select()
+      .select({ id: teams.id, name: teams.name })
       .from(teams)
       .where(eq(teams.tenantId, id));
 
     const venuesData = await db
-      .select()
+      .select({ id: venues.id, name: venues.name })
       .from(venues)
       .where(eq(venues.tenantId, id));
 
     const tenantWithRelations = {
-      ...tenant,
-      tenant_branding: brandingData[0] || null,
-      tournaments: tournamentsData || [],
-      teams: teamsData || [],
-      venues: venuesData || [],
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      customDomain: tenant.customDomain ?? null,
+      plan: tenant.plan,
+      isActive: tenant.isActive === true,
+      createdAt: tenant.createdAt.toISOString(),
+      updatedAt: tenant.updatedAt.toISOString(),
+      branding: branding ?? null,
+      members: membersData,
+      tournaments: tournamentsData,
+      teams: teamsData,
+      venues: venuesData,
     };
 
     return NextResponse.json({ tenant: tenantWithRelations });
@@ -79,17 +115,31 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, slug, plan, is_active, custom_domain, branding } = body;
+    // ENH-02-03: canonical camelCase with a snake_case fallback for the
+    // legacy caller payload — one truth inside (isActive/customDomain).
+    const bodyFields = body as {
+      name?: string; slug?: string; plan?: string;
+      is_active?: boolean; isActive?: boolean;
+      custom_domain?: string | null; customDomain?: string | null;
+      branding?: Record<string, unknown>;
+    };
+    const { name, slug, branding } = bodyFields;
+    const is_active = bodyFields.is_active ?? bodyFields.isActive;
+    const custom_domain = bodyFields.custom_domain ?? bodyFields.customDomain;
+    // tenants.plan is an enum column: an out-of-vocabulary value must not be
+    // written (and previously a missing field silently nulled siblings).
+    const VALID_PLANS = ["free", "starter", "pro", "enterprise"] as const;
+    const plan = VALID_PLANS.find((candidate) => candidate === bodyFields.plan);
 
     // Update tenant
     const [tenant] = await db
       .update(tenants)
       .set({
-        name,
-        slug,
-        plan,
-        isActive: is_active,
-        customDomain: custom_domain,
+        ...(name !== undefined ? { name } : {}),
+        ...(slug !== undefined ? { slug } : {}),
+        ...(plan !== undefined ? { plan } : {}),
+        ...(is_active !== undefined ? { isActive: is_active } : {}),
+        ...(custom_domain !== undefined ? { customDomain: custom_domain } : {}),
         updatedAt: new Date(),
       })
       .where(eq(tenants.id, id))
