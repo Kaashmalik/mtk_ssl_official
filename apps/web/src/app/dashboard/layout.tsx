@@ -2,6 +2,7 @@ import React from "react"
 import { auth } from "@clerk/nextjs/server"
 import { getDashboardContext, type DashboardContext } from "@/lib/dashboard-context"
 import { reconcileSessionUser } from "@/lib/account-provisioning"
+import { PlatformContact } from "@/components/support/platform-contact"
 import { DashboardShell } from "./dashboard-shell"
 import { TrialBannerServer } from "@/components/billing/trial-banner-server"
 import type { UserRole } from "@/lib/rbac"
@@ -27,6 +28,7 @@ export default async function DashboardLayout({
     let userRole: UserRole = "fan"
     let context: DashboardContext | null = null
     let blocked = "Sign in to access a league workspace."
+    let recovering = false
     try {
         const { userId } = await auth()
         if (userId) {
@@ -47,6 +49,7 @@ export default async function DashboardLayout({
                 // Authenticated active accounts still need the league setup page.
                 blocked = ""
             } else if (access.status === "provisioning") {
+                recovering = true
                 blocked = "Your account is still being set up. Wait a few seconds and reload this page — if this notice does not clear, contact platform support."
             } else {
                 blocked = access.status === "unavailable" ? "Workspace access is temporarily unavailable. Please retry."
@@ -59,7 +62,16 @@ export default async function DashboardLayout({
 
     return (
         <DashboardShell userRole={userRole} banner={context && hasPermission(context.role, "settings:manage") ? <TrialBannerServer context={context} /> : null}>
-            {blocked ? <p role="alert">{blocked}</p> : children}
+            {blocked ? (
+                <div className="space-y-3">
+                    <p role="alert">{blocked}</p>
+                    {recovering && (
+                        // ENH-02-04: a recovery path that can actually reach a
+                        // human — the privacy-conscious WhatsApp contact.
+                        <PlatformContact context={{ topic: "recovery" }} className="max-w-md" />
+                    )}
+                </div>
+            ) : children}
         </DashboardShell>
     )
 }

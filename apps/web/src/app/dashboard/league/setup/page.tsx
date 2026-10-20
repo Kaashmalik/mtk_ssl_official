@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import Link from "next/link"
 import React from "react"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
+import { PlatformContact } from "@/components/support/platform-contact"
 import { LeagueSetupForm } from "@/components/league-setup-form"
 import { getMyOwnedTenant } from "@/app/actions/tenants"
 
@@ -30,6 +31,10 @@ export default async function LeagueSetupPage() {
       </MotionWrapper>
       <MotionWrapper variant="fadeInUp" delay={0.1}>
         <LeagueSetupForm />
+      </MotionWrapper>
+      <MotionWrapper variant="fadeInUp" delay={0.12}>
+        {/* ENH-02-04: creation help is one honest tap away; nothing auto-sends. */}
+        <PlatformContact context={{ topic: "setup" }} />
       </MotionWrapper>
       <MotionWrapper variant="fadeInUp" delay={0.15}>
         <p className="text-center text-sm text-muted-foreground">

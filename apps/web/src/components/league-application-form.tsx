@@ -19,6 +19,8 @@ import {
   type LeagueApplicationView,
 } from "@/app/actions/league-applications"
 import { ClipboardCheck, FileText, MessagesSquare, RefreshCw, ShieldCheck } from "lucide-react"
+import { PlatformContact } from "@/components/support/platform-contact"
+import type { PlatformSupportTopic } from "@/lib/platform-support"
 
 const PLAN_OPTIONS = [
   { value: "free", label: "Free" },
@@ -369,6 +371,19 @@ export function LeagueApplicationForm({
             {isPending ? "Refreshing..." : "Refresh status"}
           </Button>
         </div>
+      )}
+
+      {application && (
+        <PlatformContact
+          context={{
+            topic: (state === "submitted" || state === "approved" ? "status" : "apply") as PlatformSupportTopic,
+            leagueName: application.proposedName,
+            leagueSlug: application.proposedSlug,
+            plan: application.desiredPlan,
+            applicationReference: application.id,
+            statusLabel: STATE_LABELS[application.state],
+          }}
+        />
       )}
 
       {state === "approved" && (

@@ -93,7 +93,10 @@ vi.mock("@mtk/ui/components/ui/textarea", () => ({
 vi.mock("next/link", () => ({ default: ({ children, href }: { children?: ReactNode; href: string }) => <a href={href}>{children}</a> }))
 vi.mock("lucide-react", () => ({
   ClipboardCheck: () => null,
+  Copy: () => null,
+  ExternalLink: () => null,
   FileText: () => null,
+  MessageCircle: () => null,
   MessagesSquare: () => null,
   RefreshCw: () => null,
   ShieldCheck: () => null,
@@ -219,6 +222,12 @@ describe("applicant console state (ENH-02-02)", () => {
 
     expect(mocks.inputs).toHaveLength(0)
     expect(html).not.toContain("Save draft")
-    expect(mocks.buttons.map((entry) => entry.label)).toEqual(["Withdraw application", "Refresh status"])
+    // ENH-02-04: the support contact travels with the status surface.
+    expect(html).toContain("+92 303 8111297")
+    expect(html).toContain("https://wa.me/923038111297")
+    expect(mocks.buttons.map((entry) => entry.label)).toEqual(
+      expect.arrayContaining(["Withdraw application", "Refresh status", "Show message preview", "Copy number"]),
+    )
+    expect(mocks.buttons.map((entry) => entry.label)).not.toContain("Start a new application")
   })
 })

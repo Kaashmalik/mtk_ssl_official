@@ -1,7 +1,10 @@
-import React from "react"
+import React, { type ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import DashboardLayout from "@/app/dashboard/layout"
 import { TrialBannerServer } from "@/components/billing/trial-banner-server"
+// Element-tree probe: the layout embeds this exact component identity next to
+// the recovery notice; inspection never renders it, so no hook mocks needed.
+import { PlatformContact as DashboardLayoutContactProbe } from "@/components/support/platform-contact"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), subscription: vi.fn(), reconcile: vi.fn() }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
@@ -25,7 +28,10 @@ describe("Active-tenant dashboard shell and billing notice", () => {
     const privateChild = <p>Private league records</p>
     const shell = await DashboardLayout({ children: privateChild })
     expect(shell.props.children).not.toBe(privateChild)
-    expect(shell.props.children.props.role).toBe("alert")
+    const alert = React.Children.toArray(shell.props.children.props.children).find(
+      (child: any) => child?.props?.role === "alert",
+    )
+    expect(alert).toBeTruthy()
   })
   it("keeps the authenticated no-league onboarding child available", async () => {
     mocks.context.mockResolvedValue({ status: "no-tenant" })
@@ -37,9 +43,24 @@ describe("Active-tenant dashboard shell and billing notice", () => {
     mocks.context.mockResolvedValue({ status: "provisioning" })
     const shell = await DashboardLayout({ children: <p>Setup</p> })
     const notice = JSON.stringify(shell.props.children)
-    expect(shell.props.children.props.role).toBe("alert")
     expect(notice).not.toContain("Contact the organizer")
     expect(notice).not.toContain("Setup") // children withheld while unprovisioned
+  })
+
+  it("attaches the privacy-conscious support contact to the recovery notice (ENH-02-04)", async () => {
+    mocks.context.mockResolvedValue({ status: "provisioning" })
+    const shell = await DashboardLayout({ children: <p>Setup</p> })
+    const found: React.ReactElement[] = []
+    const walk = (node: unknown): void => {
+      if (!React.isValidElement(node)) return
+      const element = node as React.ReactElement<{ children?: ReactNode }>
+      found.push(element)
+      React.Children.forEach(element.props?.children, walk)
+    }
+    walk(shell.props.children as never)
+    const contact = found.find((element) => element.type === DashboardLayoutContactProbe)
+    expect(contact, "the support contact should ride with the recovery notice").toBeTruthy()
+    expect((contact!.props as { context: { topic: string } }).context).toEqual({ topic: "recovery" })
   })
 
   it("recovers a delayed webhook exactly once: reconcile, then re-resolve before giving up (ENH-02-01)", async () => {
