@@ -69,7 +69,7 @@ export type Permission =
 /**
  * Permission matrix — defines which roles have which permissions
  */
-const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   super_admin: [
     "tournament:create", "tournament:read", "tournament:update", "tournament:delete", "tournament:manage_registrations",
     "team:create", "team:read", "team:update", "team:delete", "team:manage_roster",
