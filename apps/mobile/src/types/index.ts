@@ -1,11 +1,13 @@
+import type { MatchStatus } from "@mtk/contracts";
+
 export interface Match {
   id: string;
   tenantId?: string;
   tournamentId?: string;
-  team1Id?: string;
-  team2Id?: string;
   teamAId?: string;
   teamBId?: string;
+  team1Id?: string;
+  team2Id?: string;
   team1Name?: string;
   team2Name?: string;
   team1Score?: number;
@@ -14,7 +16,12 @@ export interface Match {
   team2Wickets?: number;
   team1Overs?: number;
   team2Overs?: number;
-  status: "scheduled" | "toss" | "live" | "innings_break" | "completed" | "abandoned" | "cancelled" | "no_result";
+  /**
+   * ENH-03-03: the complete database vocabulary from @mtk/contracts (10
+   * values) - the hand-written union here previously missed
+   * `forfeited`/`postponed`.
+   */
+  status: MatchStatus;
   scheduledDate?: string;
   scheduled_date?: string;
   scheduledAt?: string;

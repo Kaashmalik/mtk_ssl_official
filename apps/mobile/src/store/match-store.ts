@@ -2,7 +2,82 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
+import { appApiUrl, currentSessionToken } from "@/lib/app-api";
+import {
+  MOBILE_BFF_MAX_PAGE_SIZE,
+  MOBILE_BFF_ROUTES,
+  type MemberMatch,
+  type MobileBffListResponse,
+} from "@mtk/contracts";
 import type { Match } from "@/types";
+
+/**
+ * ENH-03-03: THE native matches read goes through the authenticated web BFF
+ * (`/api/mobile/matches`, Clerk bearer) - never direct database queries.
+ * The server resolves the league from the session, returns the contracts
+ * `MemberMatch` projection (complete 10-value status vocabulary) and cursor
+ * pagination (a 60-fixture league pages; nothing truncates at a hard 50).
+ *
+ * `fetchMatches`/`fetchAllMatches`/`fetchMatch` resolve their own session
+ * token, so screens keep their plain call signatures. A signed-out session
+ * gets an explicit error instead of anonymous raw-row reads: without a
+ * league there is nothing member-scoped to show.
+ */
+
+/** The one wire → screen adapter (screen shape stays stable across refactors). */
+function memberMatchToMatch(m: MemberMatch): Match {
+  return {
+    id: m.id,
+    tournamentId: m.tournamentId ?? undefined,
+    teamAId: m.teamAId,
+    teamBId: m.teamBId,
+    team1Id: m.teamAId,
+    team2Id: m.teamBId,
+    team1Name: m.teamAName,
+    team2Name: m.teamBName,
+    status: m.status,
+    // Screens historically read both casings; one wire date feeds all three.
+    scheduledDate: m.scheduledDate ?? undefined,
+    scheduled_date: m.scheduledDate ?? undefined,
+    scheduledAt: m.scheduledDate ?? undefined,
+    tossWinner: m.tossWinnerId ?? undefined,
+    tossDecision: m.tossDecision ?? undefined,
+    winnerId: m.winnerId ?? undefined,
+    result: m.result ?? undefined,
+    liveStreamUrl: m.liveStreamUrl,
+    streamSource: m.streamSource,
+    streamStatus: m.streamStatus,
+  };
+}
+
+function bucket(matches: Match[]) {
+  return {
+    liveMatches: matches.filter((m) => m.status === "live"),
+    upcomingMatches: matches.filter((m) => m.status === "scheduled"),
+    completedMatches: matches.filter((m) => m.status === "completed"),
+  };
+}
+
+type BffError = { error?: string; detail?: string };
+
+async function fetchMatchPage(
+  cursor: string | null,
+  limit: number,
+  token: string,
+): Promise<MobileBffListResponse<MemberMatch>> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const res = await fetch(`${appApiUrl()}${MOBILE_BFF_ROUTES.matches}?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error("Session expired - sign in again to load matches");
+  if (res.status === 403) throw new Error("No active league for this account");
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as BffError;
+    throw new Error(body.detail || body.error || `Matches request failed (HTTP ${res.status})`);
+  }
+  return (await res.json()) as MobileBffListResponse<MemberMatch>;
+}
 
 interface MatchStore {
   matches: Match[];
@@ -12,7 +87,15 @@ interface MatchStore {
   currentMatch: Match | null;
   loading: boolean;
   error: string | null;
-  fetchMatches: (tenantId?: string) => Promise<void>;
+  /** Opaque continuation cursor for the paged list (null = exhausted). */
+  nextCursor: string | null;
+  hasMore: boolean;
+  /** One page (up to the BFF's 50 ceiling) - home/matches tabs. */
+  fetchMatches: () => Promise<void>;
+  /** Pages through the WHOLE league list - standings must never be partial. */
+  fetchAllMatches: () => Promise<void>;
+  /** Continues the paged list (matches tab "load more"). */
+  fetchNextMatches: () => Promise<void>;
   fetchMatch: (matchId: string) => Promise<Match | null>;
   setCurrentMatch: (match: Match | null) => void;
   subscribeToMatch: (matchId: string) => () => void;
@@ -28,35 +111,92 @@ export const useMatchStore = create<MatchStore>()(
       currentMatch: null,
       loading: false,
       error: null,
+      nextCursor: null,
+      hasMore: false,
 
-      fetchMatches: async (tenantId?: string) => {
+      fetchMatches: async () => {
         set({ loading: true, error: null });
         try {
-          let query = supabase
-            .from("matches")
-            .select("*")
-            .order("scheduled_date", { ascending: false })
-            .limit(50);
-
-          if (tenantId) {
-            query = query.eq("tenant_id", tenantId);
+          const token = await currentSessionToken();
+          if (!token) {
+            set({ error: "Sign in to load your league's matches", loading: false });
+            return;
           }
-
-          const { data, error } = await query;
-
-          if (error) throw error;
-
-          const matches = (data || []) as Match[];
-          const live = matches.filter((m) => m.status === "live");
-          const upcoming = matches.filter((m) => m.status === "scheduled");
-          const completed = matches.filter((m) => m.status === "completed");
-
+          const page = await fetchMatchPage(null, MOBILE_BFF_MAX_PAGE_SIZE, token);
+          const matches = page.items.map(memberMatchToMatch);
           set({
             matches,
-            liveMatches: live,
-            upcomingMatches: upcoming,
-            completedMatches: completed,
+            ...bucket(matches),
+            nextCursor: page.nextCursor,
+            hasMore: page.nextCursor !== null,
             loading: false,
+          });
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+        }
+      },
+
+      fetchAllMatches: async () => {
+        set({ loading: true, error: null });
+        try {
+          const token = await currentSessionToken();
+          if (!token) {
+            set({ error: "Sign in to load your league's matches", loading: false });
+            return;
+          }
+          // Standings computed from a truncated list are WRONG standings -
+          // page to exhaustion (safety-capped; even a 500-match league is
+          // 10 pages and the cursor contract, not a counter, ends the loop).
+          const acc: Match[] = [];
+          const seen = new Set<string>();
+          let cursor: string | null = null;
+          for (let page_ = 0; page_ < 20; page_++) {
+            const page = await fetchMatchPage(cursor, MOBILE_BFF_MAX_PAGE_SIZE, token);
+            for (const item of page.items) {
+              if (!seen.has(item.id)) {
+                seen.add(item.id);
+                acc.push(memberMatchToMatch(item));
+              }
+            }
+            cursor = page.nextCursor;
+            if (!cursor) break;
+          }
+          if (cursor) {
+            // The safety cap tripped before the cursor contract ended the
+            // list - surface it rather than shipping silent partial standings.
+            set({ error: "League too large to load standings - contact support", loading: false });
+            return;
+          }
+          set({ matches: acc, ...bucket(acc), nextCursor: null, hasMore: false, loading: false });
+        } catch (error: any) {
+          set({ error: error.message, loading: false });
+        }
+      },
+
+      fetchNextMatches: async () => {
+        const { nextCursor } = _get();
+        if (!nextCursor) return;
+        set({ loading: true, error: null });
+        try {
+          const token = await currentSessionToken();
+          if (!token) {
+            set({ error: "Sign in to load your league's matches", loading: false });
+            return;
+          }
+          const page = await fetchMatchPage(nextCursor, MOBILE_BFF_MAX_PAGE_SIZE, token);
+          set((state) => {
+            const known = new Set(state.matches.map((m) => m.id));
+            const merged = [...state.matches];
+            for (const item of page.items) {
+              if (!known.has(item.id)) merged.push(memberMatchToMatch(item));
+            }
+            return {
+              matches: merged,
+              ...bucket(merged),
+              nextCursor: page.nextCursor,
+              hasMore: page.nextCursor !== null,
+              loading: false,
+            };
           });
         } catch (error: any) {
           set({ error: error.message, loading: false });
@@ -66,15 +206,23 @@ export const useMatchStore = create<MatchStore>()(
       fetchMatch: async (matchId: string) => {
         set({ loading: true, error: null });
         try {
-          const { data, error } = await supabase
-            .from("matches")
-            .select("*")
-            .eq("id", matchId)
-            .single();
-
-          if (error) throw error;
-
-          const match = data as Match;
+          const token = await currentSessionToken();
+          if (!token) {
+            set({ error: "Sign in to load your league's matches", loading: false });
+            return null;
+          }
+          const res = await fetch(
+            `${appApiUrl()}${MOBILE_BFF_ROUTES.matches}?matchId=${encodeURIComponent(matchId)}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (res.status === 401) throw new Error("Session expired - sign in again to load matches");
+          if (res.status === 403) throw new Error("No active league for this account");
+          if (!res.ok) {
+            const body = (await res.json().catch(() => ({}))) as BffError;
+            throw new Error(body.detail || body.error || `Match request failed (HTTP ${res.status})`);
+          }
+          const page = (await res.json()) as MobileBffListResponse<MemberMatch>;
+          const match = page.items.length > 0 ? memberMatchToMatch(page.items[0]) : null;
           set({ currentMatch: match, loading: false });
           return match;
         } catch (error: any) {
@@ -86,6 +234,10 @@ export const useMatchStore = create<MatchStore>()(
       setCurrentMatch: (match) => set({ currentMatch: match }),
 
       subscribeToMatch: (matchId: string) => {
+        // Realtime remains the database channel for push-style updates; its
+        // raw payload carries only the snake_case row, so only fields that
+        // exist verbatim (id, status) are applied to the store buckets. The
+        // canonical projection still arrives through fetchMatch on focus.
         const channel = supabase
           .channel(`match:${matchId}`)
           .on(
@@ -97,23 +249,21 @@ export const useMatchStore = create<MatchStore>()(
               filter: `id=eq.${matchId}`,
             },
             (payload) => {
-              const updatedMatch = payload.new as Match;
+              const raw = payload.new as { id?: string; status?: Match["status"] };
+              if (!raw.status) return;
+              const status = raw.status;
               set((state) => {
+                // Same-field patch: id and status come from the channel,
+                // everything else waits for the next canonical fetch.
                 const updatedMatches = state.matches.map((m) =>
-                  m.id === matchId ? updatedMatch : m
+                  m.id === matchId ? { ...m, status } : m
                 );
-                const live = updatedMatches.filter((m) => m.status === "live");
-                const upcoming = updatedMatches.filter((m) => m.status === "scheduled");
-                const completed = updatedMatches.filter((m) => m.status === "completed");
-
                 return {
                   matches: updatedMatches,
-                  liveMatches: live,
-                  upcomingMatches: upcoming,
-                  completedMatches: completed,
+                  ...bucket(updatedMatches),
                   currentMatch:
                     state.currentMatch?.id === matchId
-                      ? updatedMatch
+                      ? { ...state.currentMatch, status }
                       : state.currentMatch,
                 };
               });

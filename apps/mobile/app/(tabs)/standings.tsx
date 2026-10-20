@@ -78,20 +78,23 @@ const formatRR = (runs: number, overs: number) => {
 };
 
 export default function StandingsScreen() {
-  const { matches, fetchMatches, loading } = useMatchStore();
+  // ENH-03-03: standings computed from a paged partial list are WRONG
+  // standings - this screen consumes the exhaustive fetchAllMatches() read,
+  // which pages the BFF to the cursor contract's end.
+  const { matches, fetchAllMatches, loading } = useMatchStore();
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      await fetchMatches();
+      await fetchAllMatches();
     } catch (e: any) {
       setError(e.message || "Failed to fetch standings");
     } finally {
       setRefreshing(false);
     }
-  }, [fetchMatches]);
+  }, [fetchAllMatches]);
 
   useEffect(() => {
     loadData();

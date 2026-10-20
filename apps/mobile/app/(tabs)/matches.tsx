@@ -13,7 +13,7 @@ export default function MatchesScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("live");
-  const { liveMatches, upcomingMatches, completedMatches, fetchMatches, loading } =
+  const { liveMatches, upcomingMatches, completedMatches, fetchMatches, fetchNextMatches, hasMore, loading } =
     useMatchStore();
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +116,16 @@ export default function MatchesScreen() {
           <Ionicons name="calendar-outline" size={64} color="#d1d5db" />
           <Text style={styles.emptyText}>No matches found</Text>
         </View>
+      }
+      ListFooterComponent={
+        hasMore ? (
+          <TouchableOpacity
+            style={{ padding: 14, alignItems: "center", backgroundColor: "#ffffff", borderRadius: 12, marginHorizontal: 16, marginBottom: 12, borderWidth: 1, borderColor: "#e5e7eb" }}
+            onPress={() => { void fetchNextMatches(); }}
+          >
+            <Text style={{ color: "#16a34a", fontWeight: "600" }}>Load more matches</Text>
+          </TouchableOpacity>
+        ) : null
       }
       renderItem={({ item: match }) => (
         <TouchableOpacity

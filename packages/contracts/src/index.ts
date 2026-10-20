@@ -14,6 +14,7 @@ export const CONTRACTS_VERSION = "0.1.0" as const
 export * from "./status"
 export * from "./scoring"
 export * from "./public-reads"
+export * from "./mobile-bff"
 export * from "./pagination"
 export * from "./errors"
 export * from "./capabilities"
