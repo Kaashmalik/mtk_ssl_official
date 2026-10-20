@@ -53,8 +53,16 @@ describe("Authorized active workspace context", () => {
     expect(await getDashboardContext("clerk")).toEqual({ status: "no-tenant" })
     expect(mocks.membership).not.toHaveBeenCalled()
   })
-  it.each([undefined, { ...actor, isActive: false }])("rejects unprovisioned/inactive accounts %s", async (user) => {
-    mocks.user.mockResolvedValue(user)
+  it("returns provisioning while a verified session waits on its local row (delayed webhook, ENH-02-01)", async () => {
+    // Clerk session exists but the webhook-created users row has not landed
+    // yet. This is NOT a denial: the account was never judged, so the state
+    // must be distinguishable from suspended/forbidden accounts.
+    mocks.user.mockResolvedValue(undefined)
+    expect(await getDashboardContext("clerk")).toEqual({ status: "provisioning" })
+    expect(mocks.membership).not.toHaveBeenCalled()
+  })
+  it("denies an explicitly deactivated (suspended) account", async () => {
+    mocks.user.mockResolvedValue({ ...actor, isActive: false })
     expect(await getDashboardContext("clerk")).toEqual({ status: "denied" })
     expect(mocks.membership).not.toHaveBeenCalled()
   })

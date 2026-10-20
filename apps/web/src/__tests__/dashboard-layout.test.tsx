@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import DashboardLayout from "@/app/dashboard/layout"
 import { TrialBannerServer } from "@/components/billing/trial-banner-server"
 
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), subscription: vi.fn() }))
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), subscription: vi.fn(), reconcile: vi.fn() }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("@/lib/dashboard-context", () => ({ getDashboardContext: mocks.context }))
+vi.mock("@/lib/account-provisioning", () => ({ reconcileSessionUser: mocks.reconcile }))
 vi.mock("@/app/dashboard/dashboard-shell", () => ({ DashboardShell: () => null }))
 vi.mock("@/lib/subscription-status", () => ({ getSubscriptionStatus: mocks.subscription }))
 vi.mock("@/components/billing/trial-banner", () => ({ TrialBanner: () => null }))
@@ -14,11 +15,12 @@ beforeEach(() => {
   vi.resetAllMocks()
   mocks.auth.mockResolvedValue({ userId: "clerk" })
   mocks.context.mockResolvedValue({ status: "ready", context })
+  mocks.reconcile.mockResolvedValue(true)
   mocks.subscription.mockResolvedValue({ status: "trialing", daysRemaining: 4, plan: "pro" })
 })
 
 describe("Active-tenant dashboard shell and billing notice", () => {
-  it.each(["denied", "unavailable"])("does not render private children on %s (pages still need their own authorization)", async status => {
+  it.each(["denied", "unavailable", "provisioning"])("does not render private children on %s (pages still need their own authorization)", async status => {
     mocks.context.mockResolvedValue({ status })
     const privateChild = <p>Private league records</p>
     const shell = await DashboardLayout({ children: privateChild })
@@ -29,6 +31,35 @@ describe("Active-tenant dashboard shell and billing notice", () => {
     mocks.context.mockResolvedValue({ status: "no-tenant" })
     const setup = <p>Setup</p>
     expect((await DashboardLayout({ children: setup })).props.children).toBe(setup)
+  })
+
+  it("shows a truthful provisioning notice on a delayed webhook — not the access-denied lie (ENH-02-01)", async () => {
+    mocks.context.mockResolvedValue({ status: "provisioning" })
+    const shell = await DashboardLayout({ children: <p>Setup</p> })
+    const notice = JSON.stringify(shell.props.children)
+    expect(shell.props.children.props.role).toBe("alert")
+    expect(notice).not.toContain("Contact the organizer")
+    expect(notice).not.toContain("Setup") // children withheld while unprovisioned
+  })
+
+  it("recovers a delayed webhook exactly once: reconcile, then re-resolve before giving up (ENH-02-01)", async () => {
+    mocks.context
+      .mockResolvedValueOnce({ status: "provisioning" })
+      .mockResolvedValueOnce({ status: "no-tenant" })
+    const setup = <p>Setup</p>
+    const shell = await DashboardLayout({ children: setup })
+    expect(mocks.reconcile).toHaveBeenCalledTimes(1)
+    expect(mocks.context).toHaveBeenCalledTimes(2)
+    expect(shell.props.children).toBe(setup)
+  })
+
+  it("stays on the truthful provisioning notice when reconciliation cannot recover (ENH-02-01)", async () => {
+    mocks.context.mockResolvedValue({ status: "provisioning" })
+    mocks.reconcile.mockResolvedValue(false)
+    const shell = await DashboardLayout({ children: <p>Setup</p> })
+    const notice = JSON.stringify(shell.props.children)
+    expect(notice).not.toContain("Setup")
+    expect(mocks.context).toHaveBeenCalledTimes(1)
   })
   it("uses the authorized context for navigation and billing", async () => {
     const shell = await DashboardLayout({ children: <p>Page</p> })
@@ -42,7 +73,7 @@ describe("Active-tenant dashboard shell and billing notice", () => {
     expect(shell.props.userRole).toBe(role)
     expect(shell.props.banner).toBeNull()
   })
-  it.each(["no-tenant", "denied", "unavailable"])("does not elevate global roles or show billing on %s", async (status) => {
+  it.each(["no-tenant", "denied", "unavailable", "provisioning"])("does not elevate global roles or show billing on %s", async (status) => {
     mocks.context.mockResolvedValue({ status })
     const shell = await DashboardLayout({ children: null })
     expect(shell.props.userRole).toBe("fan")

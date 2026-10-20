@@ -6,12 +6,13 @@ import { DashboardOverview, DashboardAssignments, DashboardMatches, DashboardTas
 import { DashboardSetup } from "@/components/dashboard/dashboard-view"
 import type { DashboardContext } from "@/lib/dashboard-context"
 
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), stats: vi.fn(), matches: vi.fn(), attention: vi.fn() }))
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), stats: vi.fn(), matches: vi.fn(), attention: vi.fn(), myApp: vi.fn() }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: (href: string) => { throw new Error(`redirect:${href}`) } }))
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }))
 vi.mock("next/link", () => ({ default: ({ children, ...props }: any) => <a {...props}>{children}</a> }))
 vi.mock("@/lib/dashboard-context", () => ({ getDashboardContext: mocks.context }))
+vi.mock("@/app/actions/league-applications", () => ({ getMyLeagueApplication: mocks.myApp }))
 vi.mock("@/lib/dashboard-data", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/dashboard-data")>(),
   getDashboardStats: mocks.stats, getDashboardMatches: mocks.matches, getDashboardAttention: mocks.attention,
@@ -39,9 +40,26 @@ describe("Dashboard route gating and section integration", () => {
     expect(mocks.context).not.toHaveBeenCalled()
     expect(mocks.stats).not.toHaveBeenCalled()
   })
-  it("redirects a genuinely missing tenant to setup", async () => {
+  it("lands a no-tenant account on the truthful explore-or-organize hub (ENH-02-01, no membership granted)", async () => {
     mocks.context.mockResolvedValue({ status: "no-tenant" })
-    await expect(DashboardPage()).rejects.toThrow("redirect:/dashboard/league/setup")
+    mocks.myApp.mockResolvedValue({ application: null })
+    const html = render(await DashboardPage())
+    expect(html).toContain("Create your league")    // organizer path
+    expect(html).toContain("apply")                 // reviewed path
+    expect(html).toContain("eligible matches")      // fan path
+    expect(mocks.stats).not.toHaveBeenCalled()      // no workspace widgets without a workspace
+  })
+  it("sends a returning applicant with a live journey to their application status (ENH-02-01)", async () => {
+    mocks.context.mockResolvedValue({ status: "no-tenant" })
+    mocks.myApp.mockResolvedValue({ application: { id: "app1", state: "needs_information", reviewerNote: null } })
+    await expect(DashboardPage()).rejects.toThrow("redirect:/dashboard/league/apply")
+  })
+  it("still offers both paths (plus the previous decision) after a terminal application (ENH-02-01)", async () => {
+    mocks.context.mockResolvedValue({ status: "no-tenant" })
+    mocks.myApp.mockResolvedValue({ application: { id: "app1", state: "rejected", reviewerNote: "not enough clubs" } })
+    const html = render(await DashboardPage())
+    expect(html).toContain("previous application")
+    expect(html).toContain("Create your league")
   })
   it.each(["denied", "unavailable"])("does not request business widgets for %s access", async (status) => {
     mocks.context.mockResolvedValue({ status })
