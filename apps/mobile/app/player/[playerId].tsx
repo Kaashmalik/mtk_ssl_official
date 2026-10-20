@@ -2,7 +2,8 @@ import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { bffEnvelope } from "@/lib/bff-client";
+import { MOBILE_BFF_ROUTES, type MemberPlayer } from "@mtk/contracts";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
@@ -51,36 +52,36 @@ export default function PlayerScreen() {
       setErrorMessage(null);
       
       if (isOnline) {
-        // Fetch player data
-        const { data: playerData, error: playerError } = await supabase
-          .from("players")
-          .select("*, teams(name)")
-          .eq("id", playerId)
-          .single();
+        // ENH-03-03: one BFF read returns the player projection with the
+        // DB-owned per-tournament aggregates embedded - the client only
+        // sums them for the career card (exact decimals wire as strings;
+        // the DB is the only place averages are computed).
+        const page = await bffEnvelope<MemberPlayer>(MOBILE_BFF_ROUTES.players, { playerId });
+        const wire = page.items[0];
 
-        if (playerError) throw playerError;
+        const p = wire
+          ? {
+              id: wire.id,
+              name: wire.name,
+              teamId: wire.teamId ?? undefined,
+              teamName: wire.teamName ?? undefined,
+              jerseyNumber: wire.jerseyNumber ?? undefined,
+              role: wire.role ?? undefined,
+              battingStyle: wire.battingStyle ?? undefined,
+              bowlingStyle: wire.bowlingStyle ?? undefined,
+            }
+          : null;
 
-        const p = {
-          id: playerData.id,
-          name: playerData.name,
-          teamId: playerData.team_id,
-          teamName: playerData.teams?.name,
-          jerseyNumber: playerData.jersey_number,
-          role: playerData.role,
-          battingStyle: playerData.batting_style,
-          bowlingStyle: playerData.bowling_style,
-        };
+        if (!p) {
+          setPlayer(null);
+          await AsyncStorage.removeItem(`cached_player_${playerId}`);
+          await AsyncStorage.removeItem(`cached_player_stats_${playerId}`);
+          return;
+        }
         setPlayer(p);
         await AsyncStorage.setItem(`cached_player_${playerId}`, JSON.stringify(p));
 
-        // Fetch player stats
-        const { data: statsData, error: statsError } = await supabase
-          .from("player_season_stats")
-          .select("*")
-          .eq("player_id", playerId);
-
-        if (statsError) throw statsError;
-
+        const rows = wire.seasonStats ?? [];
         let matches = 0;
         let runs = 0;
         let wickets = 0;
@@ -90,17 +91,15 @@ export default function PlayerScreen() {
         let runsConceded = 0;
         let ballsBowled = 0;
 
-        if (statsData && statsData.length > 0) {
-          statsData.forEach((row: any) => {
-            matches += row.matches_played || 0;
-            runs += row.runs_scored || 0;
-            wickets += row.wickets_taken || 0;
-            ballsFaced += row.balls_faced || 0;
-            inningsBatted += row.innings_batted || 0;
-            notOuts += row.not_outs || 0;
-            runsConceded += row.runs_conceded || 0;
-            ballsBowled += row.balls_bowled || 0;
-          });
+        for (const row of rows) {
+          matches += row.matchesPlayed || 0;
+          runs += row.runsScored || 0;
+          wickets += row.wicketsTaken || 0;
+          ballsFaced += row.ballsFaced || 0;
+          inningsBatted += row.inningsBatted || 0;
+          notOuts += row.notOuts || 0;
+          runsConceded += row.runsConceded || 0;
+          ballsBowled += row.ballsBowled || 0;
         }
 
         // Calculate averages

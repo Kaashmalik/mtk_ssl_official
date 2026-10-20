@@ -1,7 +1,8 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
+import { bffEnvelope, bffListAll } from "@/lib/bff-client";
+import { MOBILE_BFF_ROUTES, type MemberMatch, type MemberPlayer, type MemberTeam } from "@mtk/contracts";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
@@ -60,80 +61,43 @@ export default function TeamDetailScreen() {
       setError(null);
       
       if (isOnline) {
-        // 1. Fetch Team Details
-        const { data: teamData, error: teamErr } = await supabase
-          .from("teams")
-          .select("id, name, short_name, logo_url")
-          .eq("id", teamId)
-          .single();
-
-        if (teamErr) throw teamErr;
+        // ENH-03-03: all three reads go through the authenticated BFF. The
+        // old path selected columns that do not exist (team1_score, venue) -
+        // this screen's fixtures tab has been erroring in production; the
+        // member projections fix it AND carry real team names.
+        const [teamPage, roster, fixtures] = await Promise.all([
+          bffEnvelope<MemberTeam>(MOBILE_BFF_ROUTES.teams, { teamId }),
+          bffListAll<MemberPlayer>(MOBILE_BFF_ROUTES.players, { teamId }),
+          bffListAll<MemberMatch>(MOBILE_BFF_ROUTES.matches, { teamId, limit: "50" }, { pageCap: 10 }),
+        ]);
+        const t = teamPage.items[0];
+        if (!t) throw new Error("Team not found");
         const fetchedTeam = {
-          id: teamData.id,
-          name: teamData.name,
-          shortName: teamData.short_name,
-          logoUrl: teamData.logo_url,
+          id: t.id,
+          name: t.name,
+          shortName: t.shortName,
+          logoUrl: t.logoUrl,
         };
         setTeam(fetchedTeam);
 
-        // 2. Fetch Players (Roster)
-        const { data: playersData, error: playersErr } = await supabase
-          .from("players")
-          .select("id, name, role, jersey_number")
-          .eq("team_id", teamId)
-          .order("name", { ascending: true });
-
-        if (playersErr) throw playersErr;
-        const fetchedPlayers = (playersData || []).map((p) => ({
+        const fetchedPlayers = roster.map((p) => ({
           id: p.id,
           name: p.name,
           role: p.role,
-          jerseyNumber: p.jersey_number,
+          jerseyNumber: p.jerseyNumber,
         }));
         setPlayers(fetchedPlayers);
 
-        // 3. Fetch Matches
-        const { data: matchesData, error: matchesErr } = await supabase
-          .from("matches")
-          .select(`
-            id,
-            team1_id,
-            team2_id,
-            team_a_id,
-            team_b_id,
-            status,
-            winner_id,
-            scheduled_date,
-            scheduled_at,
-            venue,
-            team1_score,
-            team2_score,
-            team1_wickets,
-            team2_wickets,
-            team1_overs,
-            team2_overs
-          `)
-          .or(`team1_id.eq.${teamId},team2_id.eq.${teamId},team_a_id.eq.${teamId},team_b_id.eq.${teamId}`);
-
-        if (matchesErr) throw matchesErr;
-
-        const fetchedMatches = (matchesData || []).map((m: any) => ({
+        const fetchedMatches = fixtures.map((m) => ({
           id: m.id,
-          team1Id: m.team1_id || m.team_a_id,
-          team2Id: m.team2_id || m.team_b_id,
-          team1Name: m.team1?.name || "Team A",
-          team2Name: m.team2?.name || "Team B",
-          team1Score: m.team1_score,
-          team2Score: m.team2_score,
-          team1Wickets: m.team1_wickets,
-          team2Wickets: m.team2_wickets,
-          team1Overs: m.team1_overs,
-          team2Overs: m.team2_overs,
-          status: m.status,
-          scheduledDate: m.scheduled_date || m.scheduled_at,
-          scheduledAt: m.scheduled_at || m.scheduled_date,
-          venue: m.venue,
-          winnerId: m.winner_id,
+          team1Id: m.teamAId,
+          team2Id: m.teamBId,
+          team1Name: m.teamAName,
+          team2Name: m.teamBName,
+          status: m.status as string,
+          scheduledDate: m.scheduledDate ?? undefined,
+          scheduledAt: m.scheduledDate ?? undefined,
+          winnerId: m.winnerId,
         }));
         setMatches(fetchedMatches);
 

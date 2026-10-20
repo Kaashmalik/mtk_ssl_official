@@ -2,7 +2,8 @@ import { View, Text, TouchableOpacity, StyleSheet, FlatList, RefreshControl } fr
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "@/lib/supabase";
+import { bffListAll } from "@/lib/bff-client";
+import { MOBILE_BFF_ROUTES, type MemberPlayer } from "@mtk/contracts";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
 import { useOfflineStore } from "@/store/offline-store";
@@ -27,18 +28,14 @@ export default function PlayersScreen() {
     try {
       setError(null);
       if (isOnline) {
-        const { data, error: fetchError } = await supabase
-          .from("players")
-          .select("id, name, role, teams(name)")
-          .order("name", { ascending: true });
-
-        if (fetchError) throw fetchError;
-
-        const mapped = (data || []).map((item: any) => ({
-          id: item.id,
-          name: item.name,
-          role: item.role,
-          teamName: item.teams?.name,
+        // ENH-03-03: the league's players through the authenticated BFF -
+        // league-scoped (the anonymous read joined teams across ALL leagues).
+        const rows = await bffListAll<MemberPlayer>(MOBILE_BFF_ROUTES.players);
+        const mapped = rows.map((p) => ({
+          id: p.id,
+          name: p.name,
+          role: p.role,
+          teamName: p.teamName,
         }));
 
         setPlayers(mapped);

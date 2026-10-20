@@ -115,7 +115,7 @@ beforeEach(() => {
 describe("mobile BFF match list query parsing", () => {
   it("defaults to the documented page size and no status filter", () => {
     const parsed = parseMemberMatchListQuery({})
-    expect(parsed).toMatchObject({ ok: true, query: { cursor: null, limit: 25, status: null } })
+    expect(parsed).toMatchObject({ ok: true, query: { cursor: null, limit: 25, status: null, teamId: null } })
   })
 
   it("caps the page at the documented ceiling and refuses non-integers", () => {
@@ -151,7 +151,7 @@ describe("mobile BFF match page reader", () => {
     const page = await readMemberMatchPage({
       userId: USER,
       tenantId: TENANT,
-      query: { cursor: null, limit: 2, status: null },
+      query: { cursor: null, limit: 2, status: null, teamId: null },
     })
     expect(page.items).toHaveLength(2)
     const postponed = page.items[0]
@@ -172,7 +172,7 @@ describe("mobile BFF match page reader", () => {
     const page = await readMemberMatchPage({
       userId: USER,
       tenantId: TENANT,
-      query: { cursor: null, limit: 2, status: null },
+      query: { cursor: null, limit: 2, status: null, teamId: null },
     })
     expect(page.items).toHaveLength(2)
     expect(page.nextCursor).not.toBeNull()
@@ -194,7 +194,7 @@ describe("mobile BFF match page reader", () => {
     await readMemberMatchPage({
       userId: USER,
       tenantId: TENANT,
-      query: { cursor, limit: 25, status: "forfeited" },
+      query: { cursor, limit: 25, status: "forfeited", teamId: null },
     })
     // Parameterized SQL renders placeholders - the concrete values live in
     // `params`, so the assertion inspects those, never the SQL text.

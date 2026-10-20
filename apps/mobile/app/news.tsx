@@ -1,7 +1,8 @@
 import { View, Text, StyleSheet, FlatList, RefreshControl } from "react-native";
 import { useEffect, useState, useCallback } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "@/lib/supabase";
+import { bffListAll } from "@/lib/bff-client";
+import { MOBILE_BFF_ROUTES, type AnnouncementItem } from "@mtk/contracts";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
 
@@ -21,14 +22,15 @@ export default function NewsScreen() {
   const fetchNews = useCallback(async () => {
     try {
       setError(null);
-      const { data, error: fetchError } = await supabase
-        .from("announcements")
-        .select("id, title, summary:message, publishedAt:created_at")
-        .order("created_at", { ascending: false })
-        .limit(20);
-
-      if (fetchError) throw fetchError;
-      setNews((data || []) as NewsItem[]);
+      // ENH-03-03: platform announcements via the PUBLIC BFF route (works
+      // signed-out; a session token, when present, personalizes the
+      // audience). The 20-row hard cap becomes cursor pagination.
+      const rows = await bffListAll<AnnouncementItem>(
+        MOBILE_BFF_ROUTES.announcements,
+        { limit: "25" },
+        { requireToken: false, pageCap: 5 },
+      );
+      setNews(rows.map((a) => ({ id: a.id, title: a.title, summary: a.summary, publishedAt: a.publishedAt })));
     } catch (e: any) {
       setError(e.message || "Failed to fetch news");
       setNews([]);

@@ -2,7 +2,8 @@ import { View, Text, TouchableOpacity, StyleSheet, FlatList, RefreshControl } fr
 import { useEffect, useState, useCallback } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { supabase } from "@/lib/supabase";
+import { bffListAll } from "@/lib/bff-client";
+import { MOBILE_BFF_ROUTES, type MemberTeam } from "@mtk/contracts";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
 import { useOfflineStore } from "@/store/offline-store";
@@ -27,13 +28,16 @@ export default function TeamsScreen() {
     try {
       setError(null);
       if (isOnline) {
-        const { data, error: fetchError } = await supabase
-          .from("teams")
-          .select("id, name, shortName:short_name, logoUrl:logo_url")
-          .order("name", { ascending: true });
-
-        if (fetchError) throw fetchError;
-        const mapped = (data || []) as Team[];
+        // ENH-03-03: the league's teams through the authenticated BFF -
+        // cursor-paginated to exhaustion (no 50-row cap) and scoped to the
+        // session's league (the old anonymous read leaked every league).
+        const rows = await bffListAll<MemberTeam>(MOBILE_BFF_ROUTES.teams);
+        const mapped = rows.map((t) => ({
+          id: t.id,
+          name: t.name,
+          shortName: t.shortName,
+          logoUrl: t.logoUrl,
+        }));
         setTeams(mapped);
         await AsyncStorage.setItem("cached_teams", JSON.stringify(mapped));
       } else {

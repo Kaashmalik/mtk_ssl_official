@@ -46,6 +46,7 @@ export async function GET(request: Request) {
     cursor: url.searchParams.get("cursor"),
     limit: url.searchParams.get("limit"),
     status: url.searchParams.get("status"),
+    teamId: url.searchParams.get("teamId"),
   })
   if (!parsed.ok) {
     return NextResponse.json({ error: "invalid_query", detail: parsed.error }, { status: 400 })

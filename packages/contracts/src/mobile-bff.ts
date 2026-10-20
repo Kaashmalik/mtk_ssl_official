@@ -26,7 +26,14 @@
  *    exist as strings - screens import the map instead of inlining URLs,
  *    so renaming a route is a compile error away from every caller.
  */
-import type { PublicMatch } from "./public-reads"
+import type {
+  AnnouncementPriority,
+  AnnouncementType,
+  BattingStyle,
+  BowlingStyle,
+  PlayerRole,
+} from "./status"
+import type { PublicMatch, PublicTeam } from "./public-reads"
 
 /** Monotonic convention version for the mobile BFF surface. */
 export const MOBILE_BFF_VERSION = 1 as const
@@ -35,6 +42,12 @@ export const MOBILE_BFF_VERSION = 1 as const
 export const MOBILE_BFF_ROUTES = {
   /** GET the signed-in member's match list (cursor paginated). */
   matches: "/api/mobile/matches",
+  /** GET the league's teams (cursor paginated; teamId= for a single team). */
+  teams: "/api/mobile/teams",
+  /** GET the league's players (teamId= roster filter; playerId= single + season stats). */
+  players: "/api/mobile/players",
+  /** GET platform announcements (PUBLIC - works signed-out, audience-gated). */
+  announcements: "/api/mobile/announcements",
   /** POST one recorded delivery (SCORE-08/09 intake). */
   scoringBall: "/api/mobile/scoring/ball",
   /** GET the scoring session hydration for a match. */
@@ -68,6 +81,77 @@ export const MOBILE_BFF_MAX_PAGE_SIZE = 50 as const
 export const MOBILE_BFF_DEFAULT_PAGE_SIZE = 25 as const
 
 /**
+ * The member team projection = the public team disclosure (PUB-06), which is
+ * already the exact shape the native teams surface consumes.
+ */
+export type MemberTeam = PublicTeam
+
+/** Plain-view player projection for the native rosters and directories. */
+export type MemberPlayer = {
+  id: string
+  name: string
+  teamId: string | null
+  teamName: string | null
+  jerseyNumber: number | null
+  role: PlayerRole | null
+  battingStyle: BattingStyle | null
+  bowlingStyle: BowlingStyle | null
+  /** Embedded on the single read (`?playerId=`); absent on list pages. */
+  seasonStats?: MemberPlayerSeasonStats[]
+}
+
+/**
+ * Per-tournament season aggregate, numbers as the database stores them:
+ * integer counts verbatim, decimals as exact 2dp/1dp strings so no client
+ * re-derives (or re-rounds) them differently.
+ */
+export type MemberPlayerSeasonStats = {
+  tournamentId: string
+  matchesPlayed: number
+  runsScored: number
+  ballsFaced: number
+  inningsBatted: number
+  notOuts: number
+  fours: number
+  sixes: number
+  highestScore: number
+  isHighestScoreNotOut: boolean
+  fifties: number
+  hundreds: number
+  ducks: number
+  battingAverage: string | null
+  strikeRate: string | null
+  wicketsTaken: number
+  oversBowled: string | null
+  ballsBowled: number
+  runsConceded: number
+  inningsBowled: number
+  maidens: number
+  bowlingAverage: string | null
+  economyRate: string | null
+  bowlingStrikeRate: string | null
+  bestBowlingWickets: number
+  bestBowlingRuns: number
+  fourWicketHauls: number
+  fiveWicketHauls: number
+  catches: number
+  runOuts: number
+  stumpings: number
+}
+
+/** Platform announcement on the native wire (summary = the message body). */
+export type AnnouncementItem = {
+  id: string
+  title: string
+  summary: string
+  publishedAt: string
+  type: AnnouncementType
+  priority: AnnouncementPriority
+  actionUrl: string | null
+  actionText: string | null
+}
+
+/**
  * The keyset tuple encoded INSIDE the cursor envelope's `after` string:
  * `<createdAt ISO>~<match id>`. The list orders by `(createdAt DESC, id DESC)`,
  * so the tuple is the opaque keyset marker - clients must treat it as opaque.
@@ -84,4 +168,18 @@ export function decodeMemberMatchKeyset(after: string): { createdAtIso: string; 
   const matchId = after.slice(sep + 1)
   if (!Number.isNaN(Date.parse(createdAtIso))) return { createdAtIso, matchId }
   return undefined
+}
+
+/** Name-keyed directory keyset marker: `<name>~<id>` (names may contain `~`; id is last). */
+export function encodeNameKeyset(name: string, id: string): string {
+  return `${name}~${id}`
+}
+
+/** Inverse of `encodeNameKeyset`; undefined when the marker is malformed. */
+export function decodeNameKeyset(after: string): { name: string; id: string } | undefined {
+  const sep = after.lastIndexOf("~")
+  if (sep <= 0 || sep === after.length - 1) return undefined
+  const name = after.slice(0, sep)
+  const id = after.slice(sep + 1)
+  return name.length > 0 && id.length > 0 ? { name, id } : undefined
 }

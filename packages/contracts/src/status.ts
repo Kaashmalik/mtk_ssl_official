@@ -117,3 +117,42 @@ export const INNINGS_STATUS_VALUES = [
   "completed",
 ] as const
 export type InningsStatus = (typeof INNINGS_STATUS_VALUES)[number]
+
+export const PLAYER_ROLE_VALUES = [
+  "batsman",
+  "bowler",
+  "all_rounder",
+  "wicket_keeper",
+  "wicket_keeper_batsman",
+] as const
+export type PlayerRole = (typeof PLAYER_ROLE_VALUES)[number]
+
+export const BATTING_STYLE_VALUES = ["right", "left"] as const
+export type BattingStyle = (typeof BATTING_STYLE_VALUES)[number]
+
+export const BOWLING_STYLE_VALUES = [
+  "right_arm_fast",
+  "right_arm_medium",
+  "right_arm_spin",
+  "left_arm_fast",
+  "left_arm_medium",
+  "left_arm_spin",
+] as const
+export type BowlingStyle = (typeof BOWLING_STYLE_VALUES)[number]
+
+export const ANNOUNCEMENT_TYPE_VALUES = [
+  "info",
+  "warning",
+  "success",
+  "error",
+  "maintenance",
+] as const
+export type AnnouncementType = (typeof ANNOUNCEMENT_TYPE_VALUES)[number]
+
+export const ANNOUNCEMENT_PRIORITY_VALUES = [
+  "low",
+  "medium",
+  "high",
+  "urgent",
+] as const
+export type AnnouncementPriority = (typeof ANNOUNCEMENT_PRIORITY_VALUES)[number]
