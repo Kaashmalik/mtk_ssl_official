@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { motion, useReducedMotion } from "framer-motion"
 import { cn } from "../../lib/utils"
 
 interface ShotData {
@@ -29,6 +29,9 @@ const runColors: Record<number, string> = {
 }
 
 export function WagonWheel({ shots, className, size = 300, showLabels = true }: WagonWheelProps) {
+  // ENH-04-02: shots appear fully drawn for prefers-reduced-motion users.
+  const reduceMotion = useReducedMotion()
+  const shotInitial = reduceMotion ? false : undefined
   const center = size / 2
   const pitchRadius = size * 0.08
   const fieldRadius = size * 0.44
@@ -107,18 +110,18 @@ export function WagonWheel({ shots, className, size = 300, showLabels = true }: 
                 stroke={color}
                 strokeWidth={shot.runs >= 4 ? 2.5 : 1.5}
                 strokeLinecap="round"
-                initial={{ pathLength: 0, opacity: 0 }}
+                initial={shotInitial ?? { pathLength: 0, opacity: 0 }}
                 animate={{ pathLength: 1, opacity: 0.8 }}
-                transition={{ duration: 0.5, delay: i * 0.05 }}
+                transition={reduceMotion ? { duration: 0 } : { duration: 0.5, delay: i * 0.05 }}
               />
               <motion.circle
                 cx={x2}
                 cy={y2}
                 r={shot.runs >= 4 ? 4 : 3}
                 fill={color}
-                initial={{ scale: 0 }}
+                initial={shotInitial ?? { scale: 0 }}
                 animate={{ scale: 1 }}
-                transition={{ duration: 0.3, delay: i * 0.05 + 0.3 }}
+                transition={reduceMotion ? { duration: 0 } : { duration: 0.3, delay: i * 0.05 + 0.3 }}
               />
               {shot.runs >= 4 && (
                 <text x={x2} y={y2 - 7} textAnchor="middle" fontSize="8" fontWeight="bold" className="fill-foreground">

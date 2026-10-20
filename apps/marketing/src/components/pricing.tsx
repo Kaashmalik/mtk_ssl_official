@@ -56,7 +56,7 @@ const plans = [
     description: "For professional leagues",
     features: [
       "Unlimited teams & players",
-      "Live streaming integration",
+      "Live streaming integration (roadmap)",
       "Fantasy cricket (roadmap)",
       "White-label option",
       "Priority support",

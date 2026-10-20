@@ -18,7 +18,19 @@ export * from "./components/ui/sheet";
 export * from "./components/ui/dialog";
 export * from "./components/ui/dropdown-menu";
 
+// Shared operational surfaces
+export * from "./components/ui/data-table";
+export * from "./components/ui/stat-card";
+export * from "./components/ui/empty-state";
+export * from "./components/ui/command-palette";
+export * from "./components/theme-toggle";
+export * from "./components/ui/motion-wrapper";
+export * from "./components/ui/page-transition";
+export * from "./components/ui/avatar";
+export * from "./components/ui/tooltip";
+
 export * from "./components/cricket/worm-chart";
+export * from "./components/cricket/manhattan-chart";
 export * from "./components/cricket/tournament-bracket";
 
 // Utilities

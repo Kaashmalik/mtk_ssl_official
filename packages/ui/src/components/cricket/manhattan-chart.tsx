@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "../../lib/utils"
-import { motion } from "framer-motion"
+import { motion, useReducedMotion } from "framer-motion"
 
 interface OverData {
   overNumber: number
@@ -27,6 +27,9 @@ export function ManhattanChart({
 }: ManhattanChartProps) {
   const maxRuns = Math.max(...overs.map((o) => o.runs), ...comparisonOvers.map((o) => o.runs), 1)
   const barWidth = Math.max(12, Math.min(32, 600 / Math.max(overs.length, 1)))
+  // ENH-04-02: bars appear at full height immediately for reduced-motion users.
+  const reduceMotion = useReducedMotion()
+  const barInitial = reduceMotion ? false : undefined
 
   return (
     <div className={cn("w-full", className)}>
@@ -57,9 +60,9 @@ export function ManhattanChart({
                 {showComparison && compOver && (
                   <motion.div
                     className="w-full rounded-t bg-info/20 absolute bottom-0"
-                    initial={{ height: 0 }}
+                    initial={barInitial ?? { height: 0 }}
                     animate={{ height: `${compHeight}%` }}
-                    transition={{ duration: 0.5, delay: i * 0.03 }}
+                    transition={reduceMotion ? { duration: 0 } : { duration: 0.5, delay: i * 0.03 }}
                   />
                 )}
 
@@ -73,9 +76,9 @@ export function ManhattanChart({
                       ? "bg-gradient-to-t from-primary to-primary/70"
                       : "bg-gradient-to-t from-primary/70 to-primary/40"
                   )}
-                  initial={{ height: 0 }}
+                  initial={barInitial ?? { height: 0 }}
                   animate={{ height: `${barHeight}%` }}
-                  transition={{ duration: 0.5, delay: i * 0.03 }}
+                  transition={reduceMotion ? { duration: 0 } : { duration: 0.5, delay: i * 0.03 }}
                   style={{ maxWidth: barWidth }}
                 />
 
@@ -84,9 +87,9 @@ export function ManhattanChart({
                   <motion.div
                     className="absolute z-20 -top-1"
                     style={{ bottom: `${barHeight}%` }}
-                    initial={{ scale: 0 }}
+                    initial={barInitial ?? { scale: 0 }}
                     animate={{ scale: 1 }}
-                    transition={{ duration: 0.3, delay: i * 0.03 + 0.4 }}
+                    transition={reduceMotion ? { duration: 0 } : { duration: 0.3, delay: i * 0.03 + 0.4 }}
                   >
                     <span className="text-[9px] font-bold text-wicket-red">W</span>
                   </motion.div>

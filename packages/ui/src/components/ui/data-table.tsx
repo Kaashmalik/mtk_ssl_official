@@ -84,16 +84,23 @@ export function DataTable<T extends { id?: string }>({
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         {onSearch && (
           <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <Input
+              type="search"
+              aria-label={searchPlaceholder}
               placeholder={searchPlaceholder}
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               className="pl-9 pr-9"
             />
             {searchQuery && (
-              <button onClick={() => handleSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+              <button
+                type="button"
+                onClick={() => handleSearch("")}
+                aria-label="Clear search"
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+              >
+                <X className="h-4 w-4 text-muted-foreground hover:text-foreground" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -119,8 +126,11 @@ export function DataTable<T extends { id?: string }>({
               {data.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length} className="px-4 py-16 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      {emptyIcon && <div className="text-muted-foreground/40">{emptyIcon}</div>}
+                    {/* Announced to screen readers; distinct from a loading
+                        skeleton so a failed/slow read is never mistaken for
+                        "this league has nothing". */}
+                    <div className="flex flex-col items-center gap-2" role="status">
+                      {emptyIcon && <div className="text-muted-foreground/40" aria-hidden="true">{emptyIcon}</div>}
                       <p className="text-sm text-muted-foreground">{emptyMessage}</p>
                     </div>
                   </td>
@@ -144,22 +154,23 @@ export function DataTable<T extends { id?: string }>({
       {/* Pagination */}
       {pagination && pagination.totalPages > 1 && (
         <div className="flex items-center justify-between px-2">
-          <p className="text-sm text-muted-foreground">
+          {/* Live region: screen readers hear page changes without focus moves. */}
+          <p className="text-sm text-muted-foreground" aria-live="polite">
             Showing {((pagination.page - 1) * pagination.pageSize) + 1}–{Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
           </p>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={() => onPageChange?.(1)} disabled={pagination.page <= 1} className="h-8 w-8 p-0">
-              <ChevronsLeft className="h-4 w-4" />
+            <Button variant="outline" size="sm" onClick={() => onPageChange?.(1)} disabled={pagination.page <= 1} className="h-8 w-8 p-0" aria-label="First page">
+              <ChevronsLeft className="h-4 w-4" aria-hidden="true" />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => onPageChange?.(pagination.page - 1)} disabled={pagination.page <= 1} className="h-8 w-8 p-0">
-              <ChevronLeft className="h-4 w-4" />
+            <Button variant="outline" size="sm" onClick={() => onPageChange?.(pagination.page - 1)} disabled={pagination.page <= 1} className="h-8 w-8 p-0" aria-label="Previous page">
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </Button>
-            <span className="text-sm px-3 tabular-nums">{pagination.page} / {pagination.totalPages}</span>
-            <Button variant="outline" size="sm" onClick={() => onPageChange?.(pagination.page + 1)} disabled={pagination.page >= pagination.totalPages} className="h-8 w-8 p-0">
-              <ChevronRight className="h-4 w-4" />
+            <span className="text-sm px-3 tabular-nums">Page {pagination.page} of {pagination.totalPages}</span>
+            <Button variant="outline" size="sm" onClick={() => onPageChange?.(pagination.page + 1)} disabled={pagination.page >= pagination.totalPages} className="h-8 w-8 p-0" aria-label="Next page">
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => onPageChange?.(pagination.totalPages)} disabled={pagination.page >= pagination.totalPages} className="h-8 w-8 p-0">
-              <ChevronsRight className="h-4 w-4" />
+            <Button variant="outline" size="sm" onClick={() => onPageChange?.(pagination.totalPages)} disabled={pagination.page >= pagination.totalPages} className="h-8 w-8 p-0" aria-label="Last page">
+              <ChevronsRight className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
         </div>

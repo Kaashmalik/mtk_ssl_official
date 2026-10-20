@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
+import { useThemeColors } from "@/theme/tokens";
 
 interface ErrorViewProps {
   message?: string;
@@ -9,14 +10,30 @@ interface ErrorViewProps {
 
 export function ErrorView({ message, onRetry }: ErrorViewProps) {
   const { t } = useTranslation();
+  const colors = useThemeColors();
 
   return (
-    <View style={styles.container}>
-      <Ionicons name="alert-circle" size={64} color="#ef4444" />
-      <Text style={styles.message}>{message || t("error")}</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* ENH-04-03: this is an ALERT - announced immediately, never left to
+          be discovered, and the cause is stated rather than rendered as an
+          empty league. */}
+      <View
+        accessible
+        accessibilityRole="alert"
+        accessibilityLiveRegion="polite"
+        accessibilityLabel={message || t("error")}
+      >
+        <Ionicons name="alert-circle" size={64} color={colors.danger} />
+      </View>
+      <Text style={[styles.message, { color: colors.textMuted }]}>{message || t("error")}</Text>
       {onRetry && (
-        <TouchableOpacity style={styles.retryButton} onPress={onRetry}>
-          <Text style={styles.retryText}>{t("retry")}</Text>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: colors.tint }]}
+          onPress={onRetry}
+          accessibilityRole="button"
+          accessibilityLabel={t("retry")}
+        >
+          <Text style={[styles.retryText, { color: colors.onTint }]}>{t("retry")}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -32,21 +49,17 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: 16,
-    color: "#6b7280",
     textAlign: "center",
     marginTop: 16,
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: "#16a34a",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
   retryText: {
-    color: "#fff",
     fontSize: 16,
     fontWeight: "600",
   },
 });
-

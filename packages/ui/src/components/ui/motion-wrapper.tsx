@@ -1,6 +1,6 @@
 "use client"
 
-import { motion, type HTMLMotionProps } from "framer-motion"
+import { motion, useReducedMotion, type HTMLMotionProps } from "framer-motion"
 import { cn } from "../../lib/utils"
 
 export const motionVariants = {
@@ -50,15 +50,18 @@ export function MotionWrapper({
     children,
     ...props
 }: MotionWrapperProps) {
+    // ENH-04-02: honor prefers-reduced-motion at the JS layer too - the CSS
+    // kill-switch cannot reach framer-motion springs/translates.
+    const reduceMotion = useReducedMotion()
     const selectedVariant = stagger ? motionVariants.staggerContainer : motionVariants[variant]
 
     return (
         <motion.div
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
-            variants={selectedVariant}
-            transition={{ delay }}
+            initial={reduceMotion ? false : "hidden"}
+            animate={reduceMotion ? undefined : "visible"}
+            exit={reduceMotion ? undefined : "hidden"}
+            variants={reduceMotion ? undefined : selectedVariant}
+            transition={reduceMotion ? { duration: 0 } : { delay }}
             className={cn(className)}
             {...props}
         >

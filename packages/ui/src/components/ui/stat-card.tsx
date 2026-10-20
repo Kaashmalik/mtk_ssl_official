@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { motion, useMotionValue, useTransform, animate } from "framer-motion"
+import { motion, useMotionValue, useTransform, animate, useReducedMotion } from "framer-motion"
 import { cn } from "../../lib/utils"
 import { ArrowUp, ArrowDown, Minus } from "lucide-react"
 
@@ -19,6 +19,8 @@ interface StatCardProps {
 
 function CountUpNumber({ value, format = "number", delay = 0 }: { value: number; format?: string; delay?: number }) {
   const count = useMotionValue(0)
+  // ENH-04-02: honor prefers-reduced-motion - snap to the final number.
+  const reduceMotion = useReducedMotion()
   const rounded = useTransform(count, (latest) => {
     if (format === "decimal") return latest.toFixed(2)
     if (format === "percentage") return `${Math.round(latest)}%`
@@ -26,13 +28,18 @@ function CountUpNumber({ value, format = "number", delay = 0 }: { value: number;
   })
 
   React.useEffect(() => {
+    // ENH-04-02: reduced-motion users get the final number immediately.
+    if (reduceMotion) {
+      count.set(value)
+      return
+    }
     const controls = animate(count, value, {
       duration: 1.2,
       delay,
       ease: [0.25, 0.46, 0.45, 0.94],
     })
     return controls.stop
-  }, [value, count, delay])
+  }, [value, count, delay, reduceMotion])
 
   return <motion.span>{rounded}</motion.span>
 }

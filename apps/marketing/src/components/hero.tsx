@@ -5,10 +5,13 @@ import { Button } from "@mtk/ui";
 import { Circle, TrendingUp } from "lucide-react";
 import { useState, useEffect } from "react";
 
-const liveScores = [
-  { team1: "Lahore Qalandars", score1: "145/3", team2: "Karachi Kings", score2: "132/7", overs: "18.2" },
-  { team1: "Islamabad United", score1: "178/5", team2: "Multan Sultans", score2: "165/9", overs: "19.4" },
-  { team1: "Peshawar Zalmi", score1: "156/4", team2: "Quetta Gladiators", score2: "142/6", overs: "17.1" },
+// ENH-04-04: fictional clubs + explicitly labelled demo data. The ticker
+// previously presented PSL club names with fabricated scores under a
+// "Live Scores" heading - an unverified real-time claim.
+const sampleScores = [
+  { team1: "Lahore Lions", score1: "145/3", team2: "Karachi Falcons", score2: "132/7", overs: "18.2" },
+  { team1: "Islamabad Eagles", score1: "178/5", team2: "Multan Mariners", score2: "165/9", overs: "19.4" },
+  { team1: "Peshawar Panthers", score1: "156/4", team2: "Quetta Comets", score2: "142/6", overs: "17.1" },
 ];
 
 export function Hero() {
@@ -16,7 +19,7 @@ export function Hero() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentScore((prev) => (prev + 1) % liveScores.length);
+      setCurrentScore((prev) => (prev + 1) % sampleScores.length);
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -165,8 +168,9 @@ export function Hero() {
               <div className="flex items-center gap-2 mb-4">
                 <TrendingUp className="w-5 h-5 text-emerald-600" />
                 <span className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
-                  Live Scores
+                  Sample scoreboard
                 </span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">demo data, not live</span>
               </div>
               <motion.div
                 key={currentScore}
@@ -177,23 +181,23 @@ export function Hero() {
               >
                 <div className="flex-1 text-left">
                   <div className="font-bold text-lg text-gray-900 dark:text-white">
-                    {liveScores[currentScore].team1}
+                    {sampleScores[currentScore].team1}
                   </div>
                   <div className="text-2xl font-bold text-emerald-600 mt-1">
-                    {liveScores[currentScore].score1}
+                    {sampleScores[currentScore].score1}
                   </div>
                 </div>
                 <div className="px-4 text-gray-400">vs</div>
                 <div className="flex-1 text-right">
                   <div className="font-bold text-lg text-gray-900 dark:text-white">
-                    {liveScores[currentScore].team2}
+                    {sampleScores[currentScore].team2}
                   </div>
                   <div className="text-2xl font-bold text-emerald-600 mt-1">
-                    {liveScores[currentScore].score2}
+                    {sampleScores[currentScore].score2}
                   </div>
                 </div>
                 <div className="ml-4 text-sm text-gray-500 dark:text-gray-400">
-                  {liveScores[currentScore].overs} ov
+                  {sampleScores[currentScore].overs} ov
                 </div>
               </motion.div>
             </div>
