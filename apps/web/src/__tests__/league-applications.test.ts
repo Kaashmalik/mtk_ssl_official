@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { db, auditLogs, leagueApplications } from "@mtk/database"
+import { db, auditLogs, leagueApplications, leagueApplicationReplies } from "@mtk/database"
 import {
   getMyLeagueApplication,
+  replyLeagueApplication,
   saveLeagueApplication,
   submitLeagueApplication,
   withdrawLeagueApplication,
@@ -375,6 +376,7 @@ describe("getMyLeagueApplication", () => {
     queueOuterSelects([
       [{ id: USER, isActive: true }],
       [appRow({ state: "submitted", submittedAt: new Date("2026-10-17T09:00:00.000Z") })],
+      [],
     ])
 
     const response = await getMyLeagueApplication()
@@ -382,19 +384,124 @@ describe("getMyLeagueApplication", () => {
     expect(response.application?.state).toBe("submitted")
     expect(response.application?.submittedAt).toBe("2026-10-17T09:00:00.000Z")
     expect(response.application?.reviewReason).toBeNull()
+    // ENH-02-02: no application means no thread, not an error.
+    expect(response.replies).toEqual([])
   })
+
+  it("reads the persisted reply thread with the application, oldest first (ENH-02-02)", async () => {
+    queueOuterSelects([
+      [{ id: USER, isActive: true }],
+      [appRow({ state: "needs_information", version: 2 })],
+      [
+        { id: "3f2504e0-4f89-41d3-9a0c-0305e82c3401", applicationId: APP_ID, authorId: USER, authorSide: "applicant", body: "first answer", createdAt: new Date("2026-10-18T09:00:00.000Z") },
+        { id: "3f2504e0-4f89-41d3-9a0c-0305e82c3402", applicationId: APP_ID, authorId: USER, authorSide: "applicant", body: "second answer", createdAt: new Date("2026-10-18T10:00:00.000Z") },
+      ],
+    ])
+
+    const response = await getMyLeagueApplication()
+
+    expect(response.replies).toHaveLength(2)
+    expect(response.replies?.[0]).toMatchObject({ body: "first answer", authorSide: "applicant" })
+    expect(response.replies?.[0]?.createdAt).toBe("2026-10-18T09:00:00.000Z")
+   })
 
   it("returns null for an unauthenticated caller without reading", async () => {
     mocks.auth.mockResolvedValue({})
-    expect(await getMyLeagueApplication()).toEqual({ application: null })
+    expect(await getMyLeagueApplication()).toEqual({ application: null, replies: [] })
     expect(db.select).not.toHaveBeenCalled()
   })
 
   it("returns null for a missing or inactive account", async () => {
     queueOuterSelects([[]])
-    expect(await getMyLeagueApplication()).toEqual({ application: null })
+    expect(await getMyLeagueApplication()).toEqual({ application: null, replies: [] })
 
     queueOuterSelects([[{ id: USER, isActive: false }]])
-    expect(await getMyLeagueApplication()).toEqual({ application: null })
+    expect(await getMyLeagueApplication()).toEqual({ application: null, replies: [] })
   })
 })
+
+const REPLY_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3401"
+
+function replyRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: REPLY_ID,
+    applicationId: APP_ID,
+    authorId: USER,
+    authorSide: "applicant",
+    body: "Sent the club list.",
+    createdAt: new Date("2026-10-18T09:00:00.000Z"),
+    ...overrides,
+  }
+}
+
+describe("replyLeagueApplication (ENH-02-02)", () => {
+  it("persists the applicant reply under the account row lock and audits it", async () => {
+    queueOuterSelects([[{ id: USER, isActive: true, role: "fan" }]])
+    const tx = txMock({
+      selects: [[appRow({ state: "needs_information", version: 2 })]],
+      insertResult: [replyRow()],
+    })
+
+    const response = await replyLeagueApplication({ applicationId: APP_ID, body: "  Sent the club list.  " })
+
+    // The same serialization point as every other applicant write.
+    const lock = dialect.sqlToQuery(tx.locks[0] as never)
+    expect(lock.sql).toContain("FOR UPDATE")
+    expect(lock.params).toEqual([USER])
+
+    // Ownership and identity are one guard predicate, then row lock.
+    const guard = dialect.sqlToQuery(tx.selectConds[0] as never)
+    expect(guard.params).toEqual([APP_ID, USER])
+
+    const inserted = tx.inserts.find((item) => item.table === leagueApplicationReplies)
+    expect(inserted?.values).toMatchObject({
+      applicationId: APP_ID,
+      authorId: USER,
+      authorSide: "applicant",
+      body: "Sent the club list.",
+    })
+
+    // Replies are additive records: no state move, no version bump.
+    expect(tx.updates).toHaveLength(0)
+    expect(auditFor(tx, "LEAGUE_APPLICATION_REPLY")).toMatchObject({ actorId: USER, actorRole: "fan" })
+    expect(response.reply).toMatchObject({ id: REPLY_ID, authorSide: "applicant", body: "Sent the club list." })
+    expect((response.reply as { createdAt: string }).createdAt).toBe("2026-10-18T09:00:00.000Z")
+  })
+
+  it("refuses to reply until a reviewer actually requested information", async () => {
+    queueOuterSelects([[{ id: USER, isActive: true, role: "fan" }]])
+    const tx = txMock({ selects: [[appRow({ state: "submitted", version: 1 })]] })
+
+    await expect(replyLeagueApplication({ applicationId: APP_ID, body: "hello" })).rejects.toThrow(/requested information/)
+    expect(tx.inserts.find((item) => item.table === leagueApplicationReplies)).toBeUndefined()
+  })
+
+  it("keeps a decided application as locked history", async () => {
+    queueOuterSelects([[{ id: USER, isActive: true, role: "fan" }]])
+    const tx = txMock({ selects: [[appRow({ state: "rejected", version: 4 })]] })
+
+    await expect(replyLeagueApplication({ applicationId: APP_ID, body: "hello" })).rejects.toThrow(/read only/)
+    expect(tx.inserts.find((item) => item.table === leagueApplicationReplies)).toBeUndefined()
+  })
+
+  it("refuses a reply on an application the account does not own", async () => {
+    queueOuterSelects([[{ id: USER, isActive: true, role: "fan" }]])
+    const tx = txMock({ selects: [[]] })
+
+    await expect(replyLeagueApplication({ applicationId: APP_ID, body: "hello" })).rejects.toThrow(/do not have an application/)
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it("refuses blank or oversized bodies before any write begins", async () => {
+    await expect(replyLeagueApplication({ applicationId: APP_ID, body: "   " })).rejects.toThrow(/Write a message/)
+    await expect(replyLeagueApplication({ applicationId: APP_ID, body: "x".repeat(2001) })).rejects.toThrow(/within 2000/)
+    expect(db.transaction).not.toHaveBeenCalled()
+  })
+
+  it("refuses an inactive or missing account", async () => {
+    queueOuterSelects([[{ id: USER, isActive: false }]])
+    await expect(replyLeagueApplication({ applicationId: APP_ID, body: "hello" })).rejects.toThrow()
+    expect(db.transaction).not.toHaveBeenCalled()
+  })
+})
+

@@ -141,3 +141,49 @@ export function leagueApplicationProvisioningDecision(input: {
   if (input.ownedTenant != null) return { outcome: "refused", code: "already-owns-league" }
   return { outcome: "provision" }
 }
+
+/**
+ * ENH-02-02: persisted applicant replies under an information request.
+ * Deliberately a separate surface from the tournament-application reply
+ * policy (REG-03): league onboarding is platform-level (no tenant), the only
+ * author side is the applicant, and the thread opens ONLY while a reviewer
+ * has explicitly requested information — not on a merely-live application.
+ * Replies are additive records and never mutate the state machine.
+ */
+
+export const LEAGUE_REPLY_BODY_MAX = 2000
+
+export const LEAGUE_APPLICATION_REPLY_AUTHOR_SIDES = ["applicant"] as const
+export type LeagueApplicationReplyAuthorSide = (typeof LEAGUE_APPLICATION_REPLY_AUTHOR_SIDES)[number]
+
+export type LeagueReplyRefusal = "empty_body" | "body_too_long" | "terminal" | "not_requested"
+
+export function normalizeLeagueReplyBody(raw: string): { body: string } | { refusal: "empty_body" | "body_too_long" } {
+  const body = raw.replace(/\s+/g, " ").trim()
+  if (!body) return { refusal: "empty_body" }
+  if (body.length > LEAGUE_REPLY_BODY_MAX) return { refusal: "body_too_long" }
+  return { body }
+}
+
+export function describeLeagueReplyRefusal(refusal: LeagueReplyRefusal): string {
+  switch (refusal) {
+    case "empty_body":
+      return "Write a message before posting your reply."
+    case "body_too_long":
+      return `Keep replies within ${LEAGUE_REPLY_BODY_MAX} characters.`
+    case "terminal":
+      return "This application is decided; its thread is read only."
+    case "not_requested":
+      return "The platform has not requested information on this application, so there is nothing to answer yet."
+  }
+}
+
+export type LeagueApplicationReplyTarget = "open" | "terminal" | "not_requested"
+
+/** Which kind of surface an application state presents to a would-be replier. */
+export function leagueApplicationReplyTarget(state: string): LeagueApplicationReplyTarget {
+  if (state === "needs_information") return "open"
+  if (!isLeagueApplicationState(state)) return "not_requested"
+  if (isLeagueApplicationActiveState(state)) return "not_requested"
+  return "terminal"
+}

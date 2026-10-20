@@ -35,6 +35,7 @@ interface ApplicationRow {
   applicantEmail: string;
   applicantName: string | null;
   applicantActive: boolean;
+  replies?: Array<{ id: string; body: string; createdAt: string }>;
 }
 
 const STATE_FILTERS = [
@@ -184,6 +185,18 @@ export function LeagueApplicationsManagement() {
                 </span>
               )}
             </div>
+
+            {row.replies && row.replies.length > 0 && (
+              <div className="space-y-1 text-sm text-muted-foreground">
+                <span className="font-medium">Applicant answers (ENH-02-02 thread)</span>
+                {row.replies.map((reply) => (
+                  <p key={reply.id} className="rounded-md border bg-muted/30 p-2">
+                    {reply.body}
+                    <span className="ml-2 text-xs opacity-70">{formatDate(reply.createdAt)}</span>
+                  </p>
+                ))}
+              </div>
+            )}
 
             {reasonFor?.id === row.id ? (
               <div className="space-y-2">

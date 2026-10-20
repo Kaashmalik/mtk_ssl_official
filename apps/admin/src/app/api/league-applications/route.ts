@@ -10,13 +10,14 @@ import {
   subscriptions,
   userTenantRoles,
   leagueApplications,
+  leagueApplicationReplies,
   auditLogs,
   LEAGUE_APPLICATION_STATES,
   isLeagueApplicationState,
   leagueApplicationTransition,
   leagueApplicationProvisioningDecision,
 } from "@mtk/database";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { captureError, getRequestLogger } from "@mtk/observability";
 import { z } from "zod";
 
@@ -109,6 +110,23 @@ export async function GET(request: NextRequest) {
       .where(condition)
       .orderBy(asc(leagueApplications.createdAt));
 
+    // ENH-02-02: the persisted applicant thread travels with each
+    // application so a reviewer reads the answers next to the request.
+    const applicationIds = rows.map((row) => row.id);
+    const replyRows = applicationIds.length
+      ? await db
+          .select()
+          .from(leagueApplicationReplies)
+          .where(inArray(leagueApplicationReplies.applicationId, applicationIds))
+          .orderBy(asc(leagueApplicationReplies.createdAt))
+      : [];
+    const repliesByApplication = new Map<string, Array<{ id: string; body: string; createdAt: string }>>();
+    for (const reply of replyRows) {
+      const thread = repliesByApplication.get(reply.applicationId) ?? [];
+      thread.push({ id: reply.id, body: reply.body, createdAt: reply.createdAt.toISOString() });
+      repliesByApplication.set(reply.applicationId, thread);
+    }
+
     return NextResponse.json({
       applications: rows.map((row) => ({
         id: row.id,
@@ -128,6 +146,7 @@ export async function GET(request: NextRequest) {
         applicantEmail: row.applicantEmail,
         applicantName: row.applicantName ?? null,
         applicantActive: row.applicantActive === true,
+        replies: repliesByApplication.get(row.id) ?? [],
       })),
       states: LEAGUE_APPLICATION_STATES,
     });

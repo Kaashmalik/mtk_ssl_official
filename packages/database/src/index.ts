@@ -45,6 +45,7 @@ export * from "./schema/user-invites";
 export * from "./schema/invitation-email-jobs";
 export * from "./schema/ownership-transfers";
 export * from "./schema/league-applications";
+export * from "./schema/league-application-replies";
 export * from "./schema/profiles";
 export * from "./schema/tournaments";
 export * from "./schema/teams";
