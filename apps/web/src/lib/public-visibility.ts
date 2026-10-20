@@ -434,11 +434,21 @@ const FIELDING_DISMISSALS_MATCH = sql<number>`COALESCE(sum(${fieldingScorecards.
  * SQL twin of `minorPublicDecision` in @mtk/database/lib/minor-consent-policy;
  * the policy's unit tests pin the shared semantics. Withdrawing consent
  * (clearing the columns) re-withholds the records - nothing is deleted.
+ *
+ * ENH-01-01 (2026-10-20): the Batch-132 fragment had its age comparison
+ * inverted - `date_of_birth > (CURRENT_DATE - 18 years)` is the MINOR side of
+ * the boundary, so it published every proven minor unconditionally and hid
+ * every consent-less adult. The adult side is `<=` (a player whose 18th
+ * birthday is today is an adult and needs no consent). The consent disjunct
+ * now also requires the recorded instant to be effective
+ * (`consent <= now()`), matching the policy's future-consent refusal.
+ * Pinned by the "minor-consent SQL twin (ENH-01-01)" contract tests; the
+ * LIVE gate test proves SQL-vs-policy truth against real rows.
  */
 export const minorConsentPublicSql = sql`(
   ${players}.date_of_birth IS NULL
-  OR ${players}.date_of_birth > (CURRENT_DATE - INTERVAL '18 years')
-  OR ${players}.guardian_consent_at IS NOT NULL
+  OR ${players}.date_of_birth <= (CURRENT_DATE - INTERVAL '18 years')
+  OR (${players}.guardian_consent_at IS NOT NULL AND ${players}.guardian_consent_at <= now())
 )`
 
 function toPublicLeaderboardRows(
