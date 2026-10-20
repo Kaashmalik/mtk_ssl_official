@@ -34,7 +34,11 @@ const hoisted = vi.hoisted(() => {
       applicationById: undefined as Record<string, unknown> | undefined,
     },
     appsQueue: [] as Array<Record<string, unknown> | undefined>,
-    calls: {
+    // Row-lists returned by tx.execute() calls (the FOR UPDATE steps), in
+    // order; postgres-js returns ROW ARRAYS. The locked-reread contract
+    // (ENH-01-03) is pinned by making this row's status DIFFER from the
+    // pre-lock snapshot: a concurrent transition committed in between.
+    executeResults: [] as Array<Array<Record<string, unknown>>>,    calls: {
       inserts: [] as unknown[],
       updates: [] as unknown[],
       audits: [] as unknown[],
@@ -83,7 +87,10 @@ vi.mock("@mtk/database", async (importOriginal) => {
     }))
 
   const makeTx = (): Record<string, unknown> => ({
-    execute: vi.fn(async () => []),
+    execute: vi.fn(async () => {
+      const next = hoisted.executeResults.shift()
+      return next !== undefined ? next : []
+    }),
     insert: vi.fn((table: unknown) => ({
       values: vi.fn((values: unknown) => {
         // Writers await plain values() (audit rows) AND call .returning()
@@ -131,11 +138,12 @@ describe("REG-03 (Batch 147): the tournament-application journey", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     hoisted.rows.account = { id: USER_ID, isActive: true }
-    hoisted.rows.tournament = { id: TOURNAMENT_ID, tenantId: TENANT_ID, status: "registration" }
-    hoisted.rows.team = { id: TEAM_ID, managerId: USER_ID, isActive: true }
+    hoisted.rows.tournament = { id: TOURNAMENT_ID, tenantId: TENANT_ID, status: "registration", registrationOpen: true }
+    hoisted.rows.team = { id: TEAM_ID, tenantId: TENANT_ID, managerId: USER_ID, isActive: true }
     hoisted.rows.membership = { userId: USER_ID, tenantId: TENANT_ID, role: "member", status: "active", expiresAt: null }
     hoisted.rows.applicationById = undefined
     hoisted.appsQueue = []
+    hoisted.executeResults = []
     hoisted.calls.inserts = []
     hoisted.calls.updates = []
     hoisted.calls.audits = []
@@ -177,7 +185,7 @@ describe("REG-03 (Batch 147): the tournament-application journey", () => {
   })
 
   it("only the team's current manager may apply", async () => {
-    hoisted.rows.team = { id: TEAM_ID, managerId: "other-manager", isActive: true }
+    hoisted.rows.team = { id: TEAM_ID, tenantId: TENANT_ID, managerId: "other-manager", isActive: true }
     await expect(submitTournamentApplication(TOURNAMENT_ID, TEAM_ID)).rejects.toThrow(/team's manager/)
     expect(hoisted.calls.inserts).toHaveLength(0)
   })
@@ -251,5 +259,64 @@ describe("REG-03 (Batch 147): the tournament-application journey", () => {
     expect(tournamentApplications).toBeDefined()
     expect(teams).toBeDefined()
     expect(tournaments).toBeDefined()
+  })
+
+  // --- ENH-01-03: locked rereads / effective membership / deadline flags ---
+
+  it("withdraw consumes the LOCKED status: a concurrent decision wins the race (ENH-01-03)", async () => {
+    // The pre-lock snapshot says 'submitted', but a concurrent owner decision
+    // committed 'declined' before our FOR UPDATE acquired the lock.
+    hoisted.rows.applicationById = { id: APP_ID, tenantId: TENANT_ID, teamId: TEAM_ID, status: "submitted" }
+    hoisted.executeResults = [[{ status: "declined" }]]
+    const result = await withdrawTournamentApplication(APP_ID)
+    // The withdrawal must be a pure replay-read: terminal history is NOT
+    // overwritten by a stale snapshot.
+    expect(result).toEqual({ withdrawn: true, changed: false })
+    expect(hoisted.calls.updates).toHaveLength(0)
+    expect(hoisted.calls.audits).toHaveLength(0)
+  })
+
+  it("decide consumes the LOCKED status: a concurrent withdrawal is never re-decided into approval (ENH-01-03)", async () => {
+    hoisted.rows.membership = { userId: USER_ID, tenantId: TENANT_ID, role: "league_owner", status: "active", expiresAt: null }
+    hoisted.rows.applicationById = { id: APP_ID, tenantId: TENANT_ID, status: "submitted" }
+    hoisted.executeResults = [[{ status: "withdrawn" }]]
+    const result = await decideTournamentApplication(APP_ID, "approve")
+    expect(result).toEqual({ decided: true, status: "withdrawn", changed: false })
+    expect(hoisted.calls.updates).toHaveLength(0)
+    expect(hoisted.calls.audits).toHaveLength(0)
+    // Only the lock ran; no mutation followed.
+    expect(hoisted.calls.updates).toHaveLength(0)
+  })
+
+  it("decisions require EFFECTIVE membership: an expired league owner cannot decide (ENH-01-03)", async () => {
+    hoisted.rows.membership = { userId: USER_ID, tenantId: TENANT_ID, role: "league_owner", status: "active", expiresAt: new Date(Date.now() - 60_000) }
+    hoisted.rows.applicationById = { id: APP_ID, tenantId: TENANT_ID, status: "submitted" }
+    await expect(decideTournamentApplication(APP_ID, "approve")).rejects.toThrow(/only the league owner/)
+    expect(hoisted.calls.updates).toHaveLength(0)
+    expect(hoisted.calls.audits).toHaveLength(0)
+  })
+
+  it("the window is honest: applications after the registration deadline are refused (ENH-01-03)", async () => {
+    hoisted.rows.tournament = {
+      id: TOURNAMENT_ID,
+      tenantId: TENANT_ID,
+      status: "registration",
+      registrationOpen: true,
+      registrationEnd: new Date(Date.now() - 60_000),
+    }
+    await expect(submitTournamentApplication(TOURNAMENT_ID, TEAM_ID)).rejects.toThrow(/deadline has passed/)
+    expect(hoisted.calls.inserts).toHaveLength(0)
+  })
+
+  it("the registration flag is honored: a closed tournament refuses applications (ENH-01-03)", async () => {
+    hoisted.rows.tournament = { id: TOURNAMENT_ID, tenantId: TENANT_ID, status: "registration", registrationOpen: false }
+    await expect(submitTournamentApplication(TOURNAMENT_ID, TEAM_ID)).rejects.toThrow(/Registration is closed/)
+    expect(hoisted.calls.inserts).toHaveLength(0)
+  })
+
+  it("both resources live in one league: a cross-league team refuses to apply (ENH-01-03)", async () => {
+    hoisted.rows.team = { id: TEAM_ID, tenantId: "bb000000-2222-4a1e-9c1d-000000000009", managerId: USER_ID, isActive: true }
+    await expect(submitTournamentApplication(TOURNAMENT_ID, TEAM_ID)).rejects.toThrow(/different league/)
+    expect(hoisted.calls.inserts).toHaveLength(0)
   })
 })
