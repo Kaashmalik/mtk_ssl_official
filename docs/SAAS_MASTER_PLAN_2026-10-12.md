@@ -1,5 +1,7 @@
 # Cricket SaaS 2026: League Isolation, User Control and Premium Experience
 
+> **20 October 2026 execution overlay:** [Enhancement roadmap](ENHANCEMENT_ROADMAP_2026-10-20.md) adds model-independent tasks for daylight UI, onboarding/WhatsApp, cross-platform contracts, media, branded broadcasts/replays, scoring animations, and moderated fan interaction. It does not close or replace this plan's canonical checklist or acceptance gates.
+
 ## 1. Document Control and Status Rules
 
 | Field | Value |
