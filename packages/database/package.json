@@ -32,6 +32,7 @@
     "db:types": "supabase gen types typescript --local > src/types.ts"
   },
   "dependencies": {
+    "@mtk/contracts": "workspace:*",
     "@supabase/supabase-js": "^2.49.0",
     "drizzle-orm": "^0.45.2",
     "drizzle-kit": "^0.30.0",

@@ -17,6 +17,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.2.2",
+    "@mtk/contracts": "workspace:*",
     "@mtk/database": "workspace:*",
     "@mtk/observability": "workspace:*",
     "@mtk/ui": "workspace:*",
