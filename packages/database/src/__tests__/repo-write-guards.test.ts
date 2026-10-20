@@ -20,6 +20,14 @@ describe("repo write guards (ENH-01-04)", () => {
     expect(assertWritableFields(values)).toBe(values)
   })
 
+  it("insert tolerates an explicit tenantId (context force-set wins); id stays refused", () => {
+    // Inserting a FRESH row cannot cross tenants - base.ts force-sets the
+    // context tenant after spreading values (pinned by tenant-isolation).
+    const values = { name: "X", tenantId: "other-tenant" }
+    expect(assertWritableFields(values, { allowTenantId: true })).toBe(values)
+    expect(() => assertWritableFields({ name: "X", id: "pk" }, { allowTenantId: true })).toThrow(/\[repo\].*id/)
+  })
+
   it("refuses a tenant move through the generic update path", () => {
     expect(() => assertWritableFields({ tenantId: "other-tenant" })).toThrow(/\[repo\].*tenantId/)
   })

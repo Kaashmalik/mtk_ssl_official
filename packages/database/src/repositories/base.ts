@@ -110,9 +110,9 @@ export abstract class TenantScopedRepository {
 
   // ---- Write operations (all scoped) ----
 
-  /** Insert a row. The `tenantId` field is force-set from context. */
+  /** Insert a row. The `tenantId` field is force-set from context (a fresh row cannot cross tenants); `id` is refused. */
   async insert<T = unknown>(values: Record<string, unknown>): Promise<T[]> {
-    assertWritableFields(values);
+    assertWritableFields(values, { allowTenantId: true });
     return db
       .insert(this.table)
       .values({

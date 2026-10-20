@@ -18,14 +18,24 @@ export type ProtectedWriteField = (typeof PROTECTED_WRITE_FIELDS)[number];
  * Throws when the payload tries to set a protected field; passes the payload
  * through untouched otherwise. The error names the exact offending key so the
  * caller's bug is obvious in logs.
+ *
+ * `update` paths refuse BOTH keys: a SET containing `tenantId` moves an
+ * EXISTING row into another tenant and `id` re-keys it. The insert path sets
+ * `allowTenantId` because inserting a fresh row cannot cross tenants - the
+ * context force-set overrides any caller value (pinned by the tenant-isolation
+ * suite); an explicit `id` is still refused.
  */
-export function assertWritableFields<T extends Record<string, unknown>>(values: T): T {
+export function assertWritableFields<T extends Record<string, unknown>>(
+  values: T,
+  options: { allowTenantId?: boolean } = {}
+): T {
   for (const field of PROTECTED_WRITE_FIELDS) {
+    if (options.allowTenantId && field === "tenantId") continue;
     if (field in values) {
       throw new Error(
-        `[repo] Field "${field}" is identity-scoped and cannot be written through the generic repository. Use the dedicated tenant/identity writers.`,
+        `[repo] Field "${field}" is identity-scoped and cannot be written through the generic repository. Use the dedicated tenant/identity writers.`
       );
     }
   }
-  return values
+  return values;
 }
