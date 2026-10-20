@@ -1,15 +1,41 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch, Alert } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import { useAuth, useClerk } from "@clerk/clerk-expo";
+import { useRouter } from "expo-router";
 import { useOfflineStore } from "@/store/offline-store";
+import { deregisterPushNotifications, getStoredPushToken } from "@/services/notifications";
 
 export default function SettingsScreen() {
   const { t, i18n } = useTranslation();
   const [language, setLanguage] = useState(i18n.language);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const { isOnline } = useOfflineStore();
+  // ENH-06-02: the native sign-out surface - previously the app had NO way
+  // to sign out at all. Sign-out deregisters this device's push token while
+  // the session is still valid, then ends the Clerk session.
+  const { isSignedIn, userId } = useAuth();
+  const { signOut } = useClerk();
+  const router = useRouter();
+
+  const confirmSignOut = () => {
+    Alert.alert(t("account.signOut"), t("account.signOutConfirm"), [
+      { text: t("account.cancel"), style: "cancel" },
+      {
+        text: t("account.signOut"),
+        style: "destructive",
+        onPress: async () => {
+          const token = await getStoredPushToken();
+          if (token) await deregisterPushNotifications(token);
+          await signOut();
+        },
+      },
+    ]);
+  };
+
+  const openSignIn = () => router.push("/sign-in");
 
   useEffect(() => {
     // Load persisted settings
@@ -52,6 +78,44 @@ export default function SettingsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t("settings")}</Text>
         <Text style={styles.headerSubtitle}>Preferences and app information</Text>
+      </View>
+
+      {/* Account (ENH-06-02) */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Account</Text>
+        {isSignedIn ? (
+          <>
+            <View style={styles.settingRow}>
+              <Ionicons name="person-circle-outline" size={22} color="#16a34a" />
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingTitle}>{t("account.signedIn")}</Text>
+                {userId && <Text style={styles.settingDescription}>{userId.slice(0, 24)}…</Text>}
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.signOutButton}
+              onPress={confirmSignOut}
+              accessibilityRole="button"
+              accessibilityLabel={t("account.signOut")}
+            >
+              <Ionicons name="log-out-outline" size={18} color="#dc2626" />
+              <Text style={styles.signOutText}>{t("account.signOut")}</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.settingDescription}>{t("account.signedOut")}</Text>
+            <TouchableOpacity
+              style={styles.signInButton}
+              onPress={openSignIn}
+              accessibilityRole="button"
+              accessibilityLabel={t("account.signIn")}
+            >
+              <Ionicons name="log-in-outline" size={18} color="#ffffff" />
+              <Text style={styles.signInText}>{t("account.signIn")}</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
       {/* Language Settings */}
@@ -245,6 +309,38 @@ const styles = StyleSheet.create({
   appAuthor: {
     fontSize: 12,
     color: "#9ca3af",
+  },
+  signOutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+  },
+  signOutText: {
+    color: "#dc2626",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  signInButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "#16a34a",
+  },
+  signInText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });
 

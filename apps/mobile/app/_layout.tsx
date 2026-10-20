@@ -37,7 +37,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 }
 
 export default function RootLayout() {
-  usePushNotifications();
   const router = useRouter();
   const publishableKey =
     process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -78,6 +77,10 @@ export default function RootLayout() {
       <SafeAreaProvider>
         {providerReady && publishableKey ? (
           <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+            {/* Session-dependent bridges live INSIDE ClerkProvider: push
+                registration is session-gated (ENH-06-02), offline sync is
+                account-bound. Mounted outside, useAuth() would throw and a
+                no-Clerk build would attempt unactionable registrations. */}
             <SyncBridge />
             <AppTree />
           </ClerkProvider>
@@ -96,6 +99,7 @@ export default function RootLayout() {
 
 function SyncBridge() {
   useOfflineSync();
+  usePushNotifications();
   return null;
 }
 

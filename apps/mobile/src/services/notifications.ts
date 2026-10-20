@@ -1,6 +1,6 @@
-import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import i18n from "@/lib/i18n";
 import { authedFetch } from "@/lib/app-api";
 
@@ -9,6 +9,27 @@ const isExpoGo = Constants.appOwnership === "expo";
 const getNotifications = () => {
   return require("expo-notifications") as any;
 };
+
+const PUSH_TOKEN_KEY = "push_token";
+
+/** The token THIS device last registered, for deregister-on-sign-out. */
+export async function getStoredPushToken(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function storePushToken(token: string | null): Promise<void> {
+  try {
+    if (token) await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    else await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
+  } catch {
+    // Persistence failure only loses the sign-out convenience, never safety:
+    // the server-side token row is the authoritative delivery gate.
+  }
+}
 
 /**
  * B162: register this device's Expo push token with the platform.
@@ -54,6 +75,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
       console.warn("Push registration refused:", response.status);
       return null;
     }
+    await storePushToken(token.data);
     return token.data;
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -72,6 +94,7 @@ export async function deregisterPushNotifications(token: string): Promise<boolea
       method: "DELETE",
       body: JSON.stringify({ token }),
     });
+    if (response.ok) await storePushToken(null);
     return response.ok;
   } catch {
     return false;

@@ -52,6 +52,14 @@ const resources = {
       sync: "Sync",
       "sync.pending": "Syncing pending data...",
       "sync.complete": "Sync complete",
+
+      // Account (ENH-06-02: the native session lifecycle)
+      "account.signedIn": "Signed in",
+      "account.signedOut": "Signed out - sign in to see your league",
+      "account.signOut": "Sign out",
+      "account.signOutConfirm": "Sign out of this device? Push notifications stop until you sign in again.",
+      "account.cancel": "Cancel",
+      "account.signIn": "Sign in",
       
       // Notifications
       "notification.wicket": "Wicket! {{batsman}} out",
@@ -112,6 +120,14 @@ const resources = {
       sync: "سینک",
       "sync.pending": "پینڈنگ ڈیٹا سینک ہو رہا ہے...",
       "sync.complete": "سینک مکمل",
+
+      // Account (ENH-06-02)
+      "account.signedIn": "سائن اِن",
+      "account.signedOut": "سائن آؤٹ - اپنی لیگ دیکھنے کے لیے سائن اِن کریں",
+      "account.signOut": "سائن آؤٹ",
+      "account.signOutConfirm": "اس ڈیوائس سے سائن آؤٹ کریں؟ دوبارہ سائن اِن تک اطلاعات بند رہیں گیب۔",
+      "account.cancel": "منسوخ کریں",
+      "account.signIn": "سائن اِن کریں",
       
       // Notifications
       "notification.wicket": "وکٹ! {{batsman}} آؤٹ",

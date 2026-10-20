@@ -3,6 +3,7 @@ import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { useRouter } from "expo-router";
+import { useAuth } from "@clerk/clerk-expo";
 import { registerForPushNotifications } from "@/services/notifications";
 
 const isExpoGo = Constants.appOwnership === "expo";
@@ -29,8 +30,14 @@ export function usePushNotifications() {
   const router = useRouter();
   const notificationListener = useRef<any>(null);
   const responseListener = useRef<any>(null);
+  // ENH-06-02: registration requires an ACTUAL session - a token is always
+  // attributable to the signed-in account, and re-runs when the session
+  // appears (sign-in after launch). The hook is mounted inside
+  // ClerkProvider (see app/_layout.tsx) so useAuth() is legal here.
+  const { isSignedIn } = useAuth();
 
   useEffect(() => {
+    if (!isSignedIn) return;
     if (Platform.OS === "web") return;
     if (isExpoGo) {
       warn(
@@ -79,7 +86,7 @@ export function usePushNotifications() {
         Notifications.removeNotificationSubscription(responseListener.current);
       }
     };
-  }, []);
+  }, [isSignedIn]);
 
   return {
     sendLocalNotification: async (title: string, body: string, data?: any) => {
