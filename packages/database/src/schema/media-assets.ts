@@ -84,6 +84,9 @@ export const mediaUploadSessions = pgTable("media_upload_sessions", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(),
   state: text("state").notNull().default("reserved"),
+  /** Intended attachment, fixed at authorize time so finalize cannot retarget it. */
+  bindingType: text("binding_type"),
+  resourceId: uuid("resource_id"),
   /** Unpredictable public id decided by the SERVER at authorize time. */
   provider: text("provider").notNull().default("cloudinary"),
   providerPublicId: text("provider_public_id").notNull(),
@@ -111,6 +114,10 @@ export const mediaUploadSessions = pgTable("media_upload_sessions", {
   check("media_upload_sessions_kind_check", sql`${table.kind} IN ('image','video','audio')`),
   check("media_upload_sessions_state_check", sql`${table.state} IN
     ('reserved','finalized','expired','cancelled')`),
+  check("media_upload_sessions_binding_check", sql`
+    (${table.bindingType} IS NULL AND ${table.resourceId} IS NULL)
+    OR (${table.bindingType} IN ('tournament','venue','branding','team','player','match')
+        AND ${table.resourceId} IS NOT NULL)`),
   check("media_upload_sessions_bytes_check", sql`${table.declaredBytes} > 0
     AND ${table.reservedBytes} > 0 AND ${table.reservedBytes} >= ${table.declaredBytes}`),
 ])

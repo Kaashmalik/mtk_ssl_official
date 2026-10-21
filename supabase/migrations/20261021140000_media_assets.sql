@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS public.media_upload_sessions (
   kind text NOT NULL CHECK (kind IN ('image','video','audio')),
   state text NOT NULL DEFAULT 'reserved' CHECK (state IN
     ('reserved','finalized','expired','cancelled')),
+  binding_type text,
+  resource_id uuid,
   provider text NOT NULL DEFAULT 'cloudinary',
   provider_public_id text NOT NULL,
   provider_folder text,
@@ -82,6 +84,11 @@ CREATE TABLE IF NOT EXISTS public.media_upload_sessions (
   finalized_at timestamptz,
   CONSTRAINT media_upload_sessions_bytes_check CHECK (
     declared_bytes > 0 AND reserved_bytes > 0 AND reserved_bytes >= declared_bytes
+  ),
+  CONSTRAINT media_upload_sessions_binding_check CHECK (
+    (binding_type IS NULL AND resource_id IS NULL)
+    OR (binding_type IN ('tournament','venue','branding','team','player','match')
+        AND resource_id IS NOT NULL)
   ),
   CONSTRAINT media_upload_sessions_asset_tenant_fk
     FOREIGN KEY (asset_id, tenant_id) REFERENCES public.media_assets (id, tenant_id)

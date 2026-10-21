@@ -93,3 +93,27 @@ export function buildMediaLimits(settings: MediaLimitSettings): MediaLimits {
     ...(audio ? { audio } : {}),
   }
 }
+
+/**
+ * Deployment limits are read from explicit `MEDIA_*` settings. There is no
+ * default: an operator who has not approved a provider quota gets an empty
+ * limit set and every upload is refused as `limits_unconfigured`.
+ */
+export function mediaLimitsFromEnv(env: NodeJS.ProcessEnv = process.env): MediaLimits {
+  return buildMediaLimits({
+    image: {
+      maxBytes: env.MEDIA_IMAGE_MAX_BYTES,
+      allowedMimeTypes: env.MEDIA_IMAGE_MIME_TYPES,
+    },
+    video: {
+      maxBytes: env.MEDIA_VIDEO_MAX_BYTES,
+      allowedMimeTypes: env.MEDIA_VIDEO_MIME_TYPES,
+      maxDurationSeconds: env.MEDIA_VIDEO_MAX_DURATION_SECONDS,
+    },
+    audio: {
+      maxBytes: env.MEDIA_AUDIO_MAX_BYTES,
+      allowedMimeTypes: env.MEDIA_AUDIO_MIME_TYPES,
+      maxDurationSeconds: env.MEDIA_AUDIO_MAX_DURATION_SECONDS,
+    },
+  })
+}
