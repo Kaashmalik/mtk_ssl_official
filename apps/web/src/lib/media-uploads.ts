@@ -21,6 +21,7 @@ import {
   requireMediaMember,
 } from "./media-authorization"
 import { hasPermission } from "./rbac"
+import { enqueueMediaCleanupJobs } from "./media-cleanup"
 import {
   buildUploadAuthorization,
   cloudinaryConfig,
@@ -496,6 +497,19 @@ async function settleQuarantine(
     })
     .returning({ id: mediaAssets.id })
   if (!created) throw new Error("Could not record the quarantined asset")
+
+  // A quarantined object may still exist at the provider. Keep its identity
+  // and queue destruction in this same transaction; never leave a rejected
+  // upload billable and addressable.
+  await enqueueMediaCleanupJobs(tx, {
+    tenantId: session.tenantId,
+    assetId: created.id,
+    provider: "cloudinary",
+    providerPublicId: session.providerPublicId,
+    providerResourceType: asset?.resourceType
+      ?? cloudinaryResourceType(session.kind as MediaKind),
+    actions: ["destroy_provider_asset", "invalidate_delivery"],
+  })
 
   const counted = Math.min(asset?.bytes ?? 0, session.reservedBytes)
   await tx.update(mediaQuotas)

@@ -116,7 +116,9 @@ function fakeTx(options: TxOptions = {}) {
         values(values: any) {
           inserts.push({ table, values })
           return {
-            onConflictDoNothing: async () => undefined,
+            onConflictDoNothing: () => ({
+              returning: async () => [{ id: options.insertId ?? ASSET }],
+            }),
             returning: async () => [{ id: options.insertId ?? ASSET }],
           }
         },

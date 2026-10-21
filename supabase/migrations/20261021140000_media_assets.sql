@@ -197,6 +197,8 @@ CREATE TABLE IF NOT EXISTS public.media_cleanup_jobs (
 
 CREATE UNIQUE INDEX IF NOT EXISTS media_cleanup_jobs_asset_action_key
   ON public.media_cleanup_jobs (asset_id, action);
+CREATE UNIQUE INDEX IF NOT EXISTS media_cleanup_jobs_provider_public_action_key
+  ON public.media_cleanup_jobs (tenant_id, provider, provider_public_id, action);
 CREATE INDEX IF NOT EXISTS media_cleanup_jobs_due_idx
   ON public.media_cleanup_jobs (next_attempt_at, id)
   WHERE state IN ('pending','leased');

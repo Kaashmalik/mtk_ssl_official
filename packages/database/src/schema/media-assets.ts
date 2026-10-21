@@ -219,6 +219,11 @@ export const mediaCleanupJobs = pgTable("media_cleanup_jobs", {
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
 }, table => [
   uniqueIndex("media_cleanup_jobs_asset_action_key").on(table.assetId, table.action),
+  // Expired sessions/orphans have no asset row yet; provider identity still
+  // deduplicates their cleanup jobs.
+  uniqueIndex("media_cleanup_jobs_provider_public_action_key").on(
+    table.tenantId, table.provider, table.providerPublicId, table.action,
+  ),
   index("media_cleanup_jobs_due_idx").on(table.nextAttemptAt, table.id)
     .where(sql`${table.state} IN ('pending','leased')`),
   // NO ACTION: cleanup keeps the asset as evidence until provider destruction
