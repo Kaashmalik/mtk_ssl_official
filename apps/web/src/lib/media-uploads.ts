@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
-import { db, mediaAssets, mediaQuotas, mediaUploadSessions } from "@mtk/database"
+import { db, mediaAssets, mediaConsents, mediaQuotas, mediaUploadSessions } from "@mtk/database"
 import {
   MEDIA_BINDING_TYPE_VALUES,
   authorizeMediaUploadRequestSchema,
@@ -433,6 +433,22 @@ async function settleReady(
     })
     .returning({ id: mediaAssets.id })
   if (!created) throw new Error("Could not record the verified asset")
+
+  const consent = consentFor(session.bindingType as MediaBindingType | null)
+  if (consent === "pending") {
+    // Person-bearing media starts with an explicit asset-level consent row.
+    // Publication stays blocked until it is granted; withdrawal later queues
+    // provider destruction through the same cleanup outbox.
+    await tx.insert(mediaConsents)
+      .values({
+        tenantId: session.tenantId,
+        assetId: created.id,
+        subjectUserId: null,
+        purpose: "publication",
+        state: "pending",
+      })
+      .onConflictDoNothing()
+  }
 
   await tx.update(mediaQuotas)
     .set({

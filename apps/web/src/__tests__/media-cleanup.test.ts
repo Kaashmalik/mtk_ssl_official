@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  auditLogs, mediaAssets, mediaCleanupJobs, mediaQuotas, mediaUploadSessions,
+  auditLogs, mediaAssets, mediaCleanupJobs, mediaConsents, mediaQuotas, mediaUploadSessions,
 } from "@mtk/database"
 import {
   expireStaleMediaUploadSessions,
   processMediaCleanupJobs,
 } from "@/lib/media-cleanup"
-import { deleteMediaAsset } from "@/lib/media-lifecycle"
+import {
+  resolveMediaCleanupJob,
+  retryMediaCleanupJob,
+} from "@/lib/media-cleanup-admin"
+import { deleteMediaAsset, recordMediaConsent } from "@/lib/media-lifecycle"
 import { MediaAuthorizationError } from "@/lib/media-authorization"
 
 /**
@@ -74,10 +78,12 @@ function updateResult(rows: unknown[] = [{ id: JOB }]) {
 function fakeTx(options: {
   selectQueue?: unknown[][]
   asset?: unknown
+  updateRows?: unknown[]
 } = {}) {
   const queue = [...(options.selectQueue ?? [])]
   const inserts: { table: unknown; values: any }[] = []
   const updates: { table: unknown; values: any }[] = []
+  const updateRows = options.updateRows ?? [{ id: "consent-1" }]
   const tx = {
     select() {
       const chain: any = {
@@ -107,7 +113,11 @@ function fakeTx(options: {
       return {
         set(values: any) {
           updates.push({ table, values })
-          return { where: async () => undefined }
+          return {
+            where: () => Object.assign(Promise.resolve(undefined), {
+              returning: async () => updateRows,
+            }),
+          }
         },
       }
     },
@@ -317,5 +327,127 @@ describe("ENH-07-03: tombstone deletion", () => {
     mocks.requireMember.mockResolvedValue({ ...ACTOR_CTX, role: "fan" })
     await expect(deleteMediaAsset({ assetId: ASSET }))
       .rejects.toBeInstanceOf(MediaAuthorizationError)
+  })
+})
+
+describe("ENH-07-03: consent withdrawal", () => {
+  function consentAsset(overrides: Record<string, unknown> = {}) {
+    return {
+      id: ASSET, tenantId: TENANT, provider: "cloudinary", providerPublicId: "ssl_abc",
+      resourceType: "image", state: "ready", consent: "pending", ...overrides,
+    }
+  }
+
+  it("withdraws publication, tombstones and queues destruction while keeping identity", async () => {
+    const { tx, inserts, updates } = fakeTx({ selectQueue: [[consentAsset()]] })
+    mocks.transaction.mockImplementation(async (cb: any) => cb(tx))
+
+    const result = await recordMediaConsent({ assetId: ASSET, state: "withdrawn" })
+    expect(result).toEqual({
+      ok: true, assetId: ASSET, state: "withdrawn", cleanupJobs: 2,
+    })
+    expect(updates.find(row => row.table === mediaAssets)?.values).toMatchObject({
+      consent: "withdrawn", state: "deleted", publication: "withdrawn",
+    })
+    expect(updates.find(row => row.table === mediaConsents)?.values).toMatchObject({
+      state: "withdrawn",
+    })
+    expect(updates.find(row => row.table === mediaConsents)?.values.withdrawnAt)
+      .toBeInstanceOf(Date)
+    const cleanup = inserts.filter(row => row.table === mediaCleanupJobs).flatMap(row => row.values)
+    expect(cleanup).toHaveLength(2)
+    expect(cleanup[0]).toMatchObject({
+      tenantId: TENANT, assetId: ASSET, providerPublicId: "ssl_abc",
+    })
+    expect(inserts.some(row => row.table === auditLogs)).toBe(true)
+  })
+
+  it("grants consent without queuing cleanup", async () => {
+    const { tx, inserts, updates } = fakeTx({ selectQueue: [[consentAsset()]] })
+    mocks.transaction.mockImplementation(async (cb: any) => cb(tx))
+
+    const result = await recordMediaConsent({
+      assetId: ASSET, state: "granted", evidenceRef: "doc-1",
+    })
+    expect(result).toEqual({
+      ok: true, assetId: ASSET, state: "granted", cleanupJobs: 0,
+    })
+    expect(updates.find(row => row.table === mediaAssets)?.values)
+      .toMatchObject({ consent: "granted" })
+    expect(updates.find(row => row.table === mediaConsents)?.values)
+      .toMatchObject({ state: "granted", evidenceRef: "doc-1" })
+    expect(updates.find(row => row.table === mediaConsents)?.values.grantedAt)
+      .toBeInstanceOf(Date)
+    expect(inserts.some(row => row.table === mediaCleanupJobs)).toBe(false)
+  })
+
+  it("refuses to grant publication for a non-ready asset", async () => {
+    const { tx } = fakeTx({ selectQueue: [[consentAsset({ state: "quarantined" })]] })
+    mocks.transaction.mockImplementation(async (cb: any) => cb(tx))
+    await expect(recordMediaConsent({ assetId: ASSET, state: "granted" })).resolves.toEqual({
+      ok: false, reason: "asset_not_available",
+    })
+  })
+
+  it("refuses a non-owner before touching consent", async () => {
+    mocks.requireMember.mockResolvedValue({ ...ACTOR_CTX, role: "team_manager" })
+    await expect(recordMediaConsent({ assetId: ASSET, state: "withdrawn" }))
+      .rejects.toMatchObject({ code: "permission_denied" })
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe("ENH-07-03: cleanup dead-letter operations", () => {
+  const deadJob = {
+    id: JOB, tenantId: TENANT, assetId: ASSET, providerPublicId: "ssl_abc",
+    action: "destroy_provider_asset", state: "dead_lettered", attempts: 8,
+    lastError: "network_unknown",
+  }
+
+  it("requeues a dead-lettered job with a clean ladder and audits it", async () => {
+    const { tx, updates, inserts } = fakeTx({
+      selectQueue: [[deadJob]],
+      updateRows: [{ id: JOB, state: "pending" }],
+    })
+    mocks.transaction.mockImplementation(async (cb: any) => cb(tx))
+
+    const result = await retryMediaCleanupJob({
+      id: JOB, actorId: ACTOR, actorRole: "super_admin",
+    })
+    expect(result).toEqual({ ok: true, id: JOB, state: "pending" })
+    expect(updates.find(row => row.table === mediaCleanupJobs)?.values).toMatchObject({
+      state: "pending", attempts: 0, leaseToken: null, lastError: null, resolvedAt: null,
+    })
+    expect(inserts.find(row => row.table === auditLogs)?.values)
+      .toMatchObject({ method: "MEDIA_CLEANUP_RETRY", actorRole: "super_admin" })
+  })
+
+  it("resolves without pretending the provider object was destroyed", async () => {
+    const { tx, updates, inserts } = fakeTx({
+      selectQueue: [[deadJob]],
+      updateRows: [{ id: JOB, state: "failed" }],
+    })
+    mocks.transaction.mockImplementation(async (cb: any) => cb(tx))
+
+    const result = await resolveMediaCleanupJob({
+      id: JOB, actorId: ACTOR, actorRole: "super_admin", note: "account closed",
+    })
+    expect(result).toEqual({ ok: true, id: JOB, state: "failed" })
+    expect(updates.find(row => row.table === mediaCleanupJobs)?.values).toMatchObject({
+      state: "failed", lastError: "operator_resolved: account closed",
+    })
+    expect(inserts.find(row => row.table === auditLogs)?.values)
+      .toMatchObject({ method: "MEDIA_CLEANUP_RESOLVED" })
+  })
+
+  it("refuses an action on a job that is not dead-lettered", async () => {
+    const { tx, updates } = fakeTx({
+      selectQueue: [[{ ...deadJob, state: "pending" }]],
+    })
+    mocks.transaction.mockImplementation(async (cb: any) => cb(tx))
+    await expect(retryMediaCleanupJob({
+      id: JOB, actorId: ACTOR, actorRole: "super_admin",
+    })).resolves.toEqual({ ok: false, reason: "not_dead_lettered" })
+    expect(updates).toHaveLength(0)
   })
 })

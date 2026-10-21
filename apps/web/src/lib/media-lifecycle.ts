@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { and, eq } from "drizzle-orm"
-import { auditLogs, db, mediaAssets } from "@mtk/database"
+import { and, eq, isNull } from "drizzle-orm"
+import { auditLogs, db, mediaAssets, mediaConsents } from "@mtk/database"
 import { MediaAuthorizationError, requireMediaMember } from "./media-authorization"
 import { enqueueMediaCleanupJobs } from "./media-cleanup"
 
@@ -83,5 +83,171 @@ export async function deleteMediaAsset(input: { assetId: string }): Promise<Dele
     })
 
     return { ok: true, assetId: asset.id, cleanupJobs }
+  })
+}
+
+const CONSENT_PURPOSE = "publication"
+
+export type RecordMediaConsentResult =
+  | {
+      ok: true
+      assetId: string
+      state: "granted" | "withdrawn"
+      cleanupJobs: number
+    }
+  | { ok: false; reason: "not_found" | "asset_not_available" }
+
+/**
+ * Asset-level publication consent. A person-bearing asset starts `pending`;
+ * granting unlocks publication, withdrawal is privacy-first: it withdraws
+ * publication, tombstones the asset and queues provider destruction while
+ * preserving the provider identity.
+ *
+ * Owner-only until product/legal defines who may evidence consent for a player.
+ * The consent row is updated in place under the asset lock, so concurrent
+ * grant/withdraw cannot leave the asset and evidence disagreeing.
+ */
+export async function recordMediaConsent(input: {
+  assetId: string
+  state: "granted" | "withdrawn"
+  evidenceRef?: string
+}): Promise<RecordMediaConsentResult> {
+  const actor = await requireMediaMember()
+  if (actor.role !== "league_owner") throw new MediaAuthorizationError("permission_denied")
+
+  return db.transaction(async tx => {
+    const [asset] = await tx
+      .select({
+        id: mediaAssets.id,
+        tenantId: mediaAssets.tenantId,
+        provider: mediaAssets.provider,
+        providerPublicId: mediaAssets.providerPublicId,
+        resourceType: mediaAssets.resourceType,
+        state: mediaAssets.state,
+        consent: mediaAssets.consent,
+      })
+      .from(mediaAssets)
+      .where(and(
+        eq(mediaAssets.id, input.assetId),
+        eq(mediaAssets.tenantId, actor.tenantId),
+      ))
+      .for("update")
+      .limit(1)
+    if (!asset) return { ok: false, reason: "not_found" }
+
+    const now = new Date()
+    if (input.state === "granted") {
+      if (asset.state !== "ready") return { ok: false, reason: "asset_not_available" }
+      await tx.update(mediaAssets)
+        .set({ consent: "granted", updatedAt: now })
+        .where(and(eq(mediaAssets.id, asset.id), eq(mediaAssets.tenantId, actor.tenantId)))
+      await writeConsent(tx, {
+        tenantId: asset.tenantId,
+        assetId: asset.id,
+        state: "granted",
+        evidenceRef: input.evidenceRef ?? null,
+        now,
+      })
+      await audit(tx, actor, asset.id, "MEDIA_CONSENT_GRANTED", {
+        assetId: asset.id,
+        state: "granted",
+        hasEvidence: Boolean(input.evidenceRef),
+      })
+      return { ok: true, assetId: asset.id, state: "granted", cleanupJobs: 0 }
+    }
+
+    if (asset.consent === "withdrawn" && asset.state === "deleted") {
+      return { ok: true, assetId: asset.id, state: "withdrawn", cleanupJobs: 0 }
+    }
+
+    await tx.update(mediaAssets)
+      .set({
+        consent: "withdrawn",
+        state: "deleted",
+        publication: "withdrawn",
+        deletedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(mediaAssets.id, asset.id), eq(mediaAssets.tenantId, actor.tenantId)))
+    await writeConsent(tx, {
+      tenantId: asset.tenantId,
+      assetId: asset.id,
+      state: "withdrawn",
+      evidenceRef: input.evidenceRef ?? null,
+      now,
+    })
+    const cleanupJobs = await enqueueMediaCleanupJobs(tx, {
+      tenantId: asset.tenantId,
+      assetId: asset.id,
+      provider: asset.provider,
+      providerPublicId: asset.providerPublicId,
+      providerResourceType: asset.resourceType,
+      actions: ["destroy_provider_asset", "invalidate_delivery"],
+    })
+    await audit(tx, actor, asset.id, "MEDIA_CONSENT_WITHDRAWN", {
+      assetId: asset.id,
+      state: "withdrawn",
+      cleanupJobs,
+    })
+    return { ok: true, assetId: asset.id, state: "withdrawn", cleanupJobs }
+  })
+}
+
+async function writeConsent(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  input: {
+    tenantId: string
+    assetId: string
+    state: "granted" | "withdrawn"
+    evidenceRef: string | null
+    now: Date
+  },
+): Promise<void> {
+  const [existing] = await tx.update(mediaConsents)
+    .set({
+      state: input.state,
+      evidenceRef: input.evidenceRef,
+      updatedAt: input.now,
+      ...(input.state === "granted"
+        ? { grantedAt: input.now, withdrawnAt: null }
+        : { withdrawnAt: input.now }),
+    })
+    .where(and(
+      eq(mediaConsents.assetId, input.assetId),
+      eq(mediaConsents.tenantId, input.tenantId),
+      eq(mediaConsents.purpose, CONSENT_PURPOSE),
+      isNull(mediaConsents.subjectUserId),
+    ))
+    .returning({ id: mediaConsents.id })
+  if (existing) return
+  await tx.insert(mediaConsents).values({
+    tenantId: input.tenantId,
+    assetId: input.assetId,
+    subjectUserId: null,
+    purpose: CONSENT_PURPOSE,
+    state: input.state,
+    evidenceRef: input.evidenceRef,
+    ...(input.state === "granted"
+      ? { grantedAt: input.now }
+      : { withdrawnAt: input.now }),
+  })
+}
+
+async function audit(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  actor: { tenantId: string; actorId: string; role: string },
+  assetId: string,
+  method: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await tx.insert(auditLogs).values({
+    requestId: randomUUID(),
+    tenantId: actor.tenantId,
+    actorId: actor.actorId,
+    actorRole: actor.role,
+    method,
+    path: `/api/media/${assetId}/consent`,
+    statusCode: "200",
+    payload,
   })
 }
