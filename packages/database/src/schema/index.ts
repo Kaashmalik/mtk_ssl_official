@@ -45,6 +45,7 @@ export * from "./tournament-applications";
 // Content & Media
 export * from "./documents";
 export * from "./media";
+export * from "./media-assets";
 export * from "./announcements";
 export * from "./tournament-awards";
 export * from "./tournament-award-disputes";
