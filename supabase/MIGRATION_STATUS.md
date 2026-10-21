@@ -3,6 +3,29 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **21 October 2026 (Batch 96) - four LOCAL migrations, NOT applied in this environment**
+> Listed in apply order; all are additive and no production/staging project was
+> contacted from this session. Review the SQL and deploy code before enabling the
+> dependent surfaces.
+>
+> 1. `20261021120000_notification_reads.sql` - per-member notification read
+>    markers; apply before enabling recipient read state.
+> 2. `20261021130000_notification_jobs.sql` - durable notification outbox;
+>    runtime remains OFF until `NOTIFICATION_JOBS_READY=true` after worker
+>    scheduling review.
+> 3. `20261021140000_media_assets.sql` - verified media plane (assets, upload
+>    sessions, bindings, consents, webhook journal, cleanup jobs, quotas);
+>    uploads/cleanup remain OFF until approved `MEDIA_*` limits, Cloudinary
+>    credentials and `MEDIA_CLEANUP_READY=true` exist.
+> 4. `20261021150000_broadcast_provider.sql` - tenant-owned broadcast
+>    connections/destinations/sessions/jobs/archives. No provider adapter or
+>    worker is enabled in this commit; OBS overlay reading is separately gated by
+>    `BROADCAST_OVERLAY_SECRET` (minimum 32 characters).
+>
+> RLS is forced on every new table with grants only to `ssl`/`service_role`.
+> This note records file existence, not application acceptance; the applied
+> ledger must be updated only after the reviewed staging/production run.
+
 > **19 October 2026 (Batch 171c) - drop_users_tenant_ids APPLIED remotely - drift gate FULLY GREEN**
 > The platform console deployment shipped (Vercel `mtk-ssl` <- github
 > `mtk_ssl_official@main`, live at https://mtk-ssl.vercel.app), satisfying
