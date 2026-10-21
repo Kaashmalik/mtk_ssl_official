@@ -92,6 +92,13 @@ const nextConfig = {
         protocol: "https",
         hostname: "img.clerk.com",
       },
+      {
+        // Verified media delivery. The upload API is server-signed and only
+        // reached by the browser uploader, so only the image CDN is needed in
+        // next/image here.
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
     ],
   },
   async headers() {

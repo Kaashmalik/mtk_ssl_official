@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mediaAssets, mediaQuotas, mediaUploadSessions } from "@mtk/database"
 import { MediaAuthorizationError } from "@/lib/media-authorization"
-import { MediaUploadError, authorizeMediaUpload, finalizeMediaUpload } from "@/lib/media-uploads"
+import { MediaUploadError, authorizeMediaUpload, finalizeMediaUpload, getMediaUploadStatus } from "@/lib/media-uploads"
 import type { ProviderAsset } from "@/lib/media-provider"
 
 /**
@@ -385,5 +385,47 @@ describe("ENH-07-02: finalize trusts only authoritative metadata", () => {
 
     await expect(finalizeMediaUpload({ sessionId: SESSION })).rejects.toBeInstanceOf(MediaUploadError)
     expect(inserts.some(row => row.table === mediaAssets)).toBe(false)
+  })
+})
+
+describe("ENH-07-04: owner-scoped upload reconciliation", () => {
+  it("reports a reserved session without inventing an asset", async () => {
+    readSession(session())
+    await expect(getMediaUploadStatus({ sessionId: SESSION })).resolves.toMatchObject({
+      sessionId: SESSION,
+      state: "reserved",
+      bindingType: "player",
+      resourceId: PLAYER,
+      assetId: null,
+      assetState: null,
+    })
+  })
+
+  it("reports the committed asset state after a lost finalize response", async () => {
+    readSession(session({ state: "finalized", assetId: ASSET }))
+    const assetChain: any = {
+      from: () => assetChain,
+      where: () => assetChain,
+      limit: async () => [{ state: "quarantined" }],
+    }
+    mocks.select.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [session({ state: "finalized", assetId: ASSET })],
+        }),
+      }),
+    }).mockReturnValueOnce(assetChain)
+
+    await expect(getMediaUploadStatus({ sessionId: SESSION })).resolves.toMatchObject({
+      state: "finalized",
+      assetId: ASSET,
+      assetState: "quarantined",
+    })
+  })
+
+  it("hides another user's or tenant's session", async () => {
+    readSession(null)
+    await expect(getMediaUploadStatus({ sessionId: SESSION }))
+      .rejects.toMatchObject({ code: "session_not_found" })
   })
 })

@@ -311,6 +311,73 @@ export async function finalizeMediaUpload(input: unknown): Promise<FinalizeMedia
   })
 }
 
+const uploadStatusInputSchema = z.object({ sessionId: z.string().uuid() }).strict()
+
+export type MediaUploadStatus = {
+  sessionId: string
+  state: "reserved" | "finalized" | "expired" | "cancelled"
+  kind: string
+  bindingType: string | null
+  resourceId: string | null
+  expiresAt: string
+  assetId: string | null
+  assetState: string | null
+}
+
+/**
+ * Owner-scoped reconciliation for an interrupted upload. The signed request is
+ * client-held, so after a browser reload the client can only trust the server
+ * for two facts: whether the session was finalized and what asset it produced.
+ * This endpoint is deliberately not a media listing.
+ */
+export async function getMediaUploadStatus(input: unknown): Promise<MediaUploadStatus> {
+  const parsed = uploadStatusInputSchema.parse(input)
+  const actor = await requireMediaMember()
+
+  const [session] = await db
+    .select({
+      id: mediaUploadSessions.id,
+      state: mediaUploadSessions.state,
+      kind: mediaUploadSessions.kind,
+      bindingType: mediaUploadSessions.bindingType,
+      resourceId: mediaUploadSessions.resourceId,
+      expiresAt: mediaUploadSessions.expiresAt,
+      assetId: mediaUploadSessions.assetId,
+    })
+    .from(mediaUploadSessions)
+    .where(and(
+      eq(mediaUploadSessions.id, parsed.sessionId),
+      eq(mediaUploadSessions.tenantId, actor.tenantId),
+      eq(mediaUploadSessions.userId, actor.actorId),
+    ))
+    .limit(1)
+  if (!session) throw new MediaUploadError("session_not_found")
+
+  let assetState: string | null = null
+  if (session.assetId) {
+    const [asset] = await db
+      .select({ state: mediaAssets.state })
+      .from(mediaAssets)
+      .where(and(
+        eq(mediaAssets.id, session.assetId),
+        eq(mediaAssets.tenantId, actor.tenantId),
+      ))
+      .limit(1)
+    assetState = asset?.state ?? null
+  }
+
+  return {
+    sessionId: session.id,
+    state: session.state as MediaUploadStatus["state"],
+    kind: session.kind,
+    bindingType: session.bindingType,
+    resourceId: session.resourceId,
+    expiresAt: session.expiresAt.toISOString(),
+    assetId: session.assetId,
+    assetState,
+  }
+}
+
 function sessionStateError(session: SessionRow): MediaUploadError {
   if (session.state === "finalized") return new MediaUploadError("already_finalized")
   if (session.state === "cancelled") return new MediaUploadError("session_cancelled")
