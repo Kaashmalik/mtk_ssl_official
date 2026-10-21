@@ -18,6 +18,13 @@ interface UseNotificationSocketOptions {
    * The parent (NotificationBell) can use this to refresh its count/list.
    */
   onNotification?: (payload: NotificationPayload) => void
+  /**
+   * ENH-06-04 realtime recovery: called on every successful (re)connect, so a
+   * socket that was down while notices were written performs a catch-up read
+   * instead of waiting for the next poll. The bell's read path is the source
+   * of truth; the socket is only the prompt.
+   */
+  onConnected?: () => void
 }
 
 /**
@@ -33,15 +40,21 @@ interface UseNotificationSocketOptions {
  */
 export function useNotificationSocket({
   onNotification,
+  onConnected,
 }: UseNotificationSocketOptions = {}) {
   const { user, isLoaded } = useUser()
   const socketRef = useRef<Socket | null>(null)
   const onNotificationRef = useRef(onNotification)
+  const onConnectedRef = useRef(onConnected)
 
-  // Keep callback ref up to date without reconnecting on each render
+  // Keep callback refs up to date without reconnecting on each render
   useEffect(() => {
     onNotificationRef.current = onNotification
   }, [onNotification])
+
+  useEffect(() => {
+    onConnectedRef.current = onConnected
+  }, [onConnected])
 
   const connect = useCallback(() => {
     const wsUrl = process.env.NEXT_PUBLIC_NOTIFICATION_WS_URL
@@ -75,6 +88,12 @@ export function useNotificationSocket({
 
     socket.on("notification", (payload: NotificationPayload) => {
       onNotificationRef.current?.(payload)
+    })
+
+    // Fires on the first connect AND after every reconnect. A notice written
+    // while the socket was down is never pushed; this read catches it up.
+    socket.on("connect", () => {
+      onConnectedRef.current?.()
     })
 
     socket.on("connect_error", () => {

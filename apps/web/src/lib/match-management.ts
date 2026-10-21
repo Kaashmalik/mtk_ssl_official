@@ -238,7 +238,7 @@ export async function manageMatch(clerkId: string, tenantId: string, command: Co
   }, { isolationLevel: "read committed" })
   if (command.kind === "reschedule" || command.kind === "cancel") {
     if (!updated || !before) throw new Error("Match changed. Reload before saving.")
-    queueMatchLifecycleFanout({
+    await queueMatchLifecycleFanout({
       tenantId,
       kind: command.kind === "reschedule" ? "reschedule" : "cancel",
       before: buildLifecycleSnapshot(before),

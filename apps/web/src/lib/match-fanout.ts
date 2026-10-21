@@ -4,16 +4,19 @@ import {
   matchEventDecision, matchEventCopy, matchEventDedupKey,
   type MatchFanoutKind,
 } from "@mtk/database/lib/match-event-notification"
-import { dispatchNotificationToTournamentFollowers } from "./notification-dispatch"
+import { enqueueTournamentFollowerJobs } from "./notification-fanout"
 
 /**
- * FAN-02 match lifecycle fan-out wiring (post-commit, fire-and-forget).
+ * FAN-02 match lifecycle fan-out wiring (post-commit producer).
  *
- * The lifecycle writers enqueue this AFTER their transaction commits; delivery
- * can never fail the official record. The shared pure policy decides whether
- * anything fans out at all (published competition, real state change, follower
- * surface exists); only in-app rows are ever written and the 24h dedup applies
- * per type + dedup key.
+ * ENH-06-04: this now only ENQUEUES durable per-follower jobs; it performs no
+ * provider HTTP. The lifecycle writers await it after their transaction
+ * commits, and a failure is swallowed - delivery can never fail the official
+ * record. The worker delivers later, so a terminated invocation leaves the
+ * owed notices in the outbox instead of losing them. The shared pure policy
+ * decides whether anything fans out at all (published competition, real state
+ * change, follower surface exists); jobs stay in-app and the durable event id
+ * keeps a replay idempotent per follower.
  */
 
 export type MatchLifecycleSnapshot = {
@@ -89,14 +92,16 @@ export async function fanOutMatchLifecycleEvent(trigger: MatchFanoutTrigger): Pr
     : undefined
   const copy = matchEventCopy(trigger.kind, { homeName, awayName, whenText })
 
-  await dispatchNotificationToTournamentFollowers({
+  await enqueueTournamentFollowerJobs({
     tenantId: trigger.tenantId,
     // Non-null by construction: the pure decision only notifies with a competition.
     tournamentId: trigger.after.tournamentId as string,
     type: copy.type,
     title: copy.title,
     body: copy.body,
-    dedupKey: matchEventDedupKey(trigger.kind, trigger.after.id, iso(trigger.after.scheduledDate)),
+    // ENH-06-04: the dedup key is the durable event id, so a replayed lifecycle
+    // event collides per follower instead of queuing a second notice.
+    eventId: matchEventDedupKey(trigger.kind, trigger.after.id, iso(trigger.after.scheduledDate)),
     // ENH-06-03: the notice points at the match it is about, so the bell item
     // (and the push payload) can deep-link into it. The recipient's own access
     // rules decide whether that match opens for them.
@@ -104,7 +109,12 @@ export async function fanOutMatchLifecycleEvent(trigger: MatchFanoutTrigger): Pr
   })
 }
 
-/** Never throws; delivery can never fail the official record. */
-export function queueMatchLifecycleFanout(trigger: MatchFanoutTrigger): void {
-  void fanOutMatchLifecycleEvent(trigger).catch(() => {})
+/**
+ * The enqueue is DB-only (no provider HTTP), so it is safe to AWAIT in the
+ * request that already committed the official record. Errors are still
+ * swallowed: notification delivery is ancillary and must never turn a saved
+ * match into a failed request.
+ */
+export async function queueMatchLifecycleFanout(trigger: MatchFanoutTrigger): Promise<void> {
+  await fanOutMatchLifecycleEvent(trigger).catch(() => {})
 }

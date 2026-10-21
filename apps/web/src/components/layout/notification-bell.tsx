@@ -38,9 +38,12 @@ export function NotificationBell() {
     return () => clearInterval(t)
   }, [refresh])
 
-  // Real-time update via WebSocket
+  // Real-time update via WebSocket. `onConnected` re-reads after every
+  // (re)connect: notices written during an outage are recovered from the DB,
+  // not lost with the dropped socket.
   useNotificationSocket({
     onNotification: () => refresh(),
+    onConnected: () => { void refresh() },
   })
 
   return (

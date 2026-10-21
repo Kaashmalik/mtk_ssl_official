@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   dispatchNotificationToMember,
-  dispatchNotificationToTournamentFollowers,
   saveNotificationPreferencesForMember,
   DEDUP_WINDOW_HOURS,
   FOLLOWER_FANOUT_LIMIT,
@@ -27,7 +26,6 @@ const brandRow = (row: Record<string, unknown>): Awaited<ReturnType<typeof getTe
 
 const LEAGUE = "00000000-0000-4000-8000-0000000000a1"
 const MEMBER = "00000000-0000-4000-8000-0000000000a2"
-const TOURNAMENT = "00000000-0000-4000-8000-0000000000a3"
 const PREFS = { inAppEnabled: true, quietStartMinute: null, quietEndMinute: null, timeZone: null }
 
 type SelectSpec = unknown[]
@@ -116,56 +114,6 @@ describe("Notification dispatch writer (FAN-02)", () => {
   it("exposes the dedup window and fan-out bounds as honest named constants", () => {
     expect(DEDUP_WINDOW_HOURS).toBe(24)
     expect(FOLLOWER_FANOUT_LIMIT).toBe(200)
-  })
-})
-
-describe("Tournament-follower fan-out (FAN-02)", () => {
-  it("fans out per member, each through the same consent gate; one refusal does not abort", async () => {
-    mocks.select.mockImplementation(() => ({
-      from: () => ({
-        innerJoin: () => ({
-          where: () => ({
-            orderBy: () => ({
-              limit: async () => [{ userId: MEMBER }, { userId: "00000000-0000-4000-8000-0000000000a9" }],
-            }),
-          }),
-        }),
-      }),
-    }))
-    const first = txWith([[], []])          // member 1: default-on, no dup -> written.
-    const second = txWith([[{ ...PREFS, inAppEnabled: false }]]) // member 2: consent off.
-    mocks.transaction
-      .mockImplementationOnce(async (fn: any) => fn(first.tx))
-      .mockImplementationOnce(async (fn: any) => fn(second.tx))
-
-    const result = await dispatchNotificationToTournamentFollowers({
-      tenantId: LEAGUE, tournamentId: TOURNAMENT, type: "award_declared",
-      title: "Award declared for a tournament you follow", body: "Cup: Best Batsman was declared.",
-      dedupKey: "award:abc-4",
-    })
-    expect(result).toEqual({ fanout: 2, written: 1 })
-    expect(first.inserts).toHaveLength(1)
-    expect(second.inserts).toHaveLength(0)
-    // Followers read is pinned to the league, the tournament type and the id.
-    const whereArgs = mocks.select.mock.calls
-    expect(whereArgs).toHaveLength(1)
-  })
-
-  it("still reaches the bell when the whole fan-out is requested after a declaration", async () => {
-    mocks.select.mockReturnValue({
-      from: () => ({
-        innerJoin: () => ({
-          where: () => ({
-            orderBy: () => ({ limit: async () => [] }),
-          }),
-        }),
-      }),
-    })
-    const result = await dispatchNotificationToTournamentFollowers({
-      tenantId: LEAGUE, tournamentId: TOURNAMENT, type: "award_declared",
-      title: "t", body: "b", dedupKey: "award:abc-5",
-    })
-    expect(result).toEqual({ fanout: 0, written: 0 })
   })
 })
 

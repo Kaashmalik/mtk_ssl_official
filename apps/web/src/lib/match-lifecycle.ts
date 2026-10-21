@@ -61,7 +61,7 @@ export async function mutateMatchLifecycle(clerkId: string, tenantId: string, ma
     return updated
   }, { isolationLevel: "read committed" })
   if (!updated || !before) throw new Error("Match changed. Reload before saving.")
-  queueMatchLifecycleFanout({
+  await queueMatchLifecycleFanout({
     tenantId,
     kind: "start",
     before: buildLifecycleSnapshot(before),

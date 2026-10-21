@@ -1,5 +1,5 @@
-import { db, notifications, notificationPreferences, fanFollows, users, tenants, pushTokens } from "@mtk/database"
-import { and, eq, gte, sql, desc } from "drizzle-orm"
+import { db, notifications, notificationPreferences, users, tenants, pushTokens } from "@mtk/database"
+import { and, eq, gte, sql } from "drizzle-orm"
 import { z } from "zod"
 import { memberDeliveryDecision, MINUTE_OF_DAY_MAX } from "@mtk/database/lib/notification-policy"
 import { isValidTimeZone } from "./time-policy"
@@ -313,59 +313,12 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
   return { written: result.written, reason: result.reason }
 }
 
-/**
- * Fan a notification out to (a bounded number of) followers of a tournament in
- * one league. Each member passes the same consent/dedup gate individually; a
- * failure for one member never aborts the others.
- */
-export async function dispatchNotificationToTournamentFollowers(input: {
-  tenantId: string
-  tournamentId: string
-  type: string
-  title: string
-  body: string
-  dedupKey: string
-  /**
-   * ENH-06-03: the match this notice is about, when there is one. It becomes
-   * a DEEP LINK in each member's bell item - the recipient's own access rules
-   * decide whether the match opens.
-   */
-  matchId?: string
-}): Promise<{ fanout: number; written: number }> {
-  z.string().uuid().parse(input.tenantId)
-  z.string().uuid().parse(input.tournamentId)
-  if (input.matchId) z.string().uuid().parse(input.matchId)
-  const followers = await db
-    .select({ userId: fanFollows.userId })
-    .from(fanFollows)
-    .innerJoin(users, and(eq(users.id, fanFollows.userId), eq(users.isActive, true)))
-    .where(and(
-      eq(fanFollows.tenantId, input.tenantId),
-      eq(fanFollows.followableType, "tournament"),
-      eq(fanFollows.followableId, input.tournamentId),
-    ))
-    .orderBy(desc(fanFollows.createdAt))
-    .limit(FOLLOWER_FANOUT_LIMIT)
-
-  let written = 0
-  for (const follower of followers) {
-    try {
-      const result = await dispatchNotificationToMember({
-        tenantId: input.tenantId,
-        memberId: follower.userId,
-        type: input.type,
-        title: input.title,
-        body: input.body,
-        dedupKey: input.dedupKey,
-        ...(input.matchId ? { matchId: input.matchId } : {}),
-      })
-      if (result.written) written += 1
-    } catch {
-      // One member's delivery problem never aborts the fan-out.
-    }
-  }
-  return { fanout: followers.length, written }
-}
+// ENH-06-04: tournament-follower fan-out moved OUT of the request path into
+// durable jobs. Producers call `enqueueTournamentFollowerJobs` (see
+// `notification-fanout.ts`); the bounded worker then runs every member through
+// this same consent/dedup gate. It is deliberately not re-exported here so a
+// caller cannot accidentally keep sending provider HTTP inside a lifecycle
+// request.
 
 const notificationPreferencesInputSchema = z.object({
   inAppEnabled: z.boolean(),

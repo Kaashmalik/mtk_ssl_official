@@ -1,17 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fanOutMatchLifecycleEvent, buildLifecycleSnapshot } from "@/lib/match-fanout"
 
-const mocks = vi.hoisted(() => ({ select: vi.fn(), dispatch: vi.fn() }))
+const mocks = vi.hoisted(() => ({ select: vi.fn(), enqueue: vi.fn() }))
 
-// Passthrough for the real policy and tables; only the db handles and the
-// dispatch writer are mocked.
+// Passthrough for the real policy and tables; only the db reads and the
+// durable enqueue writer are mocked.
 vi.mock("@mtk/database", async (importOriginal) => ({
   ...await importOriginal<typeof import("@mtk/database")>(),
   db: { select: mocks.select },
 }))
-vi.mock("@/lib/notification-dispatch", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/notification-dispatch")>(),
-  dispatchNotificationToTournamentFollowers: mocks.dispatch,
+vi.mock("@/lib/notification-fanout", () => ({
+  enqueueTournamentFollowerJobs: mocks.enqueue,
 }))
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1"
@@ -53,19 +52,19 @@ describe("Match lifecycle fan-out wiring (FAN-02)", () => {
     harness([{ status: "live" }], [
       { id: TEAM_A, name: "Lions" }, { id: TEAM_B, name: "Falcons" },
     ])
-    mocks.dispatch.mockResolvedValue({ fanout: 2, written: 2 })
+    mocks.enqueue.mockResolvedValue({ fanout: 2, enqueued: 2 })
     await fanOutMatchLifecycleEvent({
       tenantId: TENANT,
       kind: "reschedule",
       before: buildLifecycleSnapshot(SNAPSHOT),
       after: buildLifecycleSnapshot({ ...SNAPSHOT, scheduledDate: new Date("2026-10-21T14:00:00.000Z") }),
     })
-    expect(mocks.dispatch).toHaveBeenCalledTimes(1)
-    const call = mocks.dispatch.mock.calls[0][0]
+    expect(mocks.enqueue).toHaveBeenCalledTimes(1)
+    const call = mocks.enqueue.mock.calls[0][0]
     expect(call).toMatchObject({
       tenantId: TENANT, tournamentId: TOURNEY,
       type: "match_rescheduled", title: "Match rescheduled",
-      dedupKey: `match:${MATCH}:rescheduled:2026-10-21T14:00:00.000Z`,
+      eventId: `match:${MATCH}:rescheduled:2026-10-21T14:00:00.000Z`,
       // ENH-06-03: the notice points at the match it is about, so the bell item
       // (and the push payload) can deep-link into it.
       matchId: MATCH,
@@ -76,13 +75,13 @@ describe("Match lifecycle fan-out wiring (FAN-02)", () => {
 
   it("dispatches a start event only when the match actually went live", async () => {
     harness([{ status: "live" }], [{ id: TEAM_A, name: "Lions" }, { id: TEAM_B, name: "Falcons" }])
-    mocks.dispatch.mockResolvedValue({ fanout: 1, written: 1 })
+    mocks.enqueue.mockResolvedValue({ fanout: 1, enqueued: 1 })
     await fanOutMatchLifecycleEvent({
       tenantId: TENANT, kind: "start",
       before: buildLifecycleSnapshot({ ...SNAPSHOT, status: "toss" }),
       after: buildLifecycleSnapshot({ ...SNAPSHOT, status: "live" }),
     })
-    expect(mocks.dispatch.mock.calls[0][0]).toMatchObject({ type: "match_started" })
+    expect(mocks.enqueue.mock.calls[0][0]).toMatchObject({ type: "match_started" })
   })
 
   it("stops on a replay or toss-only write without querying names or dispatching", async () => {
@@ -92,7 +91,7 @@ describe("Match lifecycle fan-out wiring (FAN-02)", () => {
       before: buildLifecycleSnapshot({ ...SNAPSHOT, status: "live" }),
       after: buildLifecycleSnapshot({ ...SNAPSHOT, status: "live" }),
     })
-    expect(mocks.dispatch).not.toHaveBeenCalled()
+    expect(mocks.enqueue).not.toHaveBeenCalled()
     expect(mocks.select).toHaveBeenCalledTimes(1) // tournament read only
   })
 
@@ -108,7 +107,7 @@ describe("Match lifecycle fan-out wiring (FAN-02)", () => {
       before: buildLifecycleSnapshot(SNAPSHOT),
       after: buildLifecycleSnapshot({ ...SNAPSHOT, status: "cancelled" }),
     })
-    expect(mocks.dispatch).not.toHaveBeenCalled()
+    expect(mocks.enqueue).not.toHaveBeenCalled()
   })
 
   it("fails closed when a participating team cannot be read", async () => {
@@ -118,6 +117,6 @@ describe("Match lifecycle fan-out wiring (FAN-02)", () => {
       before: buildLifecycleSnapshot(SNAPSHOT),
       after: buildLifecycleSnapshot({ ...SNAPSHOT, scheduledDate: new Date("2026-10-21T14:00:00.000Z") }),
     })
-    expect(mocks.dispatch).not.toHaveBeenCalled()
+    expect(mocks.enqueue).not.toHaveBeenCalled()
   })
 })

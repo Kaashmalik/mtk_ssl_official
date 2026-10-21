@@ -2,7 +2,7 @@ import { randomUUID } from "crypto"
 import { db, tournamentAwards, tournaments, players, teams, leagueRegistrations, auditLogs } from "@mtk/database"
 import { AWARD_CATEGORIES, AWARD_CATEGORY_LABELS, isAwardVisible, type AwardCategory } from "@mtk/database/lib/award-policy"
 import { requireActiveLeagueContext } from "@/lib/league-reads"
-import { dispatchNotificationToTournamentFollowers } from "@/lib/notification-dispatch"
+import { enqueueTournamentFollowerJobs } from "@/lib/notification-fanout"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
 
@@ -178,19 +178,20 @@ export async function declareTournamentAward(input: unknown): Promise<DeclareAwa
   }, { isolationLevel: "read committed" })
 
   // FAN-02: followers of the tournament learn about a new/corrected award.
-  // A replay (`changed: false`) dispatches nothing, so re-runs are durable. The
-  // fan-out itself is consented (per-member policy), deduplicated (award id)
-  // and fire-and-forget: a delivery problem NEVER fails the declaration, which
-  // is the official record; notification delivery is an ancillary courtesy.
+  // ENH-06-04: this ENQUEUES durable per-follower jobs (no provider HTTP in the
+  // declaration request); the worker delivers later. A replay (`changed:
+  // false`) enqueues nothing, and the award id is the durable event id, so a
+  // retried producer collides instead of double-sending. A failure here never
+  // rolls back the official record; notification delivery is ancillary.
   if (result.changed && declaredTournamentName) {
     try {
-      await dispatchNotificationToTournamentFollowers({
+      await enqueueTournamentFollowerJobs({
         tenantId: context.tenantId,
         tournamentId: parsed.tournamentId,
         type: "award_declared",
         title: "Award declared for a tournament you follow",
         body: `${declaredTournamentName}: ${AWARD_CATEGORY_LABELS[result.category]} was declared.`,
-        dedupKey: `award:${result.awardId}`,
+        eventId: `award:${result.awardId}`,
       })
     } catch {
       // Ancillary by design; the official record and its audit already exist.
