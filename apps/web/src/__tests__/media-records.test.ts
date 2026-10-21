@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import {
+  cloudinaryDeliveryUrl,
   findDeliverableMediaAsset,
+  findPublishedMediaDeliveryUrl,
   legacyMediaRecord,
   toPublicMediaRecord,
 } from "@/lib/media-records"
@@ -109,5 +111,70 @@ describe("ENH-07-01: tenant-scoped delivery read", () => {
     await expect(findDeliverableMediaAsset({ tenantId: "nope", assetId: ASSET })).rejects.toThrow()
     await expect(findDeliverableMediaAsset({ tenantId: TENANT, assetId: "nope" })).rejects.toThrow()
     expect(mocks.select).not.toHaveBeenCalled()
+  })
+})
+
+describe("ENH-07-02: public delivery locator", () => {
+  function selectJoinedRows(rows: unknown[]) {
+    mocks.select.mockImplementation(() => {
+      const chain: any = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: () => chain,
+        limit: () => Promise.resolve(rows),
+      }
+      return chain
+    })
+  }
+
+  const delivery = "https://res.cloudinary.com/demo/image/upload/v17/ssl_demo.png"
+
+  it("returns the stored Cloudinary URL only for ready+published+active", async () => {
+    selectJoinedRows([{
+      state: "ready", publication: "published", tenantActive: true,
+      metadata: { deliveryUrl: delivery },
+    }])
+    await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBe(delivery)
+  })
+
+  it("hides unpublished, quarantined and inactive-league assets", async () => {
+    selectJoinedRows([{
+      state: "ready", publication: "unpublished", tenantActive: true,
+      metadata: { deliveryUrl: delivery },
+    }])
+    await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+
+    selectJoinedRows([{
+      state: "quarantined", publication: "published", tenantActive: true,
+      metadata: { deliveryUrl: delivery },
+    }])
+    await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+
+    selectJoinedRows([{
+      state: "ready", publication: "published", tenantActive: false,
+      metadata: { deliveryUrl: delivery },
+    }])
+    await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+  })
+
+  it("refuses a missing row or a non-Cloudinary/credentialed URL", async () => {
+    selectJoinedRows([])
+    await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+
+    for (const deliveryUrl of [
+      "http://res.cloudinary.com/demo/image.png",
+      "https://evil.example/demo.png",
+      "data:image/png;base64,AAAA",
+      "https://user:pass@res.cloudinary.com/demo/image.png",
+      "https://res.cloudinary.com/",
+    ]) {
+      expect(cloudinaryDeliveryUrl({ deliveryUrl })).toBeNull()
+    }
+  })
+
+  it("strips fragments and keeps the provider path", () => {
+    expect(cloudinaryDeliveryUrl({
+      deliveryUrl: `${delivery}#fragment`,
+    })).toBe(delivery)
   })
 })

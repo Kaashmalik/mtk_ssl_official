@@ -1,4 +1,4 @@
-import { db, mediaAssets, type Media } from "@mtk/database"
+import { db, mediaAssets, tenants, type Media } from "@mtk/database"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
 import {
@@ -106,4 +106,60 @@ export async function findDeliverableMediaAsset(input: {
     .limit(1)
   if (!asset) return null
   return toPublicMediaRecord(asset, input.audience ?? "public")
+}
+
+const CLOUDINARY_DELIVERY_HOST = "res.cloudinary.com"
+
+/**
+ * ENH-07-02 delivery: the one public locator the server is willing to hand out.
+ *
+ * The asset id alone is not authority. The row must be ready AND explicitly
+ * published, its league must still be active, and the stored URL must be an
+ * https Cloudinary delivery URL. Legacy/unverified rows, quarantined rows and
+ * unpublished rows all collapse to null so the route cannot reveal lifecycle
+ * state. Provider metadata (public id, version, raw payload) never leaves this
+ * function.
+ *
+ * Private/entitled delivery is deliberately not implemented here; it needs a
+ * separate approved authentication/expiry design.
+ */
+export async function findPublishedMediaDeliveryUrl(assetId: string): Promise<string | null> {
+  const id = z.string().uuid().parse(assetId)
+  const [row] = await db
+    .select({
+      state: mediaAssets.state,
+      publication: mediaAssets.publication,
+      metadata: mediaAssets.metadata,
+      tenantActive: tenants.isActive,
+    })
+    .from(mediaAssets)
+    .innerJoin(tenants, eq(tenants.id, mediaAssets.tenantId))
+    .where(eq(mediaAssets.id, id))
+    .limit(1)
+  if (!row || row.tenantActive !== true) return null
+  const decision = mediaDeliveryDecision({
+    state: row.state as MediaAssetState,
+    publication: row.publication as MediaPublication,
+    audience: "public",
+  })
+  if (!decision.allowed) return null
+  return cloudinaryDeliveryUrl(row.metadata)
+}
+
+/** Accept only a plain https Cloudinary delivery URL; never a redirector or data URL. */
+export function cloudinaryDeliveryUrl(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null
+  const raw = (metadata as { deliveryUrl?: unknown }).deliveryUrl
+  if (typeof raw !== "string" || raw.length > 2_048) return null
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+  if (url.protocol !== "https:" || url.hostname !== CLOUDINARY_DELIVERY_HOST) return null
+  if (!url.pathname.startsWith("/") || url.pathname === "/") return null
+  if (url.username || url.password) return null
+  url.hash = ""
+  return url.toString()
 }
