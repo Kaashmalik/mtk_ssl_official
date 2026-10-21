@@ -10,6 +10,7 @@ import { getMatch, deleteMatch } from "@/app/actions/matches"
 import { DeleteButton } from "@/components/shared/delete-button"
 import { MatchLifecycleControls } from "@/components/matches/match-lifecycle-controls"
 import { StreamStartModal } from "@/components/matches/stream-start-modal"
+import { BroadcastOverlayButton } from "@/components/broadcast/broadcast-overlay-button"
 import { ScorerAssign } from "@/components/matches/scorer-assign"
 import { ScorerApprovalButton } from "@/components/matches/scorer-approval-button"
 import { UmpireAssign } from "@/components/matches/umpire-assign"
@@ -466,6 +467,7 @@ let viewerIsLeagueOwner = false
         />
         <div className="mt-3 space-y-3">
           <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} />
+          {viewerLeagueOwner && <BroadcastOverlayButton matchId={match.id} />}
           <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} currentBackupScorerId={match.backupScorerId} />
           <UmpireAssign matchId={match.id} currentUmpire1Id={match.umpire1Id} currentUmpire2Id={match.umpire2Id} />
           {viewerOccupiesScorerSlot && (

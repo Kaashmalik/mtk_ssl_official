@@ -18,6 +18,7 @@ export * from "./teams";
 export * from "./players";
 export * from "./venues";
 export * from "./matches";
+export * from "./broadcast";
 export * from "./match-innings";
 export * from "./match-balls";
 
