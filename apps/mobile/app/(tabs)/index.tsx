@@ -79,9 +79,9 @@ export default function HomeScreen() {
               <Text style={styles.vsText}>vs</Text>
               <Text style={styles.teamName}>{match.team2Name}</Text>
             </View>
-            {(match.scheduledDate || match.scheduled_date || match.scheduledAt) && (
+            {match.scheduledDate && (
               <Text style={styles.scheduledTime}>
-                {new Date(match.scheduledDate || match.scheduled_date || match.scheduledAt!).toLocaleString()}
+                {new Date(match.scheduledDate).toLocaleString()}
               </Text>
             )}
           </TouchableOpacity>

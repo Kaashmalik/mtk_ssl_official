@@ -85,11 +85,6 @@ export default function MatchScreen() {
             </View>
           )}
         </View>
-        {currentMatch.venue && (
-          <Text style={styles.venue}>
-            <Ionicons name="location" size={16} color="#6b7280" /> {currentMatch.venue}
-          </Text>
-        )}
         <WatchLiveButton match={currentMatch} />
         {currentMatch.result && (
           <Text style={styles.result}>{currentMatch.result}</Text>
@@ -158,20 +153,22 @@ export default function MatchScreen() {
 
       {/* Match Info */}
       <View style={styles.infoCard}>
-        {currentMatch.tossWinner && (
+        {currentMatch.tossWinnerId && (
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Toss:</Text>
             <Text style={styles.infoValue}>
-              {currentMatch.tossWinner} won the toss and chose to{" "}
-              {currentMatch.tossDecision}
+              {(currentMatch.tossWinnerId === currentMatch.team1Id
+                ? currentMatch.team1Name
+                : currentMatch.team2Name) ?? "A team"}{" "}
+              won the toss and chose to {currentMatch.tossDecision ?? "bat"}
             </Text>
           </View>
         )}
-        {(currentMatch.scheduledDate || currentMatch.scheduled_date || currentMatch.scheduledAt) && (
+        {currentMatch.scheduledDate && (
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Scheduled:</Text>
             <Text style={styles.infoValue}>
-              {new Date(currentMatch.scheduledDate || currentMatch.scheduled_date || currentMatch.scheduledAt!).toLocaleString()}
+              {new Date(currentMatch.scheduledDate).toLocaleString()}
             </Text>
           </View>
         )}
@@ -279,10 +276,6 @@ const styles = StyleSheet.create({
   offlineText: {
     color: "#6b7280",
     fontSize: 12,
-  },
-  venue: {
-    fontSize: 14,
-    color: "#6b7280",
   },
   result: {
     marginTop: 8,

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  bucketMobileFixtures,
   decodePageCursor,
   encodePageCursor,
   makeCursorPageSchema,
+  parseMobileFixturePage,
   PUBLIC_READS_SCHEMA_VERSION,
+  type MobileFixtureV1,
   type ProjectionScope,
 } from "../public-reads";
 
@@ -66,5 +69,74 @@ describe("ENH-03-01: cursor codec (runtime-neutral base64url)", () => {
     expect(decodePageCursor(encodePageCursor({ sortKey: "k" } as never))).toBeNull();
     const wrongEnvelope = encodePageCursor({ sortKey: "k", id: "i" }).slice(0, -2);
     expect(decodePageCursor(`${wrongEnvelope}xx`)).toBeNull();
+  });
+});
+
+describe("ENH-03-03: the mobile fixtures feed vocabulary", () => {
+  const fixture: MobileFixtureV1 = {
+    id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    tenantId: "3f2504e0-4f89-41d3-9a0c-0305e82c3302",
+    tournamentId: null,
+    status: "postponed",
+    scheduledDate: "2026-10-20T09:00:00.000Z",
+    startedAt: null,
+    completedAt: null,
+    team1Id: "3f2504e0-4f89-41d3-9a0c-0305e82c3303",
+    team2Id: "3f2504e0-4f89-41d3-9a0c-0305e82c3304",
+    team1Name: "Alpha XI",
+    team2Name: "Beta XI",
+    winnerId: null,
+    result: null,
+    tossWinnerId: "3f2504e0-4f89-41d3-9a0c-0305e82c3303",
+    tossDecision: "bat",
+    liveStreamUrl: null,
+    streamStatus: "idle",
+  };
+
+  it("parses a page of fixtures through the shared envelope", () => {
+    const page = parseMobileFixturePage({
+      items: [fixture, { ...fixture, id: "3f2504e0-4f89-41d3-9a0c-0305e82c3305", status: "forfeited" }],
+      nextCursor: null,
+      revision: 2,
+    });
+    expect(page.items).toHaveLength(2);
+    expect(page.items[0].status).toBe("postponed");
+    expect(page.items[1].status).toBe("forfeited");
+    expect(page.revision).toBe(2);
+  });
+
+  it("refuses a page that carries a raw, unprojected row", () => {
+    // A raw database row (snake_case, unknown statuses, extra internals)
+    // must fail the page, not be silently mapped into the canonical shape.
+    expect(() => parseMobileFixturePage({
+      items: [{ ...fixture, scheduled_date: fixture.scheduledDate }],
+      nextCursor: null, revision: 1,
+    })).toThrow();
+    expect(() => parseMobileFixturePage({
+      items: [{ ...fixture, status: "mysterious" }],
+      nextCursor: null, revision: 1,
+    })).toThrow();
+    expect(() => parseMobileFixturePage({
+      items: [{ ...fixture, streamStatus: "recording" }],
+      nextCursor: null, revision: 1,
+    })).toThrow();
+    expect(() => parseMobileFixturePage({
+      items: [{ ...fixture, createdBy: "internal-user" }],
+      nextCursor: null, revision: 1,
+    })).toThrow();
+  });
+
+  it("buckets every full-status fixture exactly once or deliberately nowhere", () => {
+    const statuses = ["scheduled", "toss", "live", "innings_break", "completed", "abandoned", "cancelled", "no_result", "forfeited", "postponed"] as const;
+    const all = statuses.map((status, index) => ({ ...fixture, id: `id-${index}`, status }));
+    const buckets = bucketMobileFixtures(all);
+    const bucketed = [...buckets.live, ...buckets.upcoming, ...buckets.completed];
+    // Every status lands in exactly one bucket except cancelled, which is a
+    // terminated fixture and is deliberately surfaced nowhere as playable.
+    expect(bucketed).toHaveLength(9);
+    expect(buckets.live.map((f) => f.status).sort()).toEqual(["innings_break", "live", "toss"]);
+    expect(buckets.upcoming.map((f) => f.status).sort()).toEqual(["postponed", "scheduled"]);
+    expect(buckets.completed.map((f) => f.status).sort()).toEqual(["abandoned", "completed", "forfeited", "no_result"]);
+    expect(all.filter((f) => !bucketed.includes(f)).map((f) => f.status)).toEqual(["cancelled"]);
   });
 });

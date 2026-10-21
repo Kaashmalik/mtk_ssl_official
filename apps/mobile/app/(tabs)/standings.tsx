@@ -1,100 +1,37 @@
 import { View, Text, StyleSheet, FlatList, RefreshControl } from "react-native";
 import { useEffect, useState, useCallback } from "react";
 import { useMatchStore } from "@/store/match-store";
-import type { Match } from "@/types";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
 
-interface StandingRow {
-  teamId: string;
-  teamName: string;
-  played: number;
-  wins: number;
-  losses: number;
-  points: number;
-  runs: number;
-  overs: number;
-}
+/** Same presentation as the web's `formatNetRunRate`: explicit sign, 2dp. */
+const formatNetRunRate = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 
-const buildStandings = (matches: Match[]): StandingRow[] => {
-  const rows = new Map<string, StandingRow>();
-
-  const ensureRow = (teamId: string, teamName: string) => {
-    if (!rows.has(teamId)) {
-      rows.set(teamId, {
-        teamId,
-        teamName,
-        played: 0,
-        wins: 0,
-        losses: 0,
-        points: 0,
-        runs: 0,
-        overs: 0,
-      });
-    }
-    return rows.get(teamId)!;
-  };
-
-  matches.forEach((match) => {
-    if (match.status !== "completed") return;
-
-    const team1 = ensureRow(match.team1Id ?? "", match.team1Name ?? "");
-    const team2 = ensureRow(match.team2Id ?? "", match.team2Name ?? "");
-
-    team1.played += 1;
-    team2.played += 1;
-
-    if (match.team1Score !== undefined && match.team1Overs) {
-      team1.runs += match.team1Score;
-      team1.overs += parseFloat(match.team1Overs.toString()) || 0;
-    }
-    if (match.team2Score !== undefined && match.team2Overs) {
-      team2.runs += match.team2Score;
-      team2.overs += parseFloat(match.team2Overs.toString()) || 0;
-    }
-
-    if (match.winnerId) {
-      if (match.winnerId === match.team1Id) {
-        team1.wins += 1;
-        team2.losses += 1;
-        team1.points += 2;
-      } else if (match.winnerId === match.team2Id) {
-        team2.wins += 1;
-        team1.losses += 1;
-        team2.points += 2;
-      }
-    }
-  });
-
-  return Array.from(rows.values()).sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    return b.wins - a.wins;
-  });
-};
-
-const formatRR = (runs: number, overs: number) => {
-  if (!overs) return "0.00";
-  return (runs / overs).toFixed(2);
-};
-
+/**
+ * ENH-03-03: the points table is served by `GET /api/mobile/standings` —
+ * computed by the SHARED canonical rule v2 fold (2/1/0 points, balls-based
+ * net run rate, forfeited/postponed/abandoned fixtures excluded from
+ * "played" by the rule) and stamped with its `ruleVersion`. The device only
+ * renders rows; it never re-derives standings from fixture rows, which is
+ * how this screen used to drift from the web's points table.
+ */
 export default function StandingsScreen() {
-  const { matches, fetchMatches, loading } = useMatchStore();
+  const { standings, standingsRuleVersion, fetchStandings, loading, error } =
+    useMatchStore();
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
+    setRefreshing(true);
     try {
-      setError(null);
-      await fetchMatches();
-    } catch (e: any) {
-      setError(e.message || "Failed to fetch standings");
+      await fetchStandings();
     } finally {
       setRefreshing(false);
     }
-  }, [fetchMatches]);
+  }, [fetchStandings]);
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onRefresh = () => {
@@ -102,14 +39,12 @@ export default function StandingsScreen() {
     loadData();
   };
 
-  const standings = buildStandings(matches);
-
-  if (loading && !refreshing) {
+  if (loading && !refreshing && standings.length === 0) {
     return <LoadingSpinner message="Loading standings..." />;
   }
 
-  if (error) {
-    return <ErrorView message={error} onRetry={loadData} />;
+  if (error && standings.length === 0) {
+    return <ErrorView message={error} onRetry={() => loadData()} />;
   }
 
   const renderHeader = () => (
@@ -125,7 +60,7 @@ export default function StandingsScreen() {
           <Text style={styles.cell}>W</Text>
           <Text style={styles.cell}>L</Text>
           <Text style={styles.cell}>Pts</Text>
-          <Text style={styles.cell}>RR</Text>
+          <Text style={styles.cell}>NRR</Text>
         </View>
       )}
     </View>
@@ -136,6 +71,11 @@ export default function StandingsScreen() {
       data={standings}
       keyExtractor={(item) => item.teamId}
       ListHeaderComponent={renderHeader}
+      ListFooterComponent={
+        standingsRuleVersion != null && standings.length > 0 ? (
+          <Text style={styles.ruleFooter}>Rules v{standingsRuleVersion}</Text>
+        ) : null
+      }
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#16a34a"]} />
@@ -147,12 +87,14 @@ export default function StandingsScreen() {
       }
       renderItem={({ item: row }) => (
         <View style={styles.row}>
-          <Text style={[styles.cell, styles.teamCell]}>{row.teamName}</Text>
+          <Text style={[styles.cell, styles.teamCell]}>{row.name}</Text>
           <Text style={styles.cell}>{row.played}</Text>
-          <Text style={styles.cell}>{row.wins}</Text>
-          <Text style={styles.cell}>{row.losses}</Text>
+          <Text style={styles.cell}>{row.won}</Text>
+          <Text style={styles.cell}>{row.lost}</Text>
           <Text style={styles.cell}>{row.points}</Text>
-          <Text style={styles.cell}>{formatRR(row.runs, row.overs)}</Text>
+          <Text style={styles.cell}>
+            {row.hasNetRunRate ? formatNetRunRate(row.netRunRate) : "—"}
+          </Text>
         </View>
       )}
     />
@@ -223,5 +165,11 @@ const styles = StyleSheet.create({
     textAlign: "left",
     fontSize: 14,
     fontWeight: "bold",
+  },
+  ruleFooter: {
+    textAlign: "center",
+    marginTop: 12,
+    fontSize: 12,
+    color: "#9ca3af",
   },
 });

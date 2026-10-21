@@ -16,8 +16,8 @@ const WEB_APP_URL =
  * player can replace this later without changing the call sites.
  */
 export function WatchLiveButton({ match }: { match: Match }) {
-  const streamUrl = match.liveStreamUrl ?? match.live_stream_url ?? null;
-  const streamStatus = match.streamStatus ?? match.stream_status ?? "idle";
+  const streamUrl = match.liveStreamUrl ?? null;
+  const streamStatus = match.streamStatus ?? "idle";
   const isLive = streamStatus === "live" && !!streamUrl;
 
   if (!isLive) return null;

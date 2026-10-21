@@ -1,3 +1,5 @@
+import { MATCH_STATUSES, type MatchStatus } from "./scoring";
+
 /**
  * ENH-03-01: canonical reader envelopes for public and member reads.
  *
@@ -184,4 +186,113 @@ export function decodePageCursor(cursor: string): PageCursor | null {
   } catch {
     return null;
   }
+}
+
+// --- ENH-03-03: the mobile fixtures feed ---------------------------------------
+
+/**
+ * The explicit member projection a fixture lands in on the native app: a
+ * bounded allowlist with RESOLVED team names — the device never re-hydrates
+ * a raw database row (snake_case columns, fabricated names, missing teams).
+ * `status` carries the COMPLETE lifecycle vocabulary, including forfeited
+ * and postponed, so a native list can never misstate a fixture's state.
+ */
+export type MobileFixtureV1 = {
+  id: string;
+  tenantId: string;
+  tournamentId: string | null;
+  status: MatchStatus;
+  /** ISO 8601, or null when the league has not scheduled the fixture. */
+  scheduledDate: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  team1Id: string;
+  team2Id: string;
+  team1Name: string | null;
+  team2Name: string | null;
+  winnerId: string | null;
+  result: string | null;
+  tossWinnerId: string | null;
+  tossDecision: "bat" | "bowl" | null;
+  liveStreamUrl: string | null;
+  streamStatus: "idle" | "live" | "ended" | null;
+};
+
+const MATCH_STATUS_SET: ReadonlySet<string> = new Set(MATCH_STATUSES);
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function nullableNonEmptyString(value: unknown): boolean {
+  return value === null || nonEmptyString(value);
+}
+
+/** A strict per-row projection: a raw row, an unknown status or an internal
+ *  field fails the WHOLE page instead of being silently mapped or dropped. */
+const MOBILE_FIXTURE_FIELDS: ReadonlySet<string> = new Set([
+  "id", "tenantId", "tournamentId", "status", "scheduledDate", "startedAt",
+  "completedAt", "team1Id", "team2Id", "team1Name", "team2Name", "winnerId",
+  "result", "tossWinnerId", "tossDecision", "liveStreamUrl", "streamStatus",
+]);
+const STREAM_STATUSES: ReadonlySet<string> = new Set(["idle", "live", "ended"]);
+
+function mobileFixtureProjection(raw: unknown): MobileFixtureV1 | null {
+  const row = asRecord(raw);
+  if (!row) return null;
+  if (![row.id, row.tenantId, row.team1Id, row.team2Id].every(nonEmptyString)) return null;
+  if (typeof row.status !== "string" || !MATCH_STATUS_SET.has(row.status)) return null;
+  if (row.tossDecision !== null && row.tossDecision !== "bat" && row.tossDecision !== "bowl") return null;
+  if (row.streamStatus !== null && (typeof row.streamStatus !== "string" || !STREAM_STATUSES.has(row.streamStatus))) return null;
+  if (![row.tournamentId, row.scheduledDate, row.startedAt, row.completedAt, row.team1Name,
+    row.team2Name, row.winnerId, row.result, row.tossWinnerId, row.liveStreamUrl]
+    .every(nullableNonEmptyString)) return null;
+  // No internal fields may ride along: the projection is the whole shape.
+  for (const key of Object.keys(row)) {
+    if (!MOBILE_FIXTURE_FIELDS.has(key)) return null;
+  }
+  return {
+    id: row.id as string, tenantId: row.tenantId as string, tournamentId: row.tournamentId as string | null,
+    status: row.status as MatchStatus, scheduledDate: row.scheduledDate as string | null,
+    startedAt: row.startedAt as string | null, completedAt: row.completedAt as string | null,
+    team1Id: row.team1Id as string, team2Id: row.team2Id as string,
+    team1Name: row.team1Name as string | null, team2Name: row.team2Name as string | null,
+    winnerId: row.winnerId as string | null, result: row.result as string | null,
+    tossWinnerId: row.tossWinnerId as string | null, tossDecision: row.tossDecision as "bat" | "bowl" | null,
+    liveStreamUrl: row.liveStreamUrl as string | null, streamStatus: row.streamStatus as "idle" | "live" | "ended" | null,
+  };
+}
+
+/** Validates a fixtures envelope; an unverifiable item refuses the page. */
+export function parseMobileFixturePage(input: unknown): CursorPage<MobileFixtureV1> {
+  return makeCursorPageSchema(mobileFixtureProjection).parse(input);
+}
+
+export interface MobileFixtureBuckets {
+  /** In progress or between innings right now. */
+  live: MobileFixtureV1[];
+  /** Scheduled or postponed (a postponed fixture is still to be played). */
+  upcoming: MobileFixtureV1[];
+  /** Terminal with an on-field outcome: completed, abandoned, no-result,
+   *  forfeited (a forfeit has a winner and belongs with the results). */
+  completed: MobileFixtureV1[];
+}
+
+const LIVE_BUCKET_STATUSES: ReadonlySet<string> = new Set(["live", "toss", "innings_break"]);
+const UPCOMING_BUCKET_STATUSES: ReadonlySet<string> = new Set(["scheduled", "postponed"]);
+const COMPLETED_BUCKET_STATUSES: ReadonlySet<string> = new Set(["completed", "abandoned", "no_result", "forfeited"]);
+
+/**
+ * Splits a fixtures feed into the native screen buckets. Every full-status
+ * fixture lands in exactly ONE bucket, except cancelled — a terminated
+ * fixture is never presented as playable, upcoming or a result anywhere.
+ */
+export function bucketMobileFixtures(fixtures: readonly MobileFixtureV1[]): MobileFixtureBuckets {
+  const buckets: MobileFixtureBuckets = { live: [], upcoming: [], completed: [] };
+  for (const fixture of fixtures) {
+    if (LIVE_BUCKET_STATUSES.has(fixture.status)) buckets.live.push(fixture);
+    else if (UPCOMING_BUCKET_STATUSES.has(fixture.status)) buckets.upcoming.push(fixture);
+    else if (COMPLETED_BUCKET_STATUSES.has(fixture.status)) buckets.completed.push(fixture);
+  }
+  return buckets;
 }

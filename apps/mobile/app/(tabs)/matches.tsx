@@ -6,8 +6,27 @@ import { useMatchStore } from "@/store/match-store";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
+import type { Match } from "@/types";
 
 type Tab = "live" | "upcoming" | "completed";
+
+/**
+ * ENH-03-03: every lifecycle state that is not obviously "in progress" gets
+ * an explicit label — a postponed or forfeited fixture must never render as
+ * if it were simply scheduled, and a cancelled one must at least say why it
+ * will never be played. (Postponed fixtures stay in the Upcoming tab: they
+ * are still to be played; forfeited ones appear under Completed with a
+ * winner — the terminal-with-outcome bucket of the canonical projection.)
+ */
+const STATUS_LABELS: Partial<Record<Match["status"], string>> = {
+  toss: "Toss",
+  innings_break: "Innings break",
+  postponed: "Postponed",
+  abandoned: "Abandoned",
+  cancelled: "Cancelled",
+  no_result: "No result",
+  forfeited: "Forfeited",
+};
 
 export default function MatchesScreen() {
   const { t } = useTranslation();
@@ -129,10 +148,10 @@ export default function MatchesScreen() {
                 <Text style={styles.liveText}>LIVE</Text>
               </View>
             )}
-            {match.venue && (
-              <Text style={styles.venueText}>
-                <Ionicons name="location" size={14} color="#6b7280" /> {match.venue}
-              </Text>
+            {match.status !== "live" && STATUS_LABELS[match.status] && (
+              <View style={styles.statusBadge}>
+                <Text style={styles.statusText}>{STATUS_LABELS[match.status]}</Text>
+              </View>
             )}
           </View>
           <View style={styles.teamsContainer}>
@@ -153,9 +172,9 @@ export default function MatchesScreen() {
               )}
             </View>
           </View>
-          {(match.scheduledDate || match.scheduled_date || match.scheduledAt) && match.status !== "live" && (
+          {match.scheduledDate && match.status !== "live" && (
             <Text style={styles.scheduledTime}>
-              {new Date(match.scheduledDate || match.scheduled_date || match.scheduledAt!).toLocaleString()}
+              {new Date(match.scheduledDate).toLocaleString()}
             </Text>
           )}
           {match.status === "completed" && match.winnerId && (
@@ -272,9 +291,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "bold",
   },
-  venueText: {
-    fontSize: 12,
+  statusBadge: {
+    backgroundColor: "#f3f4f6",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  statusText: {
     color: "#6b7280",
+    fontSize: 12,
+    fontWeight: "600",
   },
   teamsContainer: {
     gap: 12,

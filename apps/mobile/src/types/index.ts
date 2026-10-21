@@ -1,37 +1,47 @@
-export interface Match {
-  id: string;
-  tenantId?: string;
-  tournamentId?: string;
-  team1Id?: string;
-  team2Id?: string;
-  teamAId?: string;
-  teamBId?: string;
-  team1Name?: string;
-  team2Name?: string;
+import type { MobileFixtureV1 } from "@mtk/contracts";
+
+/**
+ * ENH-03-03: a fixture on the device is EXACTLY what the mobile BFF projects
+ * (`MobileFixtureV1`): an explicit, allowlisted shape delivered with RESOLVED
+ * team names and the FULL lifecycle vocabulary — including `postponed` and
+ * `forfeited`, which the old hand-copied union silently dropped. The legacy
+ * per-team score slots below are kept as OPTIONAL presentation fields the
+ * projection never fabricates (list screens already render them only when
+ * present, which against the BFF is never — innings evidence comes from the
+ * scoring state layer, not the fixtures feed).
+ */
+export type Match = MobileFixtureV1 & {
   team1Score?: number;
   team2Score?: number;
   team1Wickets?: number;
   team2Wickets?: number;
   team1Overs?: number;
   team2Overs?: number;
-  status: "scheduled" | "toss" | "live" | "innings_break" | "completed" | "abandoned" | "cancelled" | "no_result";
-  scheduledDate?: string;
-  scheduled_date?: string;
-  scheduledAt?: string;
-  startedAt?: string;
-  completedAt?: string;
-  venue?: string;
-  tossWinner?: string;
-  tossDecision?: "bat" | "bowl";
-  winnerId?: string;
-  result?: string;
-  /** Live streaming (added with the streaming feature). */
-  liveStreamUrl?: string | null;
-  live_stream_url?: string | null;
-  streamSource?: "facebook" | "youtube" | "rtmp" | "webrtc" | null;
-  stream_source?: "facebook" | "youtube" | "rtmp" | "webrtc" | null;
-  streamStatus?: "idle" | "live" | "ended" | null;
-  stream_status?: "idle" | "live" | "ended" | null;
+};
+
+/**
+ * One row of the canonical standings table served by
+ * `GET /api/mobile/standings` — computed by the SHARED rule v2 fold
+ * (apps/web/src/lib/standings.ts is the source of truth: 2/1/0 points,
+ * balls-based net run rate, only completed/no-result fixtures counted as
+ * played). The device renders rows; it never re-derives standings.
+ */
+export interface StandingRowV1 {
+  ruleVersion: number;
+  teamId: string;
+  name: string;
+  shortName: string;
+  played: number;
+  won: number;
+  lost: number;
+  noResult: number;
+  points: number;
+  runsFor: number;
+  ballsFor: number;
+  runsAgainst: number;
+  ballsAgainst: number;
+  netRunRate: number;
+  hasNetRunRate: boolean;
 }
 
 export interface Player {
