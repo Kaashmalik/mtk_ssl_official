@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Button } from "@mtk/ui/components/ui/button"
@@ -14,6 +15,12 @@ export type InboxItem = {
   body: string | null
   readAt: string | null
   createdAt: string | null
+  /**
+   * ENH-06-03: the match this notice is about (server-validated UUID), when
+   * the writer attached one. The link names a match - it grants nothing; the
+   * match page applies its own publication/access rules.
+   */
+  matchId?: string | null
 }
 
 /**
@@ -85,6 +92,14 @@ export function NotificationsInbox({ items: initialItems }: { items: InboxItem[]
           </CardHeader>
           <CardContent className="py-3 pt-0">
             {item.body && <p className="text-sm text-muted-foreground">{item.body}</p>}
+            {item.matchId && (
+              <Link
+                href={`/matches/${item.matchId}`}
+                className="mt-2 inline-block text-sm font-medium underline underline-offset-4"
+              >
+                View match
+              </Link>
+            )}
             {item.createdAt && (
               <p className="text-xs text-muted-foreground mt-1">
                 {new Date(item.createdAt).toLocaleString()}

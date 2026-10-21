@@ -36,8 +36,11 @@
       "outputs": []
     },
     "type-check": {
-      "dependsOn": ["^type-check"],
+      "dependsOn": ["^type-check", "^build"],
       "outputs": []
+    },
+    "@mtk/contracts#type-check": {
+      "outputs": ["dist/**"]
     },
     "test": {
       "dependsOn": ["build"],

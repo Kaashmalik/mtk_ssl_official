@@ -1,6 +1,6 @@
 import { db, notifications, pushTokens } from "@mtk/database"
 import { and, eq, gte, inArray, sql } from "drizzle-orm"
-import { chasePushReceipts } from "./push-delivery"
+import { chasePushReceipts, isTransportUncertainVerdict } from "./push-delivery"
 import { z } from "zod"
 
 /**
@@ -15,10 +15,14 @@ import { z } from "zod"
  * - chases the receipts; receipts Expo has not produced yet are "pending":
  *   the row is left untouched so a LATER run re-chases (never promoted to
  *   delivered on absence);
- * - only when every receipt is confirmed ok does the loop close
- *   (receiptsChased + receiptsOk) — provider_accepted remains the state;
+ * - ENH-06-03: a PARTIAL answer stays pending too. Only when EVERY receipt
+ *   comes back ok does the loop close - closing on a partial answer used to
+ *   claim `receiptsOk = <all ids>` while only some devices had answered;
+ * - ENH-06-03: a transport failure (network, HTTP error, unreadable body) is
+ *   UNCERTAIN, not a device failure. Such a row is retried on a later run
+ *   instead of being downgraded to a refusal we cannot prove;
  * - any real error receipt downgrades the row to provider_refused with the
- *   machine-readable receipt error — the send ticket's optimism is
+ *   machine-readable receipt error - the send ticket's optimism is
  *   corrected by the deeper truth, not papered over;
  * - DeviceNotRegistered additionally DEACTIVATES the offending token
  *   (data.receiptTokens pairs 1:1 with receiptIds), so a dead device stops
@@ -79,47 +83,74 @@ export async function chasePendingPushReceipts(now = new Date()): Promise<PushRe
     }
 
     const baseData = { ...(row.data as Record<string, unknown>), dedupKey }
-    const errors = received.filter(([, verdict]) => verdict !== "receipt_ok")
+    // A device verdict is about the DEVICE. A transport verdict is about our
+    // connection to the provider and says nothing about the device.
+    const deviceErrors = received.filter(
+      ([, verdict]) => verdict !== "receipt_ok" && !isTransportUncertainVerdict(verdict),
+    )
+    const transportErrors = received.filter(([, verdict]) => isTransportUncertainVerdict(verdict))
+    const missing = receiptIds.filter((id) => !(id in verdicts))
 
-    if (errors.length === 0) {
-      // Every receipt confirmed delivered: the loop closes cleanly.
+    if (deviceErrors.length > 0) {
       summary.rowsExamined += 1
-      summary.rowsClosedOk += 1
+      summary.rowsDowngraded += 1
+      // Deactivate dead devices so they stop consuming the bounded fan-out.
+      const deadTokens: string[] = []
+      if (receiptTokens && receiptTokens.length === receiptIds.length) {
+        for (const [receiptId, verdict] of deviceErrors) {
+          if (verdict !== "DeviceNotRegistered") continue
+          const index = receiptIds.indexOf(receiptId)
+          const token = index >= 0 ? receiptTokens[index] : undefined
+          if (token) deadTokens.push(token)
+        }
+      }
+      if (deadTokens.length > 0) {
+        await db.update(pushTokens)
+          .set({ isActive: false, lastUsedAt: now })
+          .where(inArray(pushTokens.token, deadTokens))
+        summary.tokensDeactivated += deadTokens.length
+      }
+
       await db.update(notifications)
-        .set({ data: { ...baseData, receiptsChased: now.toISOString(), receiptsOk: receiptIds.length } })
+        .set({
+          data: {
+            ...baseData,
+            receiptsChased: now.toISOString(),
+            deliveryState: "provider_refused",
+            deliveryError: `receipt_${deviceErrors[0][1]}`,
+            receiptVerdicts: verdicts,
+          },
+        })
         .where(eq(notifications.id, row.id))
       continue
     }
 
-    summary.rowsExamined += 1
-    summary.rowsDowngraded += 1
-    // Deactivate dead devices so they stop consuming the bounded fan-out.
-    const deadTokens: string[] = []
-    if (receiptTokens && receiptTokens.length === receiptIds.length) {
-      for (const [receiptId, verdict] of errors) {
-        if (verdict !== "DeviceNotRegistered") continue
-        const index = receiptIds.indexOf(receiptId)
-        const token = index >= 0 ? receiptTokens[index] : undefined
-        if (token) deadTokens.push(token)
-      }
-    }
-    if (deadTokens.length > 0) {
-      await db.update(pushTokens)
-        .set({ isActive: false, lastUsedAt: now })
-        .where(inArray(pushTokens.token, deadTokens))
-      summary.tokensDeactivated += deadTokens.length
+    // ENH-06-03: no device failed, but the answer is incomplete - some
+    // receipts are not produced yet and/or the transport failed. The row stays
+    // PENDING and is chased again later; `receiptsChased` is deliberately not
+    // written, so the row stays eligible for the next run.
+    if (missing.length > 0 || transportErrors.length > 0) {
+      summary.rowsExamined += 1
+      summary.rowsStillPending += 1
+      await db.update(notifications)
+        .set({
+          data: {
+            ...baseData,
+            receiptVerdicts: verdicts,
+            ...(transportErrors.length > 0
+              ? { receiptsLastError: transportErrors[0][1] }
+              : {}),
+          },
+        })
+        .where(eq(notifications.id, row.id))
+      continue
     }
 
+    // Every receipt confirmed delivered: the loop closes cleanly.
+    summary.rowsExamined += 1
+    summary.rowsClosedOk += 1
     await db.update(notifications)
-      .set({
-        data: {
-          ...baseData,
-          receiptsChased: now.toISOString(),
-          deliveryState: "provider_refused",
-          deliveryError: `receipt_${errors[0][1]}`,
-          receiptVerdicts: verdicts,
-        },
-      })
+      .set({ data: { ...baseData, receiptsChased: now.toISOString(), receiptsOk: receiptIds.length } })
       .where(eq(notifications.id, row.id))
   }
 

@@ -395,7 +395,8 @@ describe("B162: notification PUSH channel", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ data: [{ status: "ok", receiptId: "rct-1" }, { status: "ok", receiptId: "rct-2" }] }),
+      // ENH-06-03: the field Expo names is `id` (the receipt id).
+      json: async () => ({ data: [{ status: "ok", id: "rct-1" }, { status: "ok", id: "rct-2" }] }),
     }))
     vi.stubGlobal("fetch", fetchMock)
     const { tx, inserts } = txWith(pushSpecs([TOKEN, `${TOKEN}2`]))
@@ -446,7 +447,8 @@ describe("B162: notification PUSH channel", () => {
     const result = await dispatchNotificationToMember(PUSH_INPUT)
     expect(result.sendState).toBe("provider_refused")
     expect(updates[0].data.deliveryState).toBe("provider_refused")
-    expect(updates[0].data.deliveryError).toBe("expo_partial_1of2")
+    // ENH-06-03: the counts AND the reason the device was skipped.
+    expect(updates[0].data.deliveryError).toBe("expo_partial_1of2_DeviceNotRegistered")
   })
 
   it("keeps receipt-count mismatches and network failures refused, never optimistic", async () => {

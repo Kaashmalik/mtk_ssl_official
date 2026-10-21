@@ -46,6 +46,9 @@ export default async function NotificationsPage() {
           body: n.body ?? null,
           readAt: n.readAt ? n.readAt.toISOString() : null,
           createdAt: n.createdAt ? n.createdAt.toISOString() : null,
+          // ENH-06-03: the server-validated match id (null when the notice is
+          // not about a match).
+          matchId: n.matchId ?? null,
         }))}
       />
     </div>

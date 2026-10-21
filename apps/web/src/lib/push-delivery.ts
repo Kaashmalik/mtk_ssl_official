@@ -37,11 +37,49 @@ export const pushContentSchema = z.object({
   type: z.string().min(1).max(64),
   tenantId: z.string().uuid(),
   dedupKey: z.string().min(8).max(120),
+  /**
+   * ENH-06-03: the match this push is about, when there is one. It travels in
+   * the message DATA so the device can route the tap to the match screen. The
+   * client resolves the id against its own access rules - the link carries no
+   * authority, it only names a match the recipient may already be denied.
+   */
+  matchId: z.string().uuid().optional(),
 })
 
 export type PushSendOutcome =
   | { state: "provider_accepted"; ok: number; total: number; receiptIds: string[] }
   | { state: "provider_refused"; ok: number; total: number; error: string }
+
+/**
+ * One Expo send ticket. The provider names the ticket `id`; `receiptId` is the
+ * legacy spelling some wrappers used and is still tolerated on the way in.
+ */
+export type ExpoTicket = {
+  status?: string
+  id?: string
+  receiptId?: string
+  message?: string
+  details?: { error?: string }
+}
+
+/**
+ * ENH-06-03: verdicts that describe OUR side of the conversation, not the
+ * device's fate. A transport problem says nothing about whether the device
+ * received the message, so it must never be recorded as a device refusal -
+ * it stays pending and is retried.
+ */
+export const TRANSPORT_UNCERTAIN_VERDICTS = [
+  "network_unknown",
+  "provider_unconfigured",
+  "receipts_response_unreadable",
+] as const
+
+export function isTransportUncertainVerdict(verdict: string): boolean {
+  return (
+    (TRANSPORT_UNCERTAIN_VERDICTS as readonly string[]).includes(verdict)
+    || verdict.startsWith("receipts_http_")
+  )
+}
 
 /**
  * Sends ONE notification to the member's bounded token set. Returns the
@@ -63,7 +101,12 @@ export async function sendPushToTokens(
     title: content.title,
     body: content.body,
     sound: "default" as const,
-    data: { type: content.type, tenantId: content.tenantId, dedupKey: content.dedupKey },
+    data: {
+      type: content.type,
+      tenantId: content.tenantId,
+      dedupKey: content.dedupKey,
+      ...(content.matchId ? { matchId: content.matchId } : {}),
+    },
   }))
 
   let response: Response
@@ -85,11 +128,16 @@ export async function sendPushToTokens(
   }
 
   // Expo replies with one ticket per message; a malformed body is a refusal,
-  // not an assumption of success. Tickets marked ok carry a receiptId - the
+  // not an assumption of success. Tickets marked ok carry a receipt id - the
   // ACTUAL delivery verdict arrives later, through chasePendingPushReceipts.
-  let body: { data?: Array<{ status?: string; receiptId?: string }> } | null = null
+  //
+  // ENH-06-03: the field Expo names is `id` (`{ status: "ok", id: "..." }`).
+  // Reading `receiptId` only found nothing, so every accepted ticket landed
+  // without a receipt id and the receipts chase could never close a row. The
+  // legacy `receiptId` spelling is still accepted as a fallback.
+  let body: { data?: ExpoTicket[] } | null = null
   try {
-    body = (await response.json()) as { data?: Array<{ status?: string; receiptId?: string }> }
+    body = (await response.json()) as { data?: ExpoTicket[] }
   } catch {
     return { state: "provider_refused", ok: 0, total, error: "expo_response_unreadable" }
   }
@@ -98,9 +146,22 @@ export async function sendPushToTokens(
     return { state: "provider_refused", ok: 0, total, error: "expo_receipt_count_mismatch" }
   }
   const okTickets = tickets.filter((t) => t.status === "ok")
-  const receiptIds = okTickets.map((t) => t.receiptId).filter((id): id is string => typeof id === "string")
+  const receiptIds = okTickets
+    .map((t) => t.id ?? t.receiptId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
   if (okTickets.length < total) {
-    return { state: "provider_refused", ok: okTickets.length, total, error: `expo_partial_${okTickets.length}of${total}` }
+    // A refused ticket names its reason (DeviceNotRegistered, MessageTooBig,
+    // ...). The count alone hides WHY a device was skipped.
+    const failed = tickets.find((t) => t.status !== "ok")
+    const reason = failed?.details?.error ?? failed?.message
+    return {
+      state: "provider_refused",
+      ok: okTickets.length,
+      total,
+      error: reason
+        ? `expo_partial_${okTickets.length}of${total}_${reason}`
+        : `expo_partial_${okTickets.length}of${total}`,
+    }
   }
   return { state: "provider_accepted", ok: okTickets.length, total, receiptIds }
 }

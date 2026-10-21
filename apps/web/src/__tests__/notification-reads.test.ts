@@ -34,6 +34,9 @@ function selectChain(fields: any) {
   mocks.queries.push(record)
   const chain: any = {
     from: (table: any) => { record.table = table; return chain },
+    // ENH-06-03: the member-scoped join that resolves a league-wide row's own
+    // read marker.
+    leftJoin: (table: any) => { record.joined = table; return chain },
     where: (where: any) => { Object.assign(record, dialect.sqlToQuery(where)); return chain },
     orderBy: () => chain,
     limit: (limit: number) => { record.limit = limit; return chain },
@@ -150,9 +153,14 @@ describe("Notification reads are scoped and bounded", () => {
   })
 
   it("marks one read only for a validated UUID inside the active league", async () => {
+    // ENH-06-03: the ownership of the row is read FIRST (a league-wide row is
+    // shared, so the marker is written per member instead of on the row).
+    mocks.state = { rows: [{ id: NOTIFICATION, userId: ACTOR }] }
     await markNotificationReadById(context, NOTIFICATION)
-    expect(mocks.queries[0].values).toMatchObject({ status: "read" })
     expect(mocks.queries[0].params).toEqual([NOTIFICATION, ACTOR, TENANT, TENANT])
+    const update = mocks.queries[1]
+    expect(update.values).toMatchObject({ status: "read" })
+    expect(update.params).toEqual([NOTIFICATION, ACTOR, TENANT, TENANT])
   })
 
   it("rejects a crafted non-UUID notification id before any write", async () => {
@@ -161,8 +169,10 @@ describe("Notification reads are scoped and bounded", () => {
   })
 
   it("marks all unread rows read inside the active league", async () => {
+    mocks.state = { rows: [] }
     await markAllNotificationsReadFor(context)
     expect(mocks.queries[0].values).toMatchObject({ status: "read" })
-    expect(mocks.queries[0].params).toEqual([ACTOR, TENANT, TENANT])
+    // ENH-06-03: only the member's OWN personal rows are stamped in place.
+    expect(mocks.queries[0].params).toEqual([ACTOR, TENANT, TENANT, ACTOR])
   })
 })

@@ -59,13 +59,17 @@ export async function markAllNotificationsRead() {
  * Save notification preferences (consent + quiet hours) for the member in the
  * active league. Returns `changed` and the PREVIOUS values, so the UI can tell
  * an identical replay ("Nothing changed - already saved") from a real update.
+ *
+ * ENH-06-03: the channel consents are OPTIONAL here. A client that does not
+ * know about a channel must not silently revoke it - the writer keeps the
+ * stored value instead of overwriting it with the fail-closed default.
  */
 export async function saveNotificationPreferences(input: {
   inAppEnabled: boolean
   /** B161: email consent; delivery also requires the deployment-wired channel. */
-  emailEnabled: boolean
+  emailEnabled?: boolean
   /** B162: push consent; delivery also requires the deployment-wired channel. */
-  pushEnabled: boolean
+  pushEnabled?: boolean
   quietEnabled: boolean
   quietStartMinute: number
   quietEndMinute: number

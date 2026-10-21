@@ -40,6 +40,13 @@ const dispatchInputSchema = z.object({
   body: z.string().max(500),
   dedupKey: z.string().min(8).max(120),
   channel: z.enum(["in_app", "email", "push"]).default("in_app"),
+  /**
+   * ENH-06-03: the match this notification is about, when there is one. The id
+   * is validated here and becomes a DEEP LINK in the stored payload and in the
+   * push message data - the client resolves it against its own access rules,
+   * so the link can only ever point at a match the recipient may open.
+   */
+  matchId: z.string().uuid().optional(),
 })
 
 export type DispatchResult = {
@@ -61,7 +68,7 @@ type EmailDeliveryContext = {
 type PushDeliveryContext = {
   rowId: string
   tokens: string[]
-  content: { title: string; body: string; type: string; tenantId: string; dedupKey: string }
+  content: { title: string; body: string; type: string; tenantId: string; dedupKey: string; matchId?: string }
   tokenCount: number
 }
 
@@ -130,7 +137,7 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
         channel: "in_app",
         title: parsed.title,
         body: parsed.body,
-        data: { dedupKey: parsed.dedupKey },
+        data: { dedupKey: parsed.dedupKey, ...(parsed.matchId ? { matchId: parsed.matchId } : {}) },
       })
       return { written: true, reason: "ok" }
     }
@@ -153,7 +160,7 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
       channel: "email",
       title: parsed.title,
       body: parsed.body,
-      data: { dedupKey: parsed.dedupKey, deliveryState: "queued" },
+      data: { dedupKey: parsed.dedupKey, deliveryState: "queued", ...(parsed.matchId ? { matchId: parsed.matchId } : {}) },
     }).returning({ id: notifications.id })
 
     const [tenant] = await tx
@@ -197,7 +204,7 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
     channel: "push",
     title: parsed.title,
     body: parsed.body,
-    data: { dedupKey: parsed.dedupKey, deliveryState: "queued", tokenCount: deviceRows.length },
+    data: { dedupKey: parsed.dedupKey, deliveryState: "queued", tokenCount: deviceRows.length, ...(parsed.matchId ? { matchId: parsed.matchId } : {}) },
   }).returning({ id: notifications.id })
 
   return {
@@ -212,6 +219,7 @@ export async function dispatchNotificationToMember(input: unknown): Promise<Disp
         type: parsed.type,
         tenantId: parsed.tenantId,
         dedupKey: parsed.dedupKey,
+        ...(parsed.matchId ? { matchId: parsed.matchId } : {}),
       },
       tokenCount: deviceRows.length,
     },
@@ -317,9 +325,16 @@ export async function dispatchNotificationToTournamentFollowers(input: {
   title: string
   body: string
   dedupKey: string
+  /**
+   * ENH-06-03: the match this notice is about, when there is one. It becomes
+   * a DEEP LINK in each member's bell item - the recipient's own access rules
+   * decide whether the match opens.
+   */
+  matchId?: string
 }): Promise<{ fanout: number; written: number }> {
   z.string().uuid().parse(input.tenantId)
   z.string().uuid().parse(input.tournamentId)
+  if (input.matchId) z.string().uuid().parse(input.matchId)
   const followers = await db
     .select({ userId: fanFollows.userId })
     .from(fanFollows)
@@ -342,6 +357,7 @@ export async function dispatchNotificationToTournamentFollowers(input: {
         title: input.title,
         body: input.body,
         dedupKey: input.dedupKey,
+        ...(input.matchId ? { matchId: input.matchId } : {}),
       })
       if (result.written) written += 1
     } catch {
@@ -353,10 +369,17 @@ export async function dispatchNotificationToTournamentFollowers(input: {
 
 const notificationPreferencesInputSchema = z.object({
   inAppEnabled: z.boolean(),
-  /** B161: email consent; dispatch additionally requires the wired channel. */
-  emailEnabled: z.boolean().default(false),
+  /**
+   * B161: email consent; dispatch additionally requires the wired channel.
+   *
+   * ENH-06-03: OPTIONAL on purpose. A write that does not mention a channel
+   * keeps the stored consent instead of overwriting it with the fail-closed
+   * default - an absent value is "unknown", never "revoked". The dispatch
+   * policy still treats an unknown/absent consent as OFF.
+   */
+  emailEnabled: z.boolean().optional(),
   /** B162: push consent; dispatch additionally requires the wired channel. */
-  pushEnabled: z.boolean().default(false),
+  pushEnabled: z.boolean().optional(),
   quietStartMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   quietEndMinute: z.number().int().min(0).max(MINUTE_OF_DAY_MAX).nullable(),
   timeZone: z.string().min(1).max(64).nullable(),
@@ -427,24 +450,36 @@ export async function saveNotificationPreferencesForMember(
       }
       : null
 
+    // ENH-06-03: an unspecified channel consent is UNKNOWN, not revoked. The
+    // stored value survives a write that did not mention it; with no stored
+    // row the channel stays off (fail-closed default).
+    const resolved = {
+      inAppEnabled: prefs.inAppEnabled,
+      emailEnabled: prefs.emailEnabled ?? previous?.emailEnabled ?? false,
+      pushEnabled: prefs.pushEnabled ?? previous?.pushEnabled ?? false,
+      quietStartMinute: prefs.quietStartMinute,
+      quietEndMinute: prefs.quietEndMinute,
+      timeZone: prefs.timeZone,
+    }
+
     const changed = previous == null
-      || previous.inAppEnabled !== prefs.inAppEnabled
-      || previous.emailEnabled !== prefs.emailEnabled
-      || previous.pushEnabled !== prefs.pushEnabled
-      || previous.quietStartMinute !== prefs.quietStartMinute
-      || previous.quietEndMinute !== prefs.quietEndMinute
-      || previous.timeZone !== prefs.timeZone
+      || previous.inAppEnabled !== resolved.inAppEnabled
+      || previous.emailEnabled !== resolved.emailEnabled
+      || previous.pushEnabled !== resolved.pushEnabled
+      || previous.quietStartMinute !== resolved.quietStartMinute
+      || previous.quietEndMinute !== resolved.quietEndMinute
+      || previous.timeZone !== resolved.timeZone
     if (!changed) return { changed: false, previous }
 
     if (existing) {
       await tx.update(notificationPreferences)
         .set({
-          inAppEnabled: prefs.inAppEnabled,
-          emailEnabled: prefs.emailEnabled,
-          pushEnabled: prefs.pushEnabled,
-          quietStartMinute: prefs.quietStartMinute,
-          quietEndMinute: prefs.quietEndMinute,
-          timeZone: prefs.timeZone,
+          inAppEnabled: resolved.inAppEnabled,
+          emailEnabled: resolved.emailEnabled,
+          pushEnabled: resolved.pushEnabled,
+          quietStartMinute: resolved.quietStartMinute,
+          quietEndMinute: resolved.quietEndMinute,
+          timeZone: resolved.timeZone,
           updatedAt: new Date(),
         })
         .where(and(
@@ -455,12 +490,12 @@ export async function saveNotificationPreferencesForMember(
       await tx.insert(notificationPreferences).values({
         tenantId,
         userId: memberId,
-        inAppEnabled: prefs.inAppEnabled,
-        emailEnabled: prefs.emailEnabled,
-        pushEnabled: prefs.pushEnabled,
-        quietStartMinute: prefs.quietStartMinute,
-        quietEndMinute: prefs.quietEndMinute,
-        timeZone: prefs.timeZone,
+        inAppEnabled: resolved.inAppEnabled,
+        emailEnabled: resolved.emailEnabled,
+        pushEnabled: resolved.pushEnabled,
+        quietStartMinute: resolved.quietStartMinute,
+        quietEndMinute: resolved.quietEndMinute,
+        timeZone: resolved.timeZone,
       })
     }
     return { changed: true, previous }

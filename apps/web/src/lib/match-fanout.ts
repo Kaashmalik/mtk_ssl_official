@@ -97,6 +97,10 @@ export async function fanOutMatchLifecycleEvent(trigger: MatchFanoutTrigger): Pr
     title: copy.title,
     body: copy.body,
     dedupKey: matchEventDedupKey(trigger.kind, trigger.after.id, iso(trigger.after.scheduledDate)),
+    // ENH-06-03: the notice points at the match it is about, so the bell item
+    // (and the push payload) can deep-link into it. The recipient's own access
+    // rules decide whether that match opens for them.
+    matchId: trigger.after.id,
   })
 }
 

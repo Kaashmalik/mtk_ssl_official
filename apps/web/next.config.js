@@ -54,7 +54,7 @@ z.object({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ["@mtk/ui", "@mtk/database"],
+  transpilePackages: ["@mtk/ui", "@mtk/database", "@mtk/contracts"],
   eslint: {
     ignoreDuringBuilds: false,
   },

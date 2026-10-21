@@ -41,6 +41,40 @@ export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
 
 /**
+ * ENH-06-03: per-recipient read state for LEAGUE-WIDE notifications.
+ *
+ * A broadcast row (`notifications.user_id IS NULL`) is shared by every member of
+ * the league, so `notifications.read_at` cannot express "member X read it":
+ * writing it there would mark the broadcast read for everybody. This table
+ * stores the read marker per (notification, member) pair instead; personal
+ * rows keep their own `read_at` and never need a row here.
+ *
+ * The pair is unique, so a repeated "mark read" is an idempotent upsert.
+ */
+export const notificationReads = pgTable(
+  "notification_reads",
+  {
+    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    notificationId: uuid("notification_id")
+      .notNull()
+      .references(() => notifications.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    memberUniq: uniqueIndex("notification_reads_notification_user_key").on(
+      table.notificationId,
+      table.userId,
+    ),
+    userIdx: index("idx_notification_reads_user").on(table.userId),
+  }),
+);
+
+export type NotificationRead = typeof notificationReads.$inferSelect;
+export type NewNotificationRead = typeof notificationReads.$inferInsert;
+
+/**
  * Push notification device tokens (FCM / Expo).
  * user_id is NOT NULL — a token must always be attributable to a user.
  */

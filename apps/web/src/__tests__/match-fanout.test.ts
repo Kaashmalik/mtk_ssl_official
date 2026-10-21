@@ -66,6 +66,9 @@ describe("Match lifecycle fan-out wiring (FAN-02)", () => {
       tenantId: TENANT, tournamentId: TOURNEY,
       type: "match_rescheduled", title: "Match rescheduled",
       dedupKey: `match:${MATCH}:rescheduled:2026-10-21T14:00:00.000Z`,
+      // ENH-06-03: the notice points at the match it is about, so the bell item
+      // (and the push payload) can deep-link into it.
+      matchId: MATCH,
     })
     expect(call.body).toContain("Lions vs Falcons")
     expect(call.body).toContain("UTC")
