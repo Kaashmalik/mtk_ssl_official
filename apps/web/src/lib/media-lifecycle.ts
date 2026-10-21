@@ -3,6 +3,12 @@ import { and, eq, isNull } from "drizzle-orm"
 import { auditLogs, db, mediaAssets, mediaConsents } from "@mtk/database"
 import { MediaAuthorizationError, requireMediaMember } from "./media-authorization"
 import { enqueueMediaCleanupJobs } from "./media-cleanup"
+import {
+  mediaPublicationDecision,
+  type MediaAssetState,
+  type MediaConsentState,
+  type MediaPublication,
+} from "./media-policy"
 
 /**
  * ENH-07-03: tombstone deletion.
@@ -193,6 +199,111 @@ export async function recordMediaConsent(input: {
   })
 }
 
+export type SetMediaPublicationResult =
+  | {
+      ok: true
+      assetId: string
+      publication: "published" | "unpublished" | "withdrawn"
+    }
+  | {
+      ok: false
+      reason:
+        | "not_found"
+        | "asset_not_available"
+        | "asset_not_ready"
+        | "asset_quarantined"
+        | "consent_pending"
+        | "consent_withdrawn"
+        | "already_withdrawn"
+    }
+
+/**
+ * Server-authoritative publication state. A ready asset is NOT public: publish
+ * is refused while consent is pending/withdrawn and can only be reversed to
+ * `unpublished` (republishable) or `withdrawn` (terminal). Withdrawal queues
+ * delivery invalidation but intentionally retains the provider original for
+ * rollback; deleting the asset is a separate destructive command.
+ */
+export async function setMediaPublication(input: {
+  assetId: string
+  action: "publish" | "unpublish" | "withdraw"
+}): Promise<SetMediaPublicationResult> {
+  const actor = await requireMediaMember()
+  if (actor.role !== "league_owner") throw new MediaAuthorizationError("permission_denied")
+
+  return db.transaction(async tx => {
+    const [asset] = await tx
+      .select({
+        id: mediaAssets.id,
+        tenantId: mediaAssets.tenantId,
+        state: mediaAssets.state,
+        consent: mediaAssets.consent,
+        publication: mediaAssets.publication,
+        provider: mediaAssets.provider,
+        providerPublicId: mediaAssets.providerPublicId,
+        resourceType: mediaAssets.resourceType,
+      })
+      .from(mediaAssets)
+      .where(and(
+        eq(mediaAssets.id, input.assetId),
+        eq(mediaAssets.tenantId, actor.tenantId),
+      ))
+      .for("update")
+      .limit(1)
+    if (!asset) return { ok: false, reason: "not_found" }
+
+    const now = new Date()
+    if (input.action === "publish") {
+      const decision = mediaPublicationDecision({
+        state: asset.state as MediaAssetState,
+        consent: asset.consent as MediaConsentState,
+        publication: asset.publication as MediaPublication,
+      })
+      if (!decision.allowed) return { ok: false, reason: decision.reason }
+      await tx.update(mediaAssets)
+        .set({ publication: "published", updatedAt: now })
+        .where(and(eq(mediaAssets.id, asset.id), eq(mediaAssets.tenantId, actor.tenantId)))
+      await audit(tx, actor, asset.id, "MEDIA_ASSET_PUBLISHED", {
+        assetId: asset.id,
+        consent: asset.consent,
+      }, "publication")
+      return { ok: true, assetId: asset.id, publication: "published" }
+    }
+
+    if (input.action === "unpublish") {
+      if (asset.state === "deleted" || asset.publication === "withdrawn") {
+        return { ok: false, reason: "asset_not_available" }
+      }
+      await tx.update(mediaAssets)
+        .set({ publication: "unpublished", updatedAt: now })
+        .where(and(eq(mediaAssets.id, asset.id), eq(mediaAssets.tenantId, actor.tenantId)))
+      await audit(tx, actor, asset.id, "MEDIA_ASSET_UNPUBLISHED", {
+        assetId: asset.id,
+      }, "publication")
+      return { ok: true, assetId: asset.id, publication: "unpublished" }
+    }
+
+    if (asset.publication === "withdrawn") {
+      return { ok: true, assetId: asset.id, publication: "withdrawn" }
+    }
+    await tx.update(mediaAssets)
+      .set({ publication: "withdrawn", updatedAt: now })
+      .where(and(eq(mediaAssets.id, asset.id), eq(mediaAssets.tenantId, actor.tenantId)))
+    await enqueueMediaCleanupJobs(tx, {
+      tenantId: asset.tenantId,
+      assetId: asset.id,
+      provider: asset.provider,
+      providerPublicId: asset.providerPublicId,
+      providerResourceType: asset.resourceType,
+      actions: ["invalidate_delivery"],
+    })
+    await audit(tx, actor, asset.id, "MEDIA_ASSET_WITHDRAWN", {
+      assetId: asset.id,
+    }, "publication")
+    return { ok: true, assetId: asset.id, publication: "withdrawn" }
+  })
+}
+
 async function writeConsent(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   input: {
@@ -239,6 +350,7 @@ async function audit(
   assetId: string,
   method: string,
   payload: Record<string, unknown>,
+  pathSuffix = "consent",
 ): Promise<void> {
   await tx.insert(auditLogs).values({
     requestId: randomUUID(),
@@ -246,7 +358,7 @@ async function audit(
     actorId: actor.actorId,
     actorRole: actor.role,
     method,
-    path: `/api/media/${assetId}/consent`,
+    path: `/api/media/${assetId}/${pathSuffix}`,
     statusCode: "200",
     payload,
   })
