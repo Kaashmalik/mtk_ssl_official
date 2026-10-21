@@ -32,4 +32,15 @@ REVOKE ALL ON public.notification_reads FROM anon, authenticated, public;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.notification_reads TO ssl;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.notification_reads TO service_role;
 
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ssl') THEN
+    CREATE POLICY notification_reads_ssl ON public.notification_reads TO ssl
+      USING (true) WITH CHECK (true);
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    CREATE POLICY notification_reads_service ON public.notification_reads TO service_role
+      USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
 COMMIT;

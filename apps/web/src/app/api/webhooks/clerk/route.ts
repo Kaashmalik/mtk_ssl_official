@@ -20,6 +20,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { db, users } from "@mtk/database";
 import { eq } from "drizzle-orm";
+import { enqueueAccountOnboardingJob } from "@/lib/notification-jobs";
 
 /**
  * Svix needs the raw body to verify the signature. The `NextRequest.text()`
@@ -81,27 +82,38 @@ export async function POST(req: NextRequest) {
         }
 
         // Upsert: try INSERT first, fall back to UPDATE on conflict (clerk_id unique).
-        await db
-          .insert(users)
-          .values({
-            clerkId,
-            email,
-            displayName,
-            avatarUrl,
-            role: "fan",
-            isActive: true,
-            lastLoginAt: eventType === "user.updated" ? new Date() : null,
-          })
-          .onConflictDoUpdate({
-            target: users.clerkId,
-            set: {
+        // The account-level onboarding job is written in the SAME transaction:
+        // a crash can never leave an account with no durable welcome record,
+        // and a webhook redelivery collides with the unique event/recipient/
+        // channel key instead of queuing a second send.
+        await db.transaction(async (tx) => {
+          const [synced] = await tx
+            .insert(users)
+            .values({
+              clerkId,
               email,
               displayName,
               avatarUrl,
-              lastLoginAt: eventType === "user.updated" ? new Date() : undefined,
-              updatedAt: new Date(),
-            },
-          });
+              role: "fan",
+              isActive: true,
+              lastLoginAt: eventType === "user.updated" ? new Date() : null,
+            })
+            .onConflictDoUpdate({
+              target: users.clerkId,
+              set: {
+                email,
+                displayName,
+                avatarUrl,
+                lastLoginAt: eventType === "user.updated" ? new Date() : undefined,
+                updatedAt: new Date(),
+              },
+            })
+            .returning({ id: users.id });
+
+          if (eventType === "user.created" && synced?.id) {
+            await enqueueAccountOnboardingJob(tx, { userId: synced.id });
+          }
+        });
 
         console.log(`[clerk-webhook] ${eventType}: synced user ${clerkId} (${email})`);
         break;

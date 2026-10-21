@@ -9,10 +9,13 @@ const mocks = vi.hoisted(() => ({
   headerGet: vi.fn(),
   insert: vi.fn(),
   update: vi.fn(),
+  transaction: vi.fn(),
   insertValues: undefined as unknown,
+  insertCalls: [] as any[],
   conflictSet: undefined as Record<string, unknown> | undefined,
   updateSet: undefined as unknown,
   updateWhereSql: undefined as unknown,
+  syncedUserId: "00000000-0000-4000-8000-0000000000e1",
 }))
 
 vi.mock("svix", () => ({
@@ -25,7 +28,7 @@ vi.mock("next/headers", () => ({
 }))
 vi.mock("@mtk/database", async (original) => ({
   ...await original<typeof import("@mtk/database")>(),
-  db: { insert: mocks.insert, update: mocks.update },
+  db: { insert: mocks.insert, update: mocks.update, transaction: mocks.transaction },
 }))
 
 import { GET, POST } from "@/app/api/webhooks/clerk/route"
@@ -39,9 +42,14 @@ const webhookReq = (init?: { body?: string }) =>
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.insertValues = undefined
+  mocks.insertCalls = []
   mocks.conflictSet = undefined
   mocks.updateSet = undefined
   mocks.updateWhereSql = undefined
+  mocks.transaction.mockImplementation(async (fn: any) => fn({
+    insert: mocks.insert,
+    update: mocks.update,
+  }))
   vi.stubEnv("CLERK_WEBHOOK_SECRET", "whsec_test")
   mocks.headerGet.mockImplementation((name: string) => {
     if (name === "svix-id") return "msg_1"
@@ -51,12 +59,20 @@ beforeEach(() => {
   })
   mocks.insert.mockImplementation(() => ({
     values: (values: any) => {
-      mocks.insertValues = values
+      mocks.insertCalls.push(values)
+      // Keep the FIRST values for the existing user-upsert assertions; the
+      // onboarding job is the second insert and is asserted separately.
+      if (!mocks.insertValues) mocks.insertValues = values
       return {
         onConflictDoUpdate: (arg: any) => {
           mocks.conflictSet = arg.set
-          return Promise.resolve([])
+          return {
+            returning: async () => [{ id: mocks.syncedUserId }],
+          }
         },
+        onConflictDoNothing: () => ({
+          returning: async () => [{ id: "00000000-0000-4000-8000-0000000000e2" }],
+        }),
       }
     },
   }))
@@ -129,6 +145,16 @@ describe("clerk webhook event sync", () => {
     })
     expect(mocks.conflictSet).toMatchObject({ email: "fan@example.com" })
     expect(mocks.conflictSet?.lastLoginAt).toBeUndefined() // no login backfill on create
+    // ENH-06-04: the welcome is OWED in the same transaction, account-level
+    // (no tenant), and unique per event/recipient/channel.
+    expect(mocks.insertCalls).toHaveLength(2)
+    expect(mocks.insertCalls[1]).toMatchObject({
+      tenantId: null,
+      recipientUserId: mocks.syncedUserId,
+      eventId: "account.welcome",
+      channel: "email",
+      type: "account_welcome",
+    })
   })
 
   it("falls back to username for display names and stamps login on updates", async () => {
@@ -141,6 +167,8 @@ describe("clerk webhook event sync", () => {
     expect(response.status).toBe(200)
     expect(mocks.insertValues).toMatchObject({ clerkId: "user_2", displayName: "ali92" })
     expect(mocks.conflictSet).toHaveProperty("lastLoginAt", expect.any(Date))
+    // An existing account is not welcomed again.
+    expect(mocks.insertCalls).toHaveLength(1)
   })
 
   it("soft-deletes on user.deleted (isActive false, row retained)", async () => {

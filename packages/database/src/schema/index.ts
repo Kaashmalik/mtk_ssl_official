@@ -51,6 +51,7 @@ export * from "./tournament-award-disputes";
 export * from "./tournament-prizes";
 export * from "./commentary-events";
 export * from "./notifications";
+export * from "./notification-jobs";
 
 // Billing & Subscriptions
 export * from "./subscriptions";
