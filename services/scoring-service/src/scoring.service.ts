@@ -25,7 +25,7 @@ import {
 } from '@mtk/database';
 import Redis from 'ioredis';
 import { calculateDeliveryDelta } from '@mtk/database/lib/scoring-delivery';
-import { assessInningsClosure } from './cricket-rules';
+import { assessInningsClosure, canonicalActiveParticipants } from './cricket-rules';
 import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
 import { z } from 'zod';
 import { env } from './env';
@@ -326,7 +326,15 @@ export class ScoringService {
           if (!existing) throw new ConflictException('This delivery was undone; use a new operation ID');
           return { result: { ballId: existing.id, clientOpId: command.clientOpId,
             scoringRevision: match.scoringRevision ?? 0,
-            scorecard: scorecardFor(innings), replayed: true }, recorded: false };
+            scorecard: {
+              ...scorecardFor(innings),
+              // ENH-03-02: the replayed delivery's own canonical participants.
+              activeParticipants: canonicalActiveParticipants({
+                batsmanId: existing.batsmanId,
+                bowlerId: existing.bowlerId,
+                wicketType: existing.wicketType ?? null,
+              }),
+            }, replayed: true }, recorded: false };
         }
       }
 
@@ -471,7 +479,18 @@ export class ScoringService {
         throw new Error('Innings disappeared during transaction');
       }
 
-      const scorecard = scorecardFor(updatedInnings);
+      const scorecard = {
+        ...scorecardFor(updatedInnings),
+        // ENH-03-02: canonical active-participant state, derived from THIS
+        // delivered record only. The striker slot is reported vacant when
+        // the record dismisses or retires the named batter out; no
+        // non-striker is ever claimed.
+        activeParticipants: canonicalActiveParticipants({
+          batsmanId: ballEvent.batsmanId,
+          bowlerId: ballEvent.bowlerId,
+          wicketType: ballEvent.wicket?.type ?? null,
+        }),
+      };
       // SCORE-10 (Batch 154): the innings-closure decision is computed from
       // the just-updated row inside the same transaction (never a stale
       // read). A second-innings target derives from the first innings

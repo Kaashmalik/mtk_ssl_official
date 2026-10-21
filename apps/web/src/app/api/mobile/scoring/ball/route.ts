@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@clerk/nextjs/server"
 import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-server"
 import { findScoringTenant } from "@/lib/scoring-reads"
-import { recordBallCommandSchema, submitDelivery } from "@/lib/scoring-submission"
+import { normalizeDeliveryCommand } from "@mtk/contracts"
+import { submitDelivery } from "@/lib/scoring-submission"
 import { ScoringRevisionConflict } from "@/lib/scoring-revision-client"
 
 export const dynamic = "force-dynamic"
@@ -41,16 +42,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Malformed submission body" }, { status: 400 })
   }
 
-  const parsed = recordBallCommandSchema.safeParse(raw)
+  // ENH-03-02: one validated boundary for both wire generations. The flat
+  // boolean command validates directly; the LEGACY nested payload (extras /
+  // wicket objects, over/ball aliases) of installed clients is adapted
+  // LOSSLESSLY via the shared contracts adapter — never stripped and never
+  // mangled: an ambiguous or rich-extra-split payload is refused (400), not
+  // guessed. Unknown versions and unknown fields never pass.
+  const parsed = normalizeDeliveryCommand(raw)
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Delivery fields are invalid or incomplete", issues: parsed.error.flatten().fieldErrors },
+      { error: parsed.error },
       { status: 400 },
     )
   }
-  // The queue bookkeeping fields are a WEB-SESSION offline-store concern; a
-  // mobile submission must not impersonate another account's queue scope.
-  if (parsed.data.queueAccountId !== undefined || parsed.data.queueTenantId !== undefined) {
+  // The schema drops unknown keys, so the queue-bookkeeping guard looks at
+  // the RAW body: a mobile submission must not impersonate another
+  // account's queue scope in either wire generation.
+  if ("queueAccountId" in (raw as object) || "queueTenantId" in (raw as object)) {
     return NextResponse.json(
       { error: "Queue bookkeeping fields are managed by the server session" },
       { status: 403 },

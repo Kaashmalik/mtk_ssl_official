@@ -452,6 +452,35 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.innings.totalWickets).toBe(0);
   });
 
+  it('returns canonical active participants derived from the just-recorded delivery (ENH-03-02)', async () => {
+    const acknowledged = await service.recordBall(TENANT, ACTOR, ball({ runs: 1 }));
+    expect(acknowledged.scorecard.activeParticipants).toMatchObject({
+      basis: 'last_delivery', lastBatsmanId: BATTER, lastBowlerId: BOWLER,
+      strikerSlot: { state: 'occupied' },
+    });
+    // The canonical ack never claims a non-striker: only the strikers and
+    // the bowler the record itself proves are named.
+    expect(JSON.stringify(acknowledged.scorecard.activeParticipants)).not.toContain('nonStriker');
+  });
+
+  it('carries the vacant striker slot in the acknowledgement after a replayed dismissed delivery', async () => {
+    const command = ball({ runs: 0, wicket: { type: 'caught', playerId: BATTER } });
+    const first = await service.recordBall(TENANT, ACTOR, command);
+    expect(first.scorecard.activeParticipants?.strikerSlot).toEqual({ state: 'vacant', reason: 'dismissed' });
+    const replay = await service.recordBall(TENANT, ACTOR, command);
+    expect(replay.replayed).toBe(true);
+    expect(replay.scorecard.activeParticipants?.strikerSlot).toEqual({ state: 'vacant', reason: 'dismissed' });
+  });
+
+  it('keeps official retirement semantics: retired (out) counts as a wicket, retired_hurt does not (ENH-03-02 pin)', async () => {
+    await service.recordBall(TENANT, ACTOR, ball({ runs: 0, wicket: { type: 'retired', playerId: BATTER } }));
+    expect(mockTx.state.innings.totalWickets).toBe(1);
+    const hurt = await service.recordBall(TENANT, ACTOR, ball({ runs: 0, ball: 2,
+      wicket: { type: 'retired_hurt', playerId: BATTER }, expectedRevision: mockTx.state.match.scoringRevision }));
+    expect(mockTx.state.innings.totalWickets).toBe(1);
+    expect(hurt.scorecard.activeParticipants?.strikerSlot).toEqual({ state: 'open', reason: 'retired_hurt_may_return' });
+  });
+
   function mutation(operation: string) {
     if (operation === 'record') return service.recordBall(TENANT, ACTOR, ball());
     if (operation === 'undo') return service.undoBall(TENANT, ACTOR, MATCH, BATTER);

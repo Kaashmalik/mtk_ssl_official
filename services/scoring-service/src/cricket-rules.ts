@@ -1,4 +1,10 @@
-import { inningsShouldClose, type InningsClosureResult } from '@mtk/database/lib/cricket-rules-policy';
+import {
+  canonicalActiveParticipants,
+  inningsShouldClose,
+  type InningsClosureResult,
+} from '@mtk/database/lib/cricket-rules-policy';
+
+export { canonicalActiveParticipants };
 
 /**
  * SCORE-10 (Batch 154): the cricket-rules fold, adapted for the canonical
@@ -8,9 +14,12 @@ import { inningsShouldClose, type InningsClosureResult } from '@mtk/database/lib
  *
  * Legacy, ungated matches assume a full XI when no declared count exists.
  * Armed matches pass the distinct active batting-side count from the SAME
- * locked participant validation that admitted the delivery. Strike
- * rotation is client-owned today - batters are not tracked SoT-side, so
- * this module deliberately does NOT pretend to advise the next batter.
+ * locked participant validation that admitted the delivery. Full automatic
+ * strike rotation is still not adjudicated SoT-side (only the next
+ * delivered ball names the incoming batter), but ENH-03-02 now publishes
+ * the canonical LAST-recorded striker/bowler state through
+ * `canonicalActiveParticipants` - derived only from the delivered record,
+ * never from client promises.
  */
 
 export type InningsAdviceInput = {

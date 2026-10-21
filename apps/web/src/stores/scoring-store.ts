@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { calculateDeliveryDelta, scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery";
 import type { LiveMatchState } from "@mtk/database/lib/live-scoring-state";
 
-export type BallInput = 0 | 1 | 2 | 3 | 4 | 6 | "W" | "WD" | "NB" | "LB" | "B";
+export type BallInput = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | "W" | "WD" | "NB" | "LB" | "B";
 export type WicketType = "bowled" | "caught" | "lbw" | "run_out" | "stumped" | "hit_wicket";
 
 export interface BallData {

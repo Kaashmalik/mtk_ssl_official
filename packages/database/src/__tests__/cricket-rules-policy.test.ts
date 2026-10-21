@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest"
  */
 import {
   batterLeavingOnWicket,
+  canonicalActiveParticipants,
   inningsShouldClose,
   isLegalDelivery,
   nextDisplayPosition,
@@ -84,5 +85,36 @@ describe("SCORE-10 (Batch 154): cricket rules fold", () => {
     expect(superOverShouldClose(1, 4, 6)).toBe(false)
     expect(superOverShouldClose(2, 4, 6)).toBe(true)
     expect(superOverShouldClose(0, 6, 6)).toBe(true)
+  })
+})
+
+describe("ENH-03-02: canonical active-participant state", () => {
+  it("claims nothing before any delivery", () => {
+    expect(canonicalActiveParticipants(null)).toEqual({
+      basis: "no_deliveries", lastBatsmanId: null, lastBowlerId: null,
+      strikerSlot: { state: "open", reason: "no_deliveries" },
+    })
+  })
+
+  it("names the last recorded striker and bowler as occupied after a normal delivery", () => {
+    const state = canonicalActiveParticipants({ batsmanId: "a", bowlerId: "b", wicketType: null })
+    expect(state).toEqual({ basis: "last_delivery", lastBatsmanId: "a", lastBowlerId: "b", strikerSlot: { state: "occupied" } })
+  })
+
+  it("declares the striker slot vacant on a dismissal", () => {
+    const state = canonicalActiveParticipants({ batsmanId: "a", bowlerId: "b", wicketType: "caught" })
+    expect(state.strikerSlot).toEqual({ state: "vacant", reason: "dismissed" })
+  })
+
+  it("treats a retired-out batter as dismissed, never as free to resume", () => {
+    const state = canonicalActiveParticipants({ batsmanId: "a", bowlerId: "b", wicketType: "retired" })
+    expect(state.strikerSlot).toEqual({ state: "vacant", reason: "retired_out" })
+  })
+
+  it("keeps a retired-hurt batter's slot open for return, and never claims a non-striker", () => {
+    const state = canonicalActiveParticipants({ batsmanId: "a", bowlerId: "b", wicketType: "retired_hurt" })
+    expect(state.strikerSlot).toEqual({ state: "open", reason: "retired_hurt_may_return" })
+    // The shape carries exactly two named participants at most.
+    expect(Object.keys(state).sort()).toEqual(["basis", "lastBatsmanId", "lastBowlerId", "strikerSlot"])
   })
 })

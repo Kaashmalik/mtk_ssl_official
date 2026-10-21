@@ -66,50 +66,69 @@ export function useOfflineSync() {
         // SCORE-09: only THIS signed-in account's acceptable deliveries.
         const pendingBalls = getPendingBalls(undefined, userId);
 
+        // ENH-03-02: the revision fence is chained from acknowledgements.
+        // Every accepted delivery bumps the official revision, so the NEXT
+        // queued ball's fence is the ack's revision — reusing the frozen
+        // per-ball snapshot used to guarantee one ball per sync forever.
+        let chainedExpectedRevision: number | undefined;
+
         for (const ball of pendingBalls) {
           try {
             if (!ball.inningsId || !ball.batsmanId || !ball.bowlerId) {
-              // Unsatisfiable entries can never pass the canonical gate; stop
-              // and surface rather than silently looping forever.
-              logSyncError(new Error(`Delivery ${ball.id} is missing required scoring identifiers`));
-              break;
+              // Unsatisfiable entries can never pass the canonical gate;
+              // isolate them for review instead of blocking the whole queue.
+              logSyncError(new Error(`Delivery ${ball.id} is missing required scoring identifiers; kept for review`));
+              markBallConflicted(ball.id);
+              continue;
             }
 
-            let extras: { type: string; runs: number } | undefined;
-            if (ball.isWide) extras = { type: "wide", runs: Math.max(1, ball.runs) };
-            else if (ball.isNoBall) extras = { type: "noball", runs: Math.max(1, ball.runs) };
-            else if (ball.isBye) extras = { type: "bye", runs: ball.runs };
-            else if (ball.isLegBye) extras = { type: "legbye", runs: ball.runs };
-
-            const wicket = ball.isWicket && ball.wicketType
-              ? { type: ball.wicketType, playerId: ball.batsmanId } : undefined;
+            // ENH-03-02: the flat boolean command is the ONLY wire shape. The
+            // nested extras/wicket merge previously sent here was stripped by
+            // the intake schema — every mobile wicket silently vanished. Now
+            // each flag the screen set reaches the boundary as itself; the
+            // intake's contracts adapter remains for OLDER installed payloads.
             const res = await fetch(`${base}/api/mobile/scoring/ball`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
               body: JSON.stringify({
                 clientOpId: ball.id, matchId: ball.matchId, inningsId: ball.inningsId,
                 overNumber: ball.over, ballNumber: ball.ball, runs: ball.runs,
-                batsmanId: ball.batsmanId, bowlerId: ball.bowlerId, extras, wicket,
-                handoverEpoch: ball.handoverEpoch, expectedRevision: ball.expectedRevision,
+                batsmanId: ball.batsmanId, bowlerId: ball.bowlerId,
+                isWicket: ball.isWicket === true, wicketType: ball.isWicket ? ball.wicketType : undefined,
+                isWide: ball.isWide === true, isNoBall: ball.isNoBall === true,
+                isBye: ball.isBye === true, isLegBye: ball.isLegBye === true,
+                handoverEpoch: ball.handoverEpoch,
+                expectedRevision: chainedExpectedRevision ?? ball.expectedRevision,
               }),
             });
 
             if (res.status === 409) {
               // SCORE-14: the official score moved. Keep the delivery, flag
-              // it for review — the device never blind-overwrites.
+              // it for review — the device never blind-overwrites, and the
+              // fenced queue stops here rather than chaining past the gap.
               markBallConflicted(ball.id);
               logSyncError(new Error(`Delivery ${ball.id} hit a scoring revision conflict; kept for review`));
               break;
             }
 
-            const acknowledgement: unknown = res.ok ? await res.json() : null;
-            if (isScoringAcknowledgement(res.status, acknowledgement, ball.id)) {
+            const body: unknown = res.ok ? await res.json() : null;
+            if (isScoringAcknowledgement(res.status, body, ball.id)) {
               markBallSynced(ball.id);
+              const revision = (body as { scoringRevision?: unknown } | null)?.scoringRevision;
+              if (typeof revision === "number" && Number.isInteger(revision) && revision >= 0) {
+                chainedExpectedRevision = revision;
+              }
             } else {
-              logSyncError(new Error(`Scoring acknowledgement rejected (HTTP ${res.status})`));
-              break;
+              // A specific rejected delivery is isolated (poison-ball), not a
+              // head-of-line block: the intent stays on the device for review
+              // and the rest of the queue still syncs. Nothing is dropped.
+              logSyncError(new Error(`Scoring acknowledgement rejected (HTTP ${res.status}); delivery ${ball.id} kept for review`));
+              markBallConflicted(ball.id);
+              continue;
             }
           } catch (error) {
+            // Network/transport failure: stop — the queue order matters and
+            // the next tick retries from the same head.
             logSyncError(error);
             break;
           }

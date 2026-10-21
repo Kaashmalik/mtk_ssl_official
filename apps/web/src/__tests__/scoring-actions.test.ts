@@ -85,6 +85,38 @@ describe("Scoring action explicit command bridge", () => {
     await expect(recordBall(input())).rejects.toThrow("did not acknowledge")
   })
 
+  it("accepts every run value the pad offers, including 5 and 7, as batter runs", async () => {
+    for (const runs of [0, 1, 2, 3, 4, 5, 6, 7] as const) {
+      await recordBall(input({ runs, clientOpId: `op-${runs}` }))
+    }
+    expect(mocks.proxy).toHaveBeenCalledTimes(8)
+    expect(mocks.proxy.mock.calls[5][0]).toMatchObject({ runs: 5, extras: undefined })
+    expect(mocks.proxy.mock.calls[7][0]).toMatchObject({ runs: 7, extras: undefined })
+  })
+
+  it("carries explicit wicket attribution instead of hard-wiring the batsman (ENH-03-02)", async () => {
+    const nonStriker = "00000000-0000-4000-8000-000000000007"
+    const fielder = "00000000-0000-4000-8000-000000000008"
+    // A run out may name the non-striker and the completed fielder.
+    await recordBall(input({ isWicket: true, wicketType: "run_out", wicketPlayerId: nonStriker, fielderId: fielder }))
+    expect(mocks.proxy.mock.calls.at(-1)![0]).toMatchObject({
+      wicket: { type: "run_out", playerId: nonStriker, fielderId: fielder },
+    })
+    // Without an explicit name the out player is the batsman on strike.
+    await recordBall(input({ isWicket: true, wicketType: "caught" }))
+    expect(mocks.proxy.mock.calls.at(-1)![0]).toMatchObject({
+      wicket: { type: "caught", playerId: "00000000-0000-4000-8000-000000000004" },
+    })
+    expect(mocks.proxy.mock.calls.at(-1)![0].wicket).not.toHaveProperty("fielderId")
+  })
+
+  it("refuses a wicket attribution field that is not a UUID at the boundary", async () => {
+    await expect(
+      recordBall(input({ isWicket: true, wicketType: "bowled", fielderId: "not-a-uuid" })),
+    ).rejects.toThrow()
+    expect(mocks.proxy).not.toHaveBeenCalled()
+  })
+
   it("echoes the observed handover epoch so the fence can verify the session", async () => {
     await recordBall(input({ handoverEpoch: 3 }))
     expect(mocks.proxy.mock.calls[0][0]).toMatchObject({ handoverEpoch: 3 })

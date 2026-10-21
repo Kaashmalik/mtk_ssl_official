@@ -6,5 +6,6 @@
  * the boundary test in src/__tests__/boundary.test.ts enforces it.
  */
 export * from "./scoring";
+export * from "./scoring-adapters";
 export * from "./public-reads";
 export * from "./capabilities";

@@ -5,6 +5,12 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@mtk/contracts": [
+        "../../packages/contracts/src/index.ts"
+      ],
+      "@mtk/contracts/*": [
+        "../../packages/contracts/src/*"
       ]
     }
   },

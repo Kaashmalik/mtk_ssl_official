@@ -46,8 +46,7 @@ export function nextDisplayPosition(
 /** Strike rotation. Batters swap ends every ODD number of crossed runs
  *  (runs crossed excludes penalty conventions we do not support: wides
  *  plus byes combinations carry the standard crossing) and again at the
- *  end of every completed over. */
-export type StrikeState = { strikerId: string; nonStrikerId: string }
+ *  end of every completed over. */export type StrikeState = { strikerId: string; nonStrikerId: string }
 export type StrikeRotationResult =
   | { rotated: false; reason: "even_runs_or_partial_over" }
   | { rotated: true; state: StrikeState }
@@ -133,4 +132,46 @@ export function inningsShouldClose(input: InningsClosureInput): InningsClosureRe
 export const SUPER_OVER_WICKETS = 2
 export function superOverShouldClose(wicketsLost: number, legalBallsBowled: number, superOverBalls: number): boolean {
   return wicketsLost >= SUPER_OVER_WICKETS || legalBallsBowled >= superOverBalls
+}
+
+/** ENH-03-02: canonical active-participant state. The server states who it
+ *  actually recorded on the last delivered ball and whether that striker
+ *  slot can still be played - derived ONLY from the delivered record, never
+ *  from a client's promise. The NON-striker is deliberately never claimed:
+ *  only the next delivered ball names them, so no consumer may render
+ *  automatic two-batter graphics from this alone. Official retirement
+ *  semantics: `retired` (out) is a dismissal - the official record counts
+ *  it as a wicket; `retired_hurt` is not - the batter may return. */
+export interface CanonicalActiveParticipants {
+  basis: "no_deliveries" | "last_delivery";
+  lastBatsmanId: string | null;
+  lastBowlerId: string | null;
+  strikerSlot:
+    | { state: "occupied" }
+    | { state: "vacant"; reason: "dismissed" | "retired_out" }
+    | { state: "open"; reason: "no_deliveries" | "retired_hurt_may_return" };
+}
+
+export function canonicalActiveParticipants(last: {
+  batsmanId?: string | null;
+  bowlerId?: string | null;
+  wicketType?: string | null;
+} | null | undefined): CanonicalActiveParticipants {
+  const lastBatsmanId = last?.batsmanId ?? null;
+  const lastBowlerId = last?.bowlerId ?? null;
+  if (!lastBatsmanId || !lastBowlerId) {
+    return { basis: "no_deliveries", lastBatsmanId: null, lastBowlerId: null, strikerSlot: { state: "open", reason: "no_deliveries" } };
+  }
+  const basis = "last_delivery" as const;
+  const wicketType = last?.wicketType ?? null;
+  if (wicketType === "retired_hurt") {
+    return { basis, lastBatsmanId, lastBowlerId, strikerSlot: { state: "open", reason: "retired_hurt_may_return" } };
+  }
+  if (wicketType === "retired") {
+    return { basis, lastBatsmanId, lastBowlerId, strikerSlot: { state: "vacant", reason: "retired_out" } };
+  }
+  if (wicketType) {
+    return { basis, lastBatsmanId, lastBowlerId, strikerSlot: { state: "vacant", reason: "dismissed" } };
+  }
+  return { basis, lastBatsmanId, lastBowlerId, strikerSlot: { state: "occupied" } };
 }

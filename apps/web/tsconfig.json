@@ -15,6 +15,8 @@
       "@mtk/ui/*": ["../../packages/ui/src/*"],
       "@mtk/database": ["../../packages/database/src/index.ts"],
       "@mtk/database/*": ["../../packages/database/src/*"],
+      "@mtk/contracts": ["../../packages/contracts/src/index.ts"],
+      "@mtk/contracts/*": ["../../packages/contracts/src/*"],
       "@mtk/observability": ["../../packages/observability/src/index.ts"],
       "@mtk/observability/*": ["../../packages/observability/src/*"]
     },

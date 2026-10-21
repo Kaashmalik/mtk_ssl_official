@@ -1,4 +1,5 @@
 import type { matches, matchInnings } from '@mtk/database';
+import type { CanonicalActiveParticipants } from '@mtk/database/lib/cricket-rules-policy';
 import { decodeLiveMatchState, type LiveMatchState } from '@mtk/database/lib/live-scoring-state';
 
 export type MatchStatus = (typeof matches)['$inferSelect']['status'];
@@ -12,6 +13,9 @@ export interface Scorecard {
   overs: number;
   balls: number;
   runRate: number;
+  /** ENH-03-02: who the official record actually last named, and whether
+   *  that striker slot can still be played. Never a two-batter promise. */
+  activeParticipants?: CanonicalActiveParticipants;
 }
 
 export type MatchState = LiveMatchState;

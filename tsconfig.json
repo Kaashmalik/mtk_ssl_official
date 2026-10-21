@@ -28,6 +28,8 @@
       "@mtk/config/*": ["./packages/config/src/*"],
       "@mtk/ui/*": ["./packages/ui/src/*"],
       "@mtk/database/*": ["./packages/database/src/*"],
+      "@mtk/contracts": ["./packages/contracts/src/index.ts"],
+      "@mtk/contracts/*": ["./packages/contracts/src/*"],
       "@mtk/observability": ["./packages/observability/src/index.ts"],
       "@mtk/observability/*": ["./packages/observability/src/*"],
       "@mtk/dns-provider": ["./packages/dns-provider/src/index.ts"],

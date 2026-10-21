@@ -10,7 +10,8 @@ export default defineConfig({
     alias: [
       { find: "@", replacement: path.resolve(__dirname, "./src") },
       { find: /^@mtk\/database$/, replacement: path.resolve(__dirname, "../../packages/database/src/index.ts") },
-      { find: /^@mtk\/database\//, replacement: path.resolve(__dirname, "../../packages/database/src") + "/" },
+      { find: /^@mtk\/database\/$/, replacement: path.resolve(__dirname, "../../packages/database/src") + "/" },
+      { find: /^@mtk\/contracts$/, replacement: path.resolve(__dirname, "../../packages/contracts/src/index.ts") },
       { find: /^@mtk\/ui\//, replacement: path.resolve(__dirname, "../../packages/ui/src") + "/" },
       // Native modules from apps/mobile source exercised in tests: the
       // storage engine behind the persisted offline store (offline-sync

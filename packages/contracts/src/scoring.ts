@@ -63,6 +63,14 @@ export const recordBallCommandSchema = z
     bowlerId: z.string().uuid().optional().nullable(),
     isWicket: z.boolean().default(false),
     wicketType: z.enum(WICKET_TYPES).optional().nullable(),
+    // ENH-03-02 wicket attribution: who is recorded out (defaults to the
+    // batsman on the delivery; run_out may name the non-striker) and which
+    // fielder completed the dismissal. The canonical service still enforces
+    // the on-field rules (striker-only except run_out, fielder on the
+    // bowling side) — the boundary only guarantees the fields are well
+    // formed and never silently dropped.
+    wicketPlayerId: z.string().uuid().optional().nullable(),
+    fielderId: z.string().uuid().optional().nullable(),
     isWide: z.boolean().default(false),
     isNoBall: z.boolean().default(false),
     isBye: z.boolean().default(false),

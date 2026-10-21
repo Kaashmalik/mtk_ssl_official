@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { Button } from "@mtk/ui";
 import { BallInput, WicketType, useScoringStore } from "@/stores/scoring-store";
 import { WicketSelector } from "./wicket-selector";
@@ -12,7 +12,9 @@ const BALL_OPTIONS: { value: BallInput; label: string; color: string }[] = [
   { value: 2, label: "2", color: "bg-green-600 hover:bg-green-500" },
   { value: 3, label: "3", color: "bg-yellow-600 hover:bg-yellow-500" },
   { value: 4, label: "4", color: "bg-orange-600 hover:bg-orange-500" },
+  { value: 5, label: "5", color: "bg-lime-600 hover:bg-lime-500" },
   { value: 6, label: "6", color: "bg-red-600 hover:bg-red-500" },
+  { value: 7, label: "7", color: "bg-rose-700 hover:bg-rose-600" },
   { value: "W", label: "W", color: "bg-purple-600 hover:bg-purple-500" },
   { value: "WD", label: "WD", color: "bg-pink-600 hover:bg-pink-500" },
   { value: "NB", label: "NB", color: "bg-cyan-600 hover:bg-cyan-500" },

@@ -2,7 +2,7 @@ import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { readInningsForCommand } from "@/lib/scoring-reads"
 import { proxyRecordBall } from "@/lib/scoring-service-client"
-import { z } from "zod"
+import { recordBallCommandSchema, type RecordBallCommandV1 } from "@mtk/contracts"
 
 /**
  * The single authenticated delivery-submission path. Both the recordBall
@@ -11,39 +11,16 @@ import { z } from "zod"
  * tenant resolution, match access gate, actor resolution, innings boundary,
  * SoT proxying and operation-id echo pin as every other canonical write.
  * Transport never changes authority.
+ *
+ * ENH-03-02: the command schema is the SHARED @mtk/contracts vocabulary —
+ * one validated boundary for web sessions and the mobile intake, including
+ * explicit wicket attribution (wicketPlayerId/fielderId). Nothing that the
+ * schema accepts is silently stripped on the way to the service.
  */
 
-export const recordBallCommandSchema = z.object({
-  matchId: z.string().uuid(),
-  inningsId: z.string().uuid(),
-  clientOpId: z.string().trim().min(1).max(200),
-  queueAccountId: z.string().min(1).max(200).optional(),
-  queueTenantId: z.string().uuid().optional(),
-  overNumber: z.number().int().min(0),
-  ballNumber: z.number().int().min(1).max(6),
-  runs: z.number().int().min(0).max(7),
-  batsmanId: z.string().uuid().optional().nullable(),
-  bowlerId: z.string().uuid().optional().nullable(),
-  isWicket: z.boolean().default(false),
-  wicketType: z.enum([
-    "bowled", "caught", "lbw", "run_out", "stumped", "hit_wicket", "retired", "retired_hurt",
-  ]).optional().nullable(),
-  isWide: z.boolean().default(false),
-  isNoBall: z.boolean().default(false),
-  isBye: z.boolean().default(false),
-  isLegBye: z.boolean().default(false),
-  isFour: z.boolean().default(false),
-  isSix: z.boolean().default(false),
-  // SCORE-11 writer fencing: the handover epoch the scoring session observed.
-  handoverEpoch: z.number().int().min(0).optional(),
-  expectedRevision: z.number().int().min(0).max(2147483647).optional(),
-  review: z.object({ reason: z.string().trim().min(10).max(1000),
-    previousEpoch: z.number().int().min(0).optional(),
-    previousRevision: z.number().int().min(0).optional(),
-  }).optional(),
-})
+export { recordBallCommandSchema }
 
-export type DeliverySubmission = z.infer<typeof recordBallCommandSchema>
+export type DeliverySubmission = RecordBallCommandV1
 
 export type DeliveryAcknowledgement = {
   success: true
@@ -69,8 +46,16 @@ export async function submitDelivery(accountId: string, tenantId: string, valida
   const delivery = scorerRunsToDelivery(validated)
   if (validated.isWicket && !validated.wicketType) throw new Error("Select a dismissal type")
 
+  // Wicket attribution: the named-out player defaults to the batsman on
+  // strike (a run out may explicitly name the non-striker), and the fielder
+  // who completed the dismissal rides with it. The canonical service
+  // enforces the on-field rules; this path only guarantees nothing is lost.
   const wicket = validated.isWicket && validated.wicketType
-    ? { type: validated.wicketType, playerId: validated.batsmanId }
+    ? {
+        type: validated.wicketType,
+        playerId: validated.wicketPlayerId ?? validated.batsmanId,
+        ...(validated.fielderId ? { fielderId: validated.fielderId } : {}),
+      }
     : undefined
 
   const result = await proxyRecordBall({

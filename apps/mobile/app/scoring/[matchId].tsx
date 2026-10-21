@@ -14,6 +14,10 @@ import { useAuth } from "@clerk/clerk-expo";
 import { useMatchStore } from "@/store/match-store";
 import { useOfflineStore, BallData } from "@/store/offline-store";
 import { authedFetch, clerkConfigured } from "@/lib/app-api";
+// The scoring vocabulary is the SHARED contract (ENH-03-02): the run grid
+// can only offer what the server accepts, and queued coordinates advance
+// by the same rule the server verifies on flush.
+import { advanceDeliveryCoordinates, MOBILE_DELIVERY_RUNS } from "@mtk/contracts";
 
 /**
  * SCORE-08 native scoring console. Deliveries can only be recorded by a
@@ -128,6 +132,25 @@ function AuthenticatedScoring() {
   const overs = Math.floor((innings.totalBalls ?? 0) / 6);
   const ballThisOver = (innings.totalBalls ?? 0) % 6;
 
+  // ENH-03-02: chained coordinates. Stale per-render coordinates used to hand
+  // every queued ball the SAME position, so a parallel flush could never
+  // land. Instead each new entry advances the SERVER-verified position from
+  // the device's own queue tail (extras are re-bowled; legal balls advance),
+  // starting from the hydrated official state.
+  const queuedForInnings = [
+    ...conflicted.filter((entry) => entry.inningsId === innings.id),
+    ...getPendingBalls(matchId, userId).filter((entry) => entry.inningsId === innings.id),
+  ].sort((a, b) => a.timestamp - b.timestamp);
+  const queueTail = queuedForInnings[queuedForInnings.length - 1];
+  const nextCoordinate = queueTail
+    ? advanceDeliveryCoordinates({
+        overNumber: queueTail.over,
+        ballNumber: queueTail.ball,
+        isWide: !!queueTail.isWide,
+        isNoBall: !!queueTail.isNoBall,
+      })
+    : { overNumber: overs, ballNumber: ballThisOver + 1 };
+
   const localRecord = (
     runType: { kind: "runs"; value: number } | { kind: "wicket" | "wide" | "noball" | "bye" | "legbye"; wicketType?: BallData["wicketType"] }
   ) => {
@@ -140,18 +163,26 @@ function AuthenticatedScoring() {
       setPendingWicket(true); // the dismissal type is part of the official record — never guessed
       return;
     }
-    const runs = runType.kind === "runs" ? runType.value : 1;
-    const isWicket = runType.kind === "wicket";
+    // ENH-03-02: the delivery vocabulary is faithfully typed per button.
+    // Every extras button carries BOTH its runs and its boolean flag (the
+    // old code queued them as plain legal batter runs — silently falsified
+    // intent, and a wicket was queued with a run's total). Extras total 1
+    // at this UI; a wicket carries no runs.
+    const extrasRun = runType.kind === "wide" || runType.kind === "noball" || runType.kind === "bye" || runType.kind === "legbye";
     const record: BallData = {
       id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       matchId: hydrated.match.id,
       inningsId: innings.id,
       innings: innings.inningsNumber,
-      over: overs,
-      ball: ballThisOver + 1,
-      runs,
-      isWicket,
-      wicketType: isWicket ? runType.wicketType : undefined,
+      over: nextCoordinate.overNumber,
+      ball: nextCoordinate.ballNumber,
+      runs: runType.kind === "runs" ? runType.value : extrasRun ? 1 : 0,
+      isWicket: runType.kind === "wicket",
+      wicketType: runType.kind === "wicket" ? runType.wicketType : undefined,
+      isWide: runType.kind === "wide",
+      isNoBall: runType.kind === "noball",
+      isBye: runType.kind === "bye",
+      isLegBye: runType.kind === "legbye",
       batsmanId,
       bowlerId,
       handoverEpoch: hydrated.match.handoverEpoch,
@@ -193,32 +224,44 @@ function AuthenticatedScoring() {
       )}
 
       <View style={styles.controlGrid}>
-        {[0, 1, 2].map((row) => (
-          <View key={row} style={styles.row}>
-            {[0, 1, 2].map((col) => {
-              const value = row * 3 + col;
-              return (
-                <TouchableOpacity
-                  key={col}
-                  style={styles.gridButton}
-                  disabled={!batsmanId || !bowlerId}
-                  onPress={() => localRecord({ kind: "runs", value })}
-                >
-                  <Text style={styles.buttonText}>{value}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
+        {/* The grid is contract-bound: exactly 0..7, the server ceiling. The
+            old grid offered 8 — a run value the server refuses, so a queued
+            8 could only ever be stripped or stuck. */}
         <View style={styles.row}>
-          {(["wide", "noball", "bye"] as const).map((kind) => (
+          {MOBILE_DELIVERY_RUNS.slice(0, 4).map((value) => (
+            <TouchableOpacity
+              key={value}
+              style={styles.gridButton}
+              disabled={!batsmanId || !bowlerId}
+              onPress={() => localRecord({ kind: "runs", value })}
+            >
+              <Text style={styles.buttonText}>{value}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={styles.row}>
+          {MOBILE_DELIVERY_RUNS.slice(4, 8).map((value) => (
+            <TouchableOpacity
+              key={value}
+              style={styles.gridButton}
+              disabled={!batsmanId || !bowlerId}
+              onPress={() => localRecord({ kind: "runs", value })}
+            >
+              <Text style={styles.buttonText}>{value}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={styles.row}>
+          {(["wide", "noball", "bye", "legbye"] as const).map((kind) => (
             <TouchableOpacity
               key={kind}
               style={styles.gridButton}
               disabled={!batsmanId || !bowlerId}
               onPress={() => localRecord({ kind })}
             >
-              <Text style={styles.buttonText}>{kind === "wide" ? "WD" : kind === "noball" ? "NB" : "B"}</Text>
+              <Text style={styles.buttonText}>
+                {kind === "wide" ? "WD" : kind === "noball" ? "NB" : kind === "bye" ? "B" : "LB"}
+              </Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity
@@ -264,6 +307,7 @@ function localRecordLabel(record: BallData, runType: { kind: string }): string {
   if (runType.kind === "wicket") return "W";
   if (runType.kind === "wide") return "WD";
   if (runType.kind === "noball") return "NB";
+  if (runType.kind === "legbye") return "LB";
   return String(record.runs);
 }
 
