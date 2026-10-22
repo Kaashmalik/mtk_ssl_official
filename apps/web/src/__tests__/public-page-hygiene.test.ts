@@ -24,6 +24,7 @@ const PUBLIC_FILES = [
   "app/matches/[matchId]/live/page.tsx",
   "app/api/scorecards/[matchId]/pdf/route.ts",
   "lib/public-visibility.ts",
+  "lib/broadcast-playback.ts",
 ]
 
 describe("PUB-06: public surfaces use explicit column selects only", () => {

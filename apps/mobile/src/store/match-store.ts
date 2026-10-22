@@ -47,6 +47,10 @@ function memberMatchToMatch(m: MemberMatch): Match {
     liveStreamUrl: m.liveStreamUrl,
     streamSource: m.streamSource,
     streamStatus: m.streamStatus,
+    // ENH-08-03: single-read playback summary (live/replay/upcoming). The list
+    // projection omits it, so the button keeps its legacy live fallback.
+    playbackState: m.playback?.state,
+    hasReplay: m.playback?.hasReplay,
   };
 }
 

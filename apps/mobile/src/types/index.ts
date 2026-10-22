@@ -1,4 +1,4 @@
-import type { MatchStatus } from "@mtk/contracts";
+import type { BroadcastPlaybackState, MatchStatus } from "@mtk/contracts";
 
 export interface Match {
   id: string;
@@ -39,6 +39,15 @@ export interface Match {
   stream_source?: "facebook" | "youtube" | "rtmp" | "webrtc" | null;
   streamStatus?: "idle" | "live" | "ended" | null;
   stream_status?: "idle" | "live" | "ended" | null;
+  /**
+   * ENH-08-03: truthful public playback state from the web BFF catalogue.
+   * Optional so an older BFF response still renders; the button falls back to
+   * the legacy live status + URL and never infers a replay by itself.
+   */
+  playbackState?: BroadcastPlaybackState;
+  playback_state?: BroadcastPlaybackState;
+  hasReplay?: boolean;
+  has_replay?: boolean;
 }
 
 export interface Player {

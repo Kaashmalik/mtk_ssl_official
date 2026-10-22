@@ -257,6 +257,9 @@ describe("mobile BFF route boundary", () => {
     const body = (await res.json()) as { items: MemberMatch[]; nextCursor: string | null }
     expect(body.items).toHaveLength(1)
     expect(body.items[0].status).toBe("postponed")
+    // ENH-08-03: an unpublished/postponed fixture has no public playback
+    // claim, even on the member read.
+    expect(body.items[0].playback).toEqual({ state: "unavailable", hasReplay: false })
     expect(body.nextCursor).toBeNull()
   })
 })

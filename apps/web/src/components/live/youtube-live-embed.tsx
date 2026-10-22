@@ -1,25 +1,19 @@
 "use client"
 
 import { useMemo } from "react"
+import { buildProviderPlaybackUrls, parseYouTubeVideoId } from "@mtk/contracts"
 
-function toYouTubeEmbed(url: string): string {
-  try {
-    const u = new URL(url)
-    let id = ""
-    if (u.hostname.includes("youtu.be")) id = u.pathname.slice(1)
-    else if (u.hostname.includes("youtube.com")) {
-      if (u.pathname.startsWith("/live/")) id = u.pathname.split("/live/")[1].split("/")[0]
-      else if (u.pathname.startsWith("/embed/")) id = u.pathname.split("/embed/")[1].split("/")[0]
-      else id = u.searchParams.get("v") ?? ""
-    }
-    return id ? `https://www.youtube.com/embed/${id}?autoplay=1&mute=1` : ""
-  } catch {
-    return ""
-  }
-}
-
+/**
+ * Compatibility wrapper for existing callers. URL parsing now goes through the
+ * ENH-08-03 exact host allowlist (`youtube.com.evil.example` is refused), and
+ * the embed URL is built from the validated provider id rather than pasted.
+ */
 export function YouTubeLiveEmbed({ url }: { url: string }) {
-  const src = useMemo(() => toYouTubeEmbed(url), [url])
+  const src = useMemo(() => {
+    const videoId = parseYouTubeVideoId(url)
+    return videoId ? buildProviderPlaybackUrls("youtube", videoId)?.embedUrl ?? "" : ""
+  }, [url])
+
   if (!src) {
     return <div className="aspect-video bg-black/80 rounded-lg flex items-center justify-center text-white/60 text-sm">Invalid YouTube URL</div>
   }
@@ -27,8 +21,9 @@ export function YouTubeLiveEmbed({ url }: { url: string }) {
     <iframe
       src={src}
       className="w-full aspect-video rounded-lg"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
       allowFullScreen
+      referrerPolicy="strict-origin-when-cross-origin"
       title="YouTube Live"
     />
   )

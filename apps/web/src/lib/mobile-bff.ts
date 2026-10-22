@@ -18,6 +18,7 @@ import {
   type MemberTeam,
   type MobileBffListResponse,
 } from "@mtk/contracts"
+import { readPublishedMatchPlayback } from "@/lib/broadcast-playback"
 
 /**
  * ENH-03-03: the native BFF reads. Server-side authority only: the caller
@@ -183,7 +184,17 @@ export async function readMemberMatch(input: {
     .where(and(eq(matches.tenantId, input.tenantId), eq(matches.id, input.matchId)))
     .limit(1)
   if (!row) return null
-  return toMemberMatch(row)
+  const match = toMemberMatch(row)
+  // ENH-08-03: the single detail read carries the truthful playback summary
+  // (flag-gated; legacy live remains the fallback). The list stays one query.
+  const playback = await readPublishedMatchPlayback(input.tenantId, match)
+  return {
+    ...match,
+    playback: {
+      state: playback.state,
+      hasReplay: playback.replays.length > 0,
+    },
+  }
 }
 
 /**

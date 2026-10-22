@@ -1,18 +1,22 @@
 "use client"
 
 import { useMemo } from "react"
+import {
+  buildLegacyFacebookEmbedUrl,
+  buildProviderPlaybackUrls,
+  parseFacebookVideoId,
+} from "@mtk/contracts"
 
+/**
+ * Compatibility wrapper for existing callers. A numeric Facebook video id is
+ * preferred; a legacy live URL is accepted only after the exact https host
+ * allowlist, and it is embedded through Facebook's own plugin.
+ */
 export function FacebookLiveEmbed({ url }: { url: string }) {
   const src = useMemo(() => {
-    try {
-      const u = new URL(url)
-      if (u.hostname.includes("facebook.com") || u.hostname.includes("fb.watch")) {
-        return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&autoplay=true&mute=true`
-      }
-    } catch {
-      return ""
-    }
-    return ""
+    const videoId = parseFacebookVideoId(url)
+    if (videoId) return buildProviderPlaybackUrls("facebook", videoId)?.embedUrl ?? ""
+    return buildLegacyFacebookEmbedUrl(url)?.embedUrl ?? ""
   }, [url])
 
   if (!src) {
@@ -24,6 +28,7 @@ export function FacebookLiveEmbed({ url }: { url: string }) {
       className="w-full aspect-video rounded-lg"
       allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
       allowFullScreen
+      referrerPolicy="strict-origin-when-cross-origin"
       title="Facebook Live"
     />
   )

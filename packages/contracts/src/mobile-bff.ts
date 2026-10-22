@@ -34,6 +34,7 @@ import type {
   PlayerRole,
 } from "./status"
 import type { PublicMatch, PublicTeam } from "./public-reads"
+import type { BroadcastPlaybackState } from "./broadcast-playback"
 
 /** Monotonic convention version for the mobile BFF surface. */
 export const MOBILE_BFF_VERSION = 1 as const
@@ -72,6 +73,15 @@ export type MobileBffListResponse<T> = {
 export type MemberMatch = PublicMatch & {
   teamAName: string
   teamBName: string
+  /**
+   * ENH-08-03: present on the single-match read only. The list page does not
+   * pay for a per-row broadcast lookup; the detail screen needs the truthful
+   * Live/Replay state to label its watch button.
+   */
+  playback?: {
+    state: BroadcastPlaybackState
+    hasReplay: boolean
+  }
 }
 
 /** Hard ceiling on a mobile BFF page (requests may ask for less, never more). */

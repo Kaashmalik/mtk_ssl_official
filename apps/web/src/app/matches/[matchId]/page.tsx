@@ -13,6 +13,7 @@ import { AiSummaryCard } from "@/components/matches/ai-summary-card"
 import { matchSummaryAiReady } from "@/lib/match-summary-ai"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedMatch, readPublishedMatchTeams } from "@/lib/public-visibility"
+import { readPublishedMatchPlayback } from "@/lib/broadcast-playback"
 import type { FanReactionType } from "@mtk/database/lib/fan-reaction-policy"
 import { readFanReactionCounts, readMyFanReactions } from "@/lib/fan-reactions"
 import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
@@ -35,6 +36,11 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
   const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
   if (!teamA || !teamB) notFound()
+  // ENH-08-03: Live/Replay badges come from the truthful provider catalogue,
+  // not from a raw stream-status column. When the verified broadcast plane is
+  // not enabled this still allows a legacy live embed, but never invents a
+  // replay.
+  const playback = await readPublishedMatchPlayback(tenantId, match)
 
     // FAN-01: engagement-only reactions on this published match. Counts are
   // public and aggregate (never per-fan); the viewer's own rows fail closed to
@@ -319,9 +325,9 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
               <span className="text-white/80">Player of the Match:</span>
               <span className="font-bold text-white">{momName}</span>
             </p>}
-            {match.streamStatus === "live" && (
-              <Link href={`/matches/${matchId}/live`} className="inline-flex items-center gap-1.5 mt-3 text-sm font-semibold text-white bg-red-600 rounded-full px-4 py-1.5">
-                <Video className="h-4 w-4" /> Watch Live
+            {(playback.state === "live" || playback.state === "replay") && (
+              <Link href={`/matches/${matchId}/live`} className={`inline-flex items-center gap-1.5 mt-3 text-sm font-semibold text-white rounded-full px-4 py-1.5 ${playback.state === "live" ? "bg-red-600" : "bg-slate-700"}`}>
+                <Video className="h-4 w-4" /> {playback.state === "live" ? "Watch Live" : "Watch Replay"}
               </Link>
             )}
           </div>

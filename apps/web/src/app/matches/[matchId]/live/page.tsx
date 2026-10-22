@@ -6,6 +6,13 @@ import { StreamSelector } from "@/components/live/stream-selector"
 import { LiveOverlay } from "@/components/live/live-overlay"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedMatch, readPublishedMatchTeams } from "@/lib/public-visibility"
+import { readPublishedMatchPlayback } from "@/lib/broadcast-playback"
+
+const STATE_BADGE = {
+  live: { label: "LIVE", className: "bg-red-600 text-white" },
+  replay: { label: "REPLAY", className: "bg-slate-700 text-white" },
+  upcoming: { label: "UPCOMING", className: "bg-amber-600 text-white" },
+} as const
 
 export default async function LiveMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
@@ -18,14 +25,16 @@ export default async function LiveMatchPage({ params }: { params: Promise<{ matc
   const match = await readPublishedMatch(tenantId, matchId)
   if (!match) notFound()
   const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
+  const playback = await readPublishedMatchPlayback(tenantId, match)
+  const badge = playback.state === "unavailable" ? null : STATE_BADGE[playback.state]
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 p-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">{teamA?.name ?? "Team A"} vs {teamB?.name ?? "Team B"}</h1>
-        {match.streamStatus === "live" && <Badge className="bg-red-600 text-white">LIVE</Badge>}
+        {badge && <Badge className={badge.className}>{badge.label}</Badge>}
       </div>
-      <StreamSelector source={match.streamSource} url={match.liveStreamUrl} />
+      <StreamSelector catalogue={playback} />
       <Card>
         <CardContent className="py-3">
           <LiveOverlay matchId={matchId} tenantId={tenantId} />

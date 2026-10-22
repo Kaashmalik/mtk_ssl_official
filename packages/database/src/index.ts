@@ -98,6 +98,7 @@ export * from "./schema/scorecard-correction-requests";
 export * from "./schema/tournament-applications";
 export * from "./schema/fan-predictions";
 export * from "./schema/tournament-application-replies";
+export * from "./schema/broadcast";
 export * from "./lib/match-availability-policy";
 export * from "./lib/scorecard-correction-policy";
 export * from "./lib/profile-policy";
