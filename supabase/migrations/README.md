@@ -113,6 +113,15 @@ SET tenant_ids = array_append(tenant_ids, 'tenant-uuid-here')
 WHERE id = current_user_id();
 ```
 
+## Pending migrations (2026-10-22)
+
+Four additive migrations are committed but unapplied:
+`20261021120000_notification_reads.sql`, `20261021130000_notification_jobs.sql`,
+`20261021140000_media_assets.sql` and `20261021150000_broadcast_provider.sql`.
+Do not use `supabase db reset` on a database that holds data. Follow the
+review, ordering, verification and rollback checklist in
+[`docs/deployment/PENDING_MIGRATIONS_2026-10-22.md`](../../docs/deployment/PENDING_MIGRATIONS_2026-10-22.md).
+
 ## Notes
 
 - All IDs use UUID v7 (time-ordered)
