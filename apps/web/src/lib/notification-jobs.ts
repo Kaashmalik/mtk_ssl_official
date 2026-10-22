@@ -232,13 +232,17 @@ async function deliverNotificationJob(job: ClaimedJob): Promise<NotificationJobD
 export async function processNotificationJobs(now = new Date()): Promise<NotificationJobRunSummary> {
   if (!notificationJobsEnabled()) return { ...EMPTY_RUN }
 
-  // A worker that died on its final attempt must become terminal instead of
-  // staying leased forever.
+  // A worker that died on its final attempt, or a deferred retry (for example
+  // quiet hours) that reached the attempt cap, must become terminal instead of
+  // staying leased/pending forever.
   await db.execute(sql`UPDATE public.notification_jobs
     SET state = 'dead_lettered', lease_token = NULL, resolved_at = now(),
-        last_error = COALESCE(last_error, 'lease_expired')
-    WHERE state = 'leased' AND attempts >= ${NOTIFICATION_JOB_MAX_ATTEMPTS}
-      AND next_attempt_at <= now()`)
+        last_error = COALESCE(last_error, CASE
+          WHEN state = 'leased' THEN 'lease_expired'
+          ELSE 'attempts_exhausted'
+        END)
+    WHERE state IN ('leased', 'pending') AND attempts >= ${NOTIFICATION_JOB_MAX_ATTEMPTS}
+      AND (next_attempt_at IS NULL OR next_attempt_at <= now())`)
 
   const lease = randomUUID()
   const claimed = await db.execute(sql`WITH due AS (

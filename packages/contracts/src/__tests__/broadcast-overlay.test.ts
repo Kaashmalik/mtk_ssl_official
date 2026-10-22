@@ -8,6 +8,7 @@ import {
 /** ENH-09-01: the overlay projection is display-only and arithmetic-honest. */
 
 const ball = {
+  id: "00000000-0000-4000-8000-0000000000e1",
   inningsNumber: 2,
   runs: 1,
   isWicket: false,
@@ -28,6 +29,7 @@ function input(overrides: Partial<Parameters<typeof buildBroadcastOverlaySnapsho
       id: "00000000-0000-4000-8000-0000000000a1",
       tenantId: "00000000-0000-4000-8000-0000000000a2",
       status: "live",
+      scoringRevision: 12,
       updatedAt: "2026-10-21T10:00:00.000Z",
       totalOvers: 20,
       teamAId: "00000000-0000-4000-8000-0000000000d1",
@@ -42,12 +44,12 @@ function input(overrides: Partial<Parameters<typeof buildBroadcastOverlaySnapsho
       { inningsNumber: 2, teamId: "00000000-0000-4000-8000-0000000000d2", totalRuns: 100, totalWickets: 3, totalBalls: 60 },
     ],
     balls: [
-      { ...ball, runs: 4, isFour: true },
-      { ...ball, runs: 0, isWide: true },
-      { ...ball, runs: 1, isNoBall: true },
-      { ...ball, runs: 2, isBye: true },
-      { ...ball, runs: 6, isSix: true },
-      { ...ball, runs: 0, isWicket: true, wicketType: "run_out" },
+      { ...ball, id: "ball-1", runs: 4, isFour: true },
+      { ...ball, id: "ball-2", runs: 0, isWide: true },
+      { ...ball, id: "ball-3", runs: 1, isNoBall: true },
+      { ...ball, id: "ball-4", runs: 2, isBye: true },
+      { ...ball, id: "ball-5", runs: 6, isSix: true },
+      { ...ball, id: "ball-6", runs: 0, isWicket: true, wicketType: "run_out" },
     ],
     players: [
       { id: "00000000-0000-4000-8000-0000000000b1", name: "A. Batter" },
@@ -87,6 +89,12 @@ describe("ENH-09-01: overlay projection", () => {
     expect(snapshot.current?.requiredRate).toBe("5.10")
     expect(snapshot.current?.recentBalls.map(row => row.label))
       .toEqual(["4", "WD", "NB", "B2", "6", "W"])
+    expect(snapshot.scoringRevision).toBe(12)
+    expect(snapshot.current?.recentBalls.map(row => row.id))
+      .toEqual(["ball-1", "ball-2", "ball-3", "ball-4", "ball-5", "ball-6"])
+    expect(snapshot.current?.recentBalls.at(-1)).toMatchObject({
+      wicketType: "run_out", bowlerCreditedWicket: false,
+    })
     // Batter: 4 + 0 wide + 0 no-ball (1-1) + 0 bye + 6 + 0 = 10 from 5 balls
     // (wides are not balls faced; the no-ball is).
     expect(snapshot.current?.lastBatter).toMatchObject({

@@ -22,6 +22,8 @@ export type BroadcastOverlayInningsInput = {
 }
 
 export type BroadcastOverlayBallInput = {
+  /** Stable canonical delivery id; event dedup must never key on a position. */
+  id: string
   inningsNumber: number
   runs: number
   isWicket: boolean
@@ -42,6 +44,8 @@ export type BroadcastOverlaySnapshot = {
   matchId: string
   tenantId: string
   status: string
+  /** Canonical scoring revision; celebration events are deduped/fenced on it. */
+  scoringRevision: number
   updatedAt: string
   league: {
     name: string
@@ -62,7 +66,14 @@ export type BroadcastOverlaySnapshot = {
     runRate: string
     target: number | null
     requiredRate: string | null
-    recentBalls: Array<{ key: string; label: string; tone: "run" | "boundary" | "wicket" | "extra" }>
+    recentBalls: Array<{
+      id: string
+      key: string
+      label: string
+      tone: "run" | "boundary" | "wicket" | "extra"
+      wicketType: string | null
+      bowlerCreditedWicket: boolean
+    }>
     lastBatter: { id: string; name: string; runs: number; balls: number } | null
     lastBowler: { id: string; name: string; balls: number; runs: number; wickets: number } | null
   } | null
@@ -113,6 +124,7 @@ export function buildBroadcastOverlaySnapshot(input: {
     id: string
     tenantId: string
     status: string
+    scoringRevision: number
     updatedAt: string
     totalOvers: number
     teamAId: string
@@ -162,9 +174,12 @@ export function buildBroadcastOverlaySnapshot(input: {
       ? ((target - latest.totalRuns) / remainingBalls * 6).toFixed(2)
       : null
 
-    const recentBalls = currentBalls.slice(-6).map((ball, index) => ({
-      key: `${latest.inningsNumber}-${latest.totalBalls}-${index}`,
+    const recentBalls = currentBalls.slice(-6).map(ball => ({
+      id: ball.id,
+      key: ball.id,
       ...broadcastBallLabel(ball),
+      wicketType: ball.wicketType,
+      bowlerCreditedWicket: overlayBowlerWicket(ball),
     }))
 
     const lastBatterBall = [...currentBalls].reverse().find(ball => ball.batsmanId)
@@ -204,6 +219,7 @@ export function buildBroadcastOverlaySnapshot(input: {
     matchId: input.match.id,
     tenantId: input.match.tenantId,
     status: input.match.status,
+    scoringRevision: input.match.scoringRevision,
     updatedAt: input.match.updatedAt,
     league: {
       name: input.branding?.name?.trim() || "Cricket",

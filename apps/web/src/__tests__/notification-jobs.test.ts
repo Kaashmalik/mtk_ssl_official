@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { PgDialect } from "drizzle-orm/pg-core"
 import { notificationJobs } from "@mtk/database"
 
 /**
@@ -181,6 +182,17 @@ describe("ENH-06-04: enqueue is transactional and idempotent", () => {
 })
 
 describe("ENH-06-04: the worker is bounded and lease-fenced", () => {
+  it("dead-letters exhausted pending jobs as well as expired leases", async () => {
+    claimed()
+
+    await processNotificationJobs(new Date("2026-10-21T00:00:00Z"))
+
+    const sweep = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0] as any)
+    expect(sweep.sql).toContain("state IN ('leased', 'pending')")
+    expect(sweep.sql).toContain("attempts_exhausted")
+    expect(sweep.sql).toContain("next_attempt_at IS NULL")
+  })
+
   it("claims nothing and touches no row while the flag is off", async () => {
     vi.stubEnv("NOTIFICATION_JOBS_READY", "false")
     const summary = await processNotificationJobs()

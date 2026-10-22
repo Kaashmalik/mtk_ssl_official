@@ -33,6 +33,7 @@ export async function readBroadcastOverlaySnapshot(input: {
       id: matches.id,
       tenantId: matches.tenantId,
       status: matches.status,
+      scoringRevision: matches.scoringRevision,
       updatedAt: matches.updatedAt,
       totalOvers: matches.totalOvers,
       teamAId: matches.teamAId,
@@ -92,6 +93,7 @@ export async function readBroadcastOverlaySnapshot(input: {
   const ballRows = currentInnings
     ? await db
       .select({
+        id: matchBalls.id,
         inningsNumber: matchInnings.inningsNumber,
         runs: matchBalls.runs,
         isWicket: matchBalls.isWicket,
@@ -135,6 +137,7 @@ export async function readBroadcastOverlaySnapshot(input: {
       id: match.id,
       tenantId: match.tenantId,
       status: match.status,
+      scoringRevision: match.scoringRevision,
       updatedAt: match.updatedAt.toISOString(),
       totalOvers: match.totalOvers ?? 20,
       teamAId: match.teamAId,

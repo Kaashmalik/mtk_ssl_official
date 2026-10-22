@@ -1,15 +1,22 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { BroadcastOverlaySnapshot } from "@mtk/contracts"
+import {
+  planBroadcastCelebrations,
+  pruneBroadcastCelebrations,
+  type BroadcastCelebrationEvent,
+  type BroadcastOverlaySnapshot,
+} from "@mtk/contracts"
 import { getScoringSocket } from "@/lib/scoring-socket"
 
 /**
  * ENH-09-01/03: read-only scoreboard for OBS.
  *
  * The socket only TRIGGERS a snapshot refresh; every number shown comes from
- * the token-bound snapshot endpoint, which rechecks publication. The last-ball
- * celebration is presentational and bounded (one short pop, no replay backlog).
+ * the token-bound snapshot endpoint, which rechecks publication. Celebrations
+ * are derived from the official snapshot diff (stable delivery ids + scoring
+ * revision), queued to at most four, and pruned when an undo removes the
+ * delivery. A reconnect primes the baseline instead of replaying a backlog.
  * "Last batter"/"Last bowler" are aggregates of recorded deliveries, never a
  * claim about who is on strike.
  */
@@ -32,8 +39,11 @@ export function BroadcastOverlay({
   const [snapshot, setSnapshot] = useState<BroadcastOverlaySnapshot | null>(initial)
   const [unavailable, setUnavailable] = useState(false)
   const inFlight = useRef(false)
-  const lastBallKey = useRef(initial.current?.recentBalls.at(-1)?.key ?? "")
-  const [celebrate, setCelebrate] = useState<string | null>(null)
+  const previousSnapshot = useRef<BroadcastOverlaySnapshot | null>(initial)
+  const suppressNextEvents = useRef(false)
+  const seenEventIds = useRef(new Set<string>())
+  const [queue, setQueue] = useState<BroadcastCelebrationEvent[]>([])
+  const [activeEvent, setActiveEvent] = useState<BroadcastCelebrationEvent | null>(null)
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return
@@ -69,7 +79,12 @@ export function BroadcastOverlay({
 
   useEffect(() => {
     const socket = getScoringSocket()
+    let connectedOnce = false
     const join = () => {
+      // A reconnect must fast-forward to the current snapshot, not replay the
+      // celebrations that happened while OBS was disconnected.
+      if (connectedOnce) suppressNextEvents.current = true
+      connectedOnce = true
       socket.emit("join-match", { matchId, tenantId }, () => {})
       void refresh()
     }
@@ -92,19 +107,69 @@ export function BroadcastOverlay({
     }
   }, [matchId, tenantId, refresh])
 
-  const key = snapshot?.current?.recentBalls.at(-1)?.key ?? ""
   useEffect(() => {
-    if (animations === "off" || !key || key === lastBallKey.current) {
-      lastBallKey.current = key
+    if (!snapshot) {
+      previousSnapshot.current = null
+      seenEventIds.current.clear()
+      setQueue([])
+      setActiveEvent(null)
       return
     }
-    lastBallKey.current = key
-    const tone = snapshot?.current?.recentBalls.at(-1)?.tone
-    if (tone !== "boundary" && tone !== "wicket") return
-    setCelebrate(key)
-    const timer = window.setTimeout(() => setCelebrate(null), 1_600)
+
+    const previous = previousSnapshot.current
+    previousSnapshot.current = snapshot
+    if (animations === "off") {
+      setQueue([])
+      setActiveEvent(null)
+      return
+    }
+
+    let events = planBroadcastCelebrations({ previous, next: snapshot, mode: animations })
+    if (suppressNextEvents.current) {
+      // `join` immediately refreshes, so the next successful snapshot is the
+      // post-reconnect baseline. Swallow its backlog, then resume live events.
+      suppressNextEvents.current = false
+      events = []
+    }
+
+    setQueue(current => {
+      const nextQueue = pruneBroadcastCelebrations(current, snapshot)
+      const kept = new Set(nextQueue.map(event => event.id))
+      for (const event of current) {
+        if (!kept.has(event.id)) seenEventIds.current.delete(event.id)
+      }
+      for (const event of events) {
+        if (seenEventIds.current.has(event.id)) continue
+        seenEventIds.current.add(event.id)
+        nextQueue.push(event)
+      }
+      return nextQueue.slice(-4)
+    })
+  }, [snapshot, animations])
+
+  useEffect(() => {
+    if (!snapshot || !activeEvent) return
+    if (pruneBroadcastCelebrations([activeEvent], snapshot).length > 0) return
+    // An undo/correction can arrive while the animation is on screen.
+    seenEventIds.current.delete(activeEvent.id)
+    setActiveEvent(null)
+  }, [snapshot, activeEvent])
+
+  useEffect(() => {
+    if (activeEvent || queue.length === 0) return
+    const [next, ...rest] = queue
+    setQueue(rest)
+    setActiveEvent(next)
+  }, [activeEvent, queue])
+
+  useEffect(() => {
+    if (!activeEvent) return
+    const timer = window.setTimeout(
+      () => setActiveEvent(null),
+      animations === "reduced" ? 1_300 : 1_800,
+    )
     return () => window.clearTimeout(timer)
-  }, [key, animations, snapshot])
+  }, [activeEvent, animations])
 
   if (unavailable) {
     return (
@@ -122,7 +187,7 @@ export function BroadcastOverlay({
   const battingId = current?.battingTeamId
   const statusLabel = snapshot.status === "live"
     ? "LIVE"
-    : ["completed", "no_result", "forfeited"].includes(snapshot.status)
+    : ["completed", "no_result", "forfeited", "abandoned"].includes(snapshot.status)
       ? "RESULT"
       : "UPCOMING"
   const teamCard = (
@@ -173,6 +238,31 @@ export function BroadcastOverlay({
         </div>
       </header>
 
+      {activeEvent && (
+        <div
+          className={`pointer-events-none absolute left-1/2 top-32 z-20 -translate-x-1/2 ${
+            animations === "full" ? "overlay-celebrate" : ""
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          <div
+            className={`rounded-2xl border px-10 py-5 text-center shadow-2xl backdrop-blur-sm ${
+              activeEvent.kind === "wicket"
+                ? "border-red-400/60 bg-red-700/95 text-white"
+                : activeEvent.kind === "result"
+                  ? "border-amber-300/60 bg-amber-400/95 text-black"
+                  : "border-white/25 bg-black/85 text-white"
+            }`}
+          >
+            <p className="text-4xl font-black tracking-wide">{activeEvent.title}</p>
+            {activeEvent.detail && (
+              <p className="mt-1 text-lg font-medium opacity-80">{activeEvent.detail}</p>
+            )}
+          </div>
+        </div>
+      )}
+
       <section className="rounded-3xl bg-black/70 p-10 shadow-2xl backdrop-blur-md">
         <div className="flex items-center gap-10">
           {teamCard(snapshot.teams.teamA, "left")}
@@ -213,7 +303,7 @@ export function BroadcastOverlay({
                           : ball.tone === "extra"
                             ? "bg-sky-700 text-white"
                             : "bg-white/15 text-white"
-                    } ${celebrate === ball.key ? "overlay-celebrate" : ""}`}
+                    }`}
                   >
                     {ball.label}
                   </span>

@@ -5,13 +5,21 @@ import { enqueueTournamentFollowerJobs } from "@/lib/notification-fanout"
 /**
  * ENH-06-04: league fan-out is a durable producer.
  *
- * It must select followers inside ONE league, write one in-app job per follower
- * (bounded), and never touch provider HTTP. Replayed producers collide on the
- * unique event/recipient/channel key instead of double-sending.
+ * It must select followers inside ONE league, write an in-app job per follower
+ * plus email/push only for that member's stored opt-ins (bounded), and never
+ * touch provider HTTP. Replayed producers collide on the unique
+ * event/recipient/channel key instead of double-sending.
  */
 
+type Follower = {
+  userId: string
+  inAppEnabled?: boolean
+  emailEnabled?: boolean
+  pushEnabled?: boolean
+}
+
 const mocks = vi.hoisted(() => ({
-  followers: [] as Array<{ userId: string }>,
+  followers: [] as Follower[],
   inserted: [] as Array<{ id: string }>,
   select: vi.fn(),
   insert: vi.fn(),
@@ -37,6 +45,7 @@ function harness() {
     const chain: any = {
       from: () => chain,
       innerJoin: () => chain,
+      leftJoin: () => chain,
       where: (where: unknown) => { captured.where = where; return chain },
       orderBy: () => chain,
       limit: (limit: number) => { captured.limit = limit; return Promise.resolve(mocks.followers) },
@@ -49,7 +58,7 @@ function harness() {
       return {
         onConflictDoNothing: (arg: { target: unknown[] }) => {
           captured.conflictTarget = arg.target
-          return { returning: async () => mocks.inserted }
+          return { returning: async () => mocks.inserted.slice(0, values.length) }
         },
       }
     },
@@ -77,7 +86,9 @@ describe("ENH-06-04: durable tournament-follower fan-out", () => {
       matchId: MATCH,
     })
 
-    expect(result).toEqual({ fanout: 2, enqueued: 2 })
+    expect(result).toEqual({
+      fanout: 2, enqueued: 2, channels: { inApp: 2, email: 0, push: 0 },
+    })
     expect(captured.limit).toBe(200)
     expect(captured.values).toHaveLength(2)
     expect(captured.values?.[0]).toMatchObject({
@@ -106,7 +117,9 @@ describe("ENH-06-04: durable tournament-follower fan-out", () => {
       title: "t", body: "b", eventId: `match:${MATCH}:started`,
     })
 
-    expect(result).toEqual({ fanout: 2, enqueued: 0 })
+    expect(result).toEqual({
+      fanout: 2, enqueued: 0, channels: { inApp: 2, email: 0, push: 0 },
+    })
     expect(captured.conflictTarget).toHaveLength(3)
   })
 
@@ -119,8 +132,56 @@ describe("ENH-06-04: durable tournament-follower fan-out", () => {
       title: "t", body: "b", eventId: "award:abc-1",
     })
 
-    expect(result).toEqual({ fanout: 0, enqueued: 0 })
+    expect(result).toEqual({
+      fanout: 0, enqueued: 0, channels: { inApp: 0, email: 0, push: 0 },
+    })
     expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it("queues email/push only for members who opted in to that channel in this league", async () => {
+    mocks.followers = [
+      { userId: MEMBER_A, inAppEnabled: true, emailEnabled: true, pushEnabled: false },
+      { userId: MEMBER_B, inAppEnabled: true, emailEnabled: false, pushEnabled: true },
+    ]
+    mocks.inserted = [{ id: "job-a" }, { id: "job-b" }, { id: "job-c" }, { id: "job-d" }]
+    const captured = harness()
+
+    const result = await enqueueTournamentFollowerJobs({
+      tenantId: TENANT, tournamentId: TOURNAMENT, type: "match_started",
+      title: "Match started", body: "Live now", eventId: `match:${MATCH}:started`,
+      matchId: MATCH,
+    })
+
+    expect(result).toEqual({
+      fanout: 2, enqueued: 4, channels: { inApp: 2, email: 1, push: 1 },
+    })
+    expect(captured.values?.map(row => (row as { channel: string }).channel).sort())
+      .toEqual(["email", "in_app", "in_app", "push"])
+    expect(captured.values).toContainEqual(expect.objectContaining({
+      recipientUserId: MEMBER_A, channel: "email",
+    }))
+    expect(captured.values).toContainEqual(expect.objectContaining({
+      recipientUserId: MEMBER_B, channel: "push",
+    }))
+  })
+
+  it("respects an explicit in-app opt-out and an absent preference row", async () => {
+    mocks.followers = [
+      { userId: MEMBER_A, inAppEnabled: false, emailEnabled: false, pushEnabled: false },
+      { userId: MEMBER_B },
+    ]
+    const captured = harness()
+
+    const result = await enqueueTournamentFollowerJobs({
+      tenantId: TENANT, tournamentId: TOURNAMENT, type: "match_started",
+      title: "t", body: "b", eventId: `match:${MATCH}:started`,
+    })
+
+    expect(result).toEqual({
+      fanout: 2, enqueued: 1, channels: { inApp: 1, email: 0, push: 0 },
+    })
+    expect(captured.values).toHaveLength(1)
+    expect(captured.values?.[0]).toMatchObject({ recipientUserId: MEMBER_B, channel: "in_app" })
   })
 
   it("refuses malformed tenant, tournament, match or event ids before any write", async () => {
