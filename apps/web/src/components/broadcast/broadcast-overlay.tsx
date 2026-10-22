@@ -5,6 +5,7 @@ import {
   planBroadcastCelebrations,
   pruneBroadcastCelebrations,
   type BroadcastCelebrationEvent,
+  type BroadcastOverlayParticipants,
   type BroadcastOverlaySnapshot,
 } from "@mtk/contracts"
 import { getScoringSocket } from "@/lib/scoring-socket"
@@ -18,7 +19,11 @@ import { getScoringSocket } from "@/lib/scoring-socket"
  * revision), queued to at most four, and pruned when an undo removes the
  * delivery. A reconnect primes the baseline instead of replaying a backlog.
  * "Last batter"/"Last bowler" are aggregates of recorded deliveries, never a
- * claim about who is on strike.
+ * claim about who is on strike. Batch 100: when the server attaches a
+ * CONFIRMED participants projection, the crease card shows striker
+ * (strike-marked)/non-striker figures and the over's bowler from that
+ * canonical state; an unconfirmed or absent projection falls back to the
+ * aggregate-only presentation below.
  */
 
 type AnimationMode = "full" | "reduced" | "off"
@@ -184,6 +189,12 @@ export function BroadcastOverlay({
   if (!snapshot) return null
 
   const current = snapshot.current
+  // Batch 100: only a CONFIRMED canonical participants block may carry a
+  // strike/bowler claim. Unconfirmed folds (drift, off-crease attribution)
+  // degrade to the aggregate-only presentation.
+  const confirmedParticipants = current?.participants?.confirmed === true
+    ? current.participants
+    : null
   const battingId = current?.battingTeamId
   const statusLabel = snapshot.status === "live"
     ? "LIVE"
@@ -311,19 +322,32 @@ export function BroadcastOverlay({
               </div>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/45">Last delivery</p>
-              <p className="mt-1 truncate text-2xl font-semibold">
-                {current.lastBatter
-                  ? `${current.lastBatter.name} ${current.lastBatter.runs} (${current.lastBatter.balls})`
-                  : "—"}
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/45">
+                {confirmedParticipants ? "At the crease" : "Last delivery"}
               </p>
+              {confirmedParticipants ? (
+                <ParticipantCrease participants={confirmedParticipants} />
+              ) : (
+                <p className="mt-1 truncate text-2xl font-semibold">
+                  {current.lastBatter
+                    ? `${current.lastBatter.name} ${current.lastBatter.runs} (${current.lastBatter.balls})`
+                    : "—"}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/45">Bowling</p>
               <p className="mt-1 truncate text-2xl font-semibold">
-                {current.lastBowler
-                  ? `${current.lastBowler.name} ${current.lastBowler.wickets}/${current.lastBowler.runs}`
-                  : "—"}
+                {confirmedParticipants
+                  ? // Between overs the next bowler is deliberately unknown per
+                    // the canonical fold - the overlay says so instead of
+                    // showing a stale name as if they were bowling now.
+                    confirmedParticipants.bowler
+                    ? `${confirmedParticipants.bowler.name} ${confirmedParticipants.bowler.wickets}/${confirmedParticipants.bowler.runs}`
+                    : "End of over"
+                  : current.lastBowler
+                    ? `${current.lastBowler.name} ${current.lastBowler.wickets}/${current.lastBowler.runs}`
+                    : "—"}
               </p>
             </div>
             <div className="text-right text-sm text-white/45">
@@ -360,6 +384,40 @@ function TeamMark({
   return (
     <div className={`${classes} flex shrink-0 items-center justify-center rounded-full bg-white/15 text-2xl font-black`}>
       {name.slice(0, 2).toUpperCase()}
+    </div>
+  )
+}
+
+/**
+ * Batch 100: the crease card from the CONFIRMED canonical participants
+ * block. Striker first and strike-marked. Between a dismissal and the new
+ * batter's first recorded delivery there is deliberately no striker claim -
+ * the crease list still names the survivor, un-positioned.
+ */
+function ParticipantCrease({ participants }: { participants: BroadcastOverlayParticipants }) {
+  const rows = participants.striker
+    ? ([participants.striker, participants.nonStriker].filter(
+      (batter): batter is NonNullable<typeof batter> => batter != null))
+    : participants.crease
+  if (rows.length === 0) return <p className="mt-1 text-2xl text-white/50">—</p>
+  return (
+    <div className="mt-1 space-y-1">
+      {rows.map(batter => (
+        <p key={batter.id} className="truncate text-2xl font-semibold">
+          {batter.name}{" "}
+          <span className="tabular-nums text-white/70">
+            {batter.runs} ({batter.balls})
+          </span>
+          {participants.striker?.id === batter.id && (
+            <span className="ml-2 text-amber-300" title="On strike">●</span>
+          )}
+          {participants.incomingBatter?.id === batter.id && (
+            <span className="ml-2 rounded bg-sky-700 px-2 py-0.5 align-middle text-xs font-bold uppercase tracking-widest text-white">
+              New
+            </span>
+          )}
+        </p>
+      ))}
     </div>
   )
 }

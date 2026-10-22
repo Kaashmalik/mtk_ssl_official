@@ -6,7 +6,7 @@ import {
   NotFoundException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { db } from '@mtk/database';
 import {
@@ -25,6 +25,7 @@ import {
 } from '@mtk/database';
 import Redis from 'ioredis';
 import { calculateDeliveryDelta } from '@mtk/database/lib/scoring-delivery';
+import { foldScoringParticipants, type ParticipantBallInput, type ScoringParticipants } from '@mtk/database/lib/scoring-participants';
 import { assessInningsClosure } from './cricket-rules';
 import { deliveryCommandSchema, deliveryFingerprint } from './delivery-command';
 import { z } from 'zod';
@@ -81,6 +82,10 @@ export interface BallResult {
   clientOpId?: string;
   scorecard: Scorecard;
   replayed?: boolean;
+  /** Batch 100: canonical striker/non-striker/bowler projection folded from
+   *  the official delivery log inside the same transaction. `null` unless
+   *  SCORING_PARTICIPANTS_READY is enabled in this environment. */
+  participants?: ScoringParticipants | null;
 }
 
 const recordedDeltaSchema = z.object({
@@ -256,6 +261,40 @@ export class ScoringService {
     }
   }
 
+  /**
+   * Batch 100: fold the canonical participant projection from this innings'
+   * official delivery log, INSIDE the caller's transaction - so the response
+   * always reflects exactly the rows this transaction settled (record or
+   * undo). Callers gate on SCORING_PARTICIPANTS_READY because the fold reads
+   * the `wicket_player_out_id` column created by migration 20261022120000.
+   */
+  private async foldParticipantsForInnings(
+    tx: ScoringTransaction,
+    tenantId: string,
+    inningsId: string,
+  ): Promise<ScoringParticipants> {
+    const rows = await tx
+      .select({
+        ballSequence: matchBalls.ballSequence,
+        overNumber: matchBalls.overNumber,
+        ballNumber: matchBalls.ballNumber,
+        batsmanId: matchBalls.batsmanId,
+        bowlerId: matchBalls.bowlerId,
+        runs: matchBalls.runs,
+        isWide: matchBalls.isWide,
+        isNoBall: matchBalls.isNoBall,
+        isBye: matchBalls.isBye,
+        isLegBye: matchBalls.isLegBye,
+        isWicket: matchBalls.isWicket,
+        wicketType: matchBalls.wicketType,
+        wicketPlayerOutId: matchBalls.wicketPlayerOutId,
+      })
+      .from(matchBalls)
+      .where(and(eq(matchBalls.inningsId, inningsId), eq(matchBalls.tenantId, tenantId)))
+      .orderBy(asc(matchBalls.ballSequence));
+    return foldScoringParticipants(rows);
+  }
+
   async recordBall(tenantId: string, actorId: string, ballEvent: BallEvent): Promise<BallResult> {
     const validated = deliveryCommandSchema.safeParse(ballEvent);
     if (!validated.success) {
@@ -273,6 +312,10 @@ export class ScoringService {
       throw new BadRequestException(error instanceof Error ? error.message : 'Invalid delivery runs');
     }
     const { matchId, inningsId } = ballEvent;
+    // Batch 100: the attribution columns (migration 20261022120000) exist
+    // only where the migration has been applied; the flag guarantees the
+    // insert and the fold never reference them before that.
+    const participantsEnabled = env.SCORING_PARTICIPANTS_READY === 'true';
 
     const outcome = await db.transaction(async (tx) => {
       // Serialize commands for this match, including retries and undo. Locks
@@ -404,6 +447,15 @@ export class ScoringService {
         runs: totalRuns,
         isWicket,
         wicketType: command.wicket?.type ?? null,
+        ...(participantsEnabled
+          ? {
+              // Batch 100: persist exactly the attribution the scorer
+              // declared (already validated against the batting XI by
+              // requireScoringWriteAccess). No silent stripping.
+              wicketPlayerOutId: command.wicket?.playerId ?? null,
+              wicketFielderId: command.wicket?.fielderId ?? null,
+            }
+          : {}),
         isFour,
         isSix,
         isWide,
@@ -515,6 +567,11 @@ export class ScoringService {
         ballId: insertedBall.id,
         clientOpId: command.clientOpId,
         scorecard,
+        // Batch 100: the striker/non-striker/bowler projection folded from
+        // this innings' settled delivery log, in this same transaction.
+        participants: participantsEnabled
+          ? await this.foldParticipantsForInnings(tx, tenantId, inningsId)
+          : null,
         // SCORE-10 (Batch 154): state-decided innings closure, decided in
         // the same transaction that recorded the ball.
         rules: { inningsClosure },
@@ -811,6 +868,12 @@ export class ScoringService {
       const result = {
         ballId,
         scorecard,
+        // Batch 100: refold after the delivery row is gone, so a confirmed
+        // striker/incoming-batter state retracts with the undo instead of
+        // describing a ball the official record no longer contains.
+        participants: env.SCORING_PARTICIPANTS_READY === 'true'
+          ? await this.foldParticipantsForInnings(tx, tenantId, ball.inningsId)
+          : null,
         scoringRevision: await commitScoringRevision(tx, match, actorId, expectedRevision, 'undo_ball', { ballId }),
       };
 

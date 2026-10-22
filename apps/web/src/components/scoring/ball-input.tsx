@@ -23,11 +23,15 @@ const BALL_OPTIONS: { value: BallInput; label: string; color: string }[] = [
 interface BallInputProps {
   batsmanId?: string;
   bowlerId?: string;
+  /** Batch 100: both confirmed crease occupants from the last
+   *  service-confirmed acknowledgement. When provided, a run-out asks the
+   *  scorer WHICH batter is out instead of silently assuming the striker. */
+  creaseBatters?: Array<{ id: string; name: string; onStrike: boolean }>;
   onBallAdded?: () => void | Promise<void>;
   disabled?: boolean;
 }
 
-export function BallInputComponent({ batsmanId, bowlerId, onBallAdded, disabled = false }: BallInputProps) {
+export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, onBallAdded, disabled = false }: BallInputProps) {
   const submitting = useRef(false);
   const [saving, setSaving] = useState(false);
   const [showWicketSelector, setShowWicketSelector] = useState(false);
@@ -48,7 +52,7 @@ export function BallInputComponent({ batsmanId, bowlerId, onBallAdded, disabled 
     }
   };
 
-  const submitBall = async (input: BallInput, wicketType?: WicketType, runs?: number) => {
+  const submitBall = async (input: BallInput, wicketType?: WicketType, runs?: number, wicketPlayerOutId?: string) => {
     if (!currentInnings || disabled || submitting.current) return;
     submitting.current = true;
     setSaving(true);
@@ -63,6 +67,10 @@ export function BallInputComponent({ batsmanId, bowlerId, onBallAdded, disabled 
         runs: runs ?? (typeof input === "number" ? input : input === "W" ? 0 : 1),
         isWicket: input === "W" || !!wicketType,
         wicketType,
+        // Batch 100: runner-out attribution is only meaningful for dismissal
+        // types whose victim is not rule-fixed (the service/fold default the
+        // striker for bowled/caught/lbw/stumped/hit_wicket).
+        wicketPlayerOutId: wicketType === "run_out" ? wicketPlayerOutId : undefined,
         isWide: input === "WD",
         isNoBall: input === "NB",
         isBye: input === "B",
@@ -82,9 +90,9 @@ export function BallInputComponent({ batsmanId, bowlerId, onBallAdded, disabled 
     }
   };
 
-  const handleWicketSelect = async (wicketType: WicketType) => {
+  const handleWicketSelect = async (wicketType: WicketType, wicketPlayerOutId?: string) => {
     if (pendingWicket) {
-      await submitBall(pendingWicket, wicketType);
+      await submitBall(pendingWicket, wicketType, undefined, wicketPlayerOutId);
     }
   };
 
@@ -108,6 +116,7 @@ export function BallInputComponent({ batsmanId, bowlerId, onBallAdded, disabled 
       {showWicketSelector && (
         <WicketSelector
           onSelect={handleWicketSelect}
+          creaseBatters={creaseBatters}
           onCancel={() => {
             setShowWicketSelector(false);
             setPendingWicket(null);

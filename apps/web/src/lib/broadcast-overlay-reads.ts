@@ -7,6 +7,7 @@ import {
   buildBroadcastOverlaySnapshot,
   type BroadcastOverlaySnapshot,
 } from "@mtk/contracts"
+import { foldScoringParticipants } from "@mtk/database/lib/scoring-participants"
 import { isMatchPublished, isTournamentPublished } from "@/lib/public-visibility"
 
 /**
@@ -17,9 +18,25 @@ import { isMatchPublished, isTournamentPublished } from "@/lib/public-visibility
  * only public allowlisted fields - no contact data, credentials, stream keys or
  * provider metadata. Balls are bounded so a long archive cannot turn the
  * overlay poll into an unbounded scan.
+ *
+ * Batch 100 (ENH-09-02): when SCORING_PARTICIPANTS_READY is on in this
+ * environment (migration 20261022120000 applied), the SAME shared fold the
+ * scoring service uses inside its recording transaction runs here over the
+ * current innings' official delivery log, and the canonical
+ * striker/non-striker/bowler projection rides the snapshot under
+ * `current.participants`. The OBS page still derives nothing itself. With
+ * the flag off the extra attribution column is never referenced (it may not
+ * exist yet) and the snapshot is byte-for-byte the aggregate-only shape.
  */
 
 const MAX_OVERLAY_BALLS = 1_000
+
+/** Batch 100: the attribution columns and the confirmed-participant fold
+ *  exist only where migration 20261022120000 has been applied AND the
+ *  operator turned the gate on. Default off = legacy behaviour. */
+function participantsReady(): boolean {
+  return process.env.SCORING_PARTICIPANTS_READY === "true"
+}
 
 export async function readBroadcastOverlaySnapshot(input: {
   tenantId: string
@@ -90,11 +107,15 @@ export async function readBroadcastOverlaySnapshot(input: {
   ])
 
   const currentInnings = innings.at(-1)
+  const ready = participantsReady()
   const ballRows = currentInnings
     ? await db
       .select({
         id: matchBalls.id,
         inningsNumber: matchInnings.inningsNumber,
+        ballSequence: matchBalls.ballSequence,
+        overNumber: matchBalls.overNumber,
+        ballNumber: matchBalls.ballNumber,
         runs: matchBalls.runs,
         isWicket: matchBalls.isWicket,
         isWide: matchBalls.isWide,
@@ -106,6 +127,7 @@ export async function readBroadcastOverlaySnapshot(input: {
         batsmanId: matchBalls.batsmanId,
         bowlerId: matchBalls.bowlerId,
         wicketType: matchBalls.wicketType,
+        ...(ready ? { wicketPlayerOutId: matchBalls.wicketPlayerOutId } : {}),
       })
       .from(matchBalls)
       .innerJoin(matchInnings, eq(matchInnings.id, matchBalls.inningsId))
@@ -132,6 +154,26 @@ export async function readBroadcastOverlaySnapshot(input: {
     : []
 
   const brand = branding[0]
+  // Batch 100: the shared canonical fold over the same official rows. The
+  // cast keeps the flagged-off select shape (no attribution column) valid;
+  // `ready` guarantees the column was selected whenever the fold runs.
+  const participants = ready
+    ? foldScoringParticipants(ballRows.map(ball => ({
+      ballSequence: ball.ballSequence,
+      overNumber: ball.overNumber,
+      ballNumber: ball.ballNumber,
+      batsmanId: ball.batsmanId,
+      bowlerId: ball.bowlerId,
+      runs: ball.runs,
+      isWide: ball.isWide,
+      isNoBall: ball.isNoBall,
+      isBye: ball.isBye,
+      isLegBye: ball.isLegBye,
+      isWicket: ball.isWicket,
+      wicketType: ball.wicketType,
+      wicketPlayerOutId: (ball as { wicketPlayerOutId?: string | null }).wicketPlayerOutId ?? null,
+    })))
+    : null
   return buildBroadcastOverlaySnapshot({
     match: {
       id: match.id,
@@ -153,5 +195,6 @@ export async function readBroadcastOverlaySnapshot(input: {
       primaryColor: brand?.primaryColor ?? null,
       secondaryColor: brand?.secondaryColor ?? null,
     },
+    participants,
   })
 }

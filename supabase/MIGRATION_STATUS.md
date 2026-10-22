@@ -3,6 +3,21 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **22 October 2026 (Batch 100) - `20261022120000_scoring_wicket_attribution.sql` LOCAL ONLY, NOT applied**
+> Additive wicket-attribution columns on the legacy `match_balls` table:
+> `wicket_player_out_id uuid NULL REFERENCES players(id) ON DELETE SET NULL` and
+> `wicket_fielder_id` (same shape), plus comments documenting that the scoring
+> service previously persisted only `wicket_type` and silently dropped the
+> scorer-declared victim/fielder. This migration ALTERS a legacy table (the
+> only new-object-free migration in this set) — it still only ADDs nullable
+> columns and never touches existing rows, but review the legacy-table surface
+> accordingly. Gate order matters and is enforced by code, not convention:
+> apply the migration FIRST, then set `SCORING_PARTICIPANTS_READY=true`; with
+> the flag off the service never writes the columns and the web reader never
+> references them, so a pre-migration environment keeps byte-identical
+> behaviour. No production/staging project was contacted; the applied ledger is
+> updated only after the reviewed staging run.
+
 > **21 October 2026 (Batch 96) - four LOCAL migrations, NOT applied in this environment**
 > Listed in apply order; all are additive and no production/staging project was
 > contacted from this session. Review the SQL and deploy code before enabling the

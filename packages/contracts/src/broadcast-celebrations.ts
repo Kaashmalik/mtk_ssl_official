@@ -8,9 +8,13 @@
  * stable delivery id, so a replayed poll cannot repeat it and an undo can
  * cancel it.
  *
- * Deliberately NOT implemented here: "new batter"/"new bowler" introductions.
- * The canonical service does not yet expose confirmed striker/non-striker or
- * incoming-batter state, and inventing one would be a false claim on stream.
+ * Batch 100: "new batter"/"new bowler" introductions ARE implemented - but
+ * only from `current.participants`, the canonical striker/non-striker/
+ * incoming-batter projection the server folds from the official delivery
+ * log behind SCORING_PARTICIPANTS_READY, and only while that block is
+ * `confirmed`. A snapshot without confirmed participants can still show
+ * every other celebration, but it never claims who walked in: inventing an
+ * introduction would be a false claim on stream.
  */
 
 import type { BroadcastOverlaySnapshot } from "./broadcast-overlay"
@@ -26,6 +30,9 @@ export type BroadcastCelebrationKind =
   | "five_wickets"
   | "innings_break"
   | "result"
+  /** Batch 100: only ever emitted from a `confirmed` participants block. */
+  | "batter_entered"
+  | "bowler_entered"
 
 export type BroadcastCelebrationEvent = {
   /** Stable across polls; a duplicate id is never queued twice. */
@@ -137,6 +144,58 @@ export function planBroadcastCelebrations(input: {
           detail: null,
           revision: next.scoringRevision,
           ballId: ball.id,
+        })
+      }
+    }
+  }
+
+  // Player introductions (Batch 100) - served ONLY from the confirmed
+  // canonical participants block, never inferred from raw deliveries here.
+  // The ids are stable per introduced player per innings (no revision), so
+  // the poll-to-poll dedup below stays idempotent while the introduction is
+  // live, and pruneBroadcastCelebrations retracts it through ballId when an
+  // undo removes the delivery that revealed the player.
+  if (sameInnings && previousCurrent && nextCurrent) {
+    const nextParticipants = nextCurrent.participants
+    const previousParticipants = previousCurrent.participants
+    if (nextParticipants?.confirmed === true) {
+      const incomingId = nextParticipants.incomingBatter?.id ?? null
+      const previouslyPresent = previousParticipants != null
+        && previousParticipants.confirmed === true
+        && (
+          previousParticipants.striker?.id === incomingId
+          || previousParticipants.nonStriker?.id === incomingId
+          || previousParticipants.incomingBatter?.id === incomingId
+          || previousParticipants.crease.some(batter => batter.id === incomingId)
+        )
+      if (incomingId != null && !previouslyPresent) {
+        events.push({
+          id: `entrant:batter:${nextCurrent.inningsNumber}:${incomingId}`,
+          kind: "batter_entered",
+          title: "NEW BATTER",
+          detail: nextParticipants.incomingBatter!.name,
+          revision: next.scoringRevision,
+          ballId: latestNewBallId,
+        })
+      }
+
+      const bowlerId = nextParticipants.bowler?.id ?? null
+      // Between overs the current bowler is deliberately unknown; the fold's
+      // boundary anchor is the bowler of the over that just completed. An
+      // introduction needs a DIFFERENT known prior bowler - this neither
+      // fires for the innings' first bowler nor re-fires while a bowler is
+      // mid-over.
+      const priorBowlerId = previousParticipants?.confirmed === true
+        ? (previousParticipants.bowler?.id ?? previousParticipants.previousBowlerId)
+        : null
+      if (bowlerId != null && priorBowlerId != null && bowlerId !== priorBowlerId) {
+        events.push({
+          id: `entrant:bowler:${nextCurrent.inningsNumber}:${bowlerId}`,
+          kind: "bowler_entered",
+          title: "NEW BOWLER",
+          detail: `${nextParticipants.bowler!.name} bowling`,
+          revision: next.scoringRevision,
+          ballId: latestNewBallId,
         })
       }
     }

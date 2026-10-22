@@ -1,6 +1,6 @@
 import { scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery"
 import { recordBallCommandSchema } from "@mtk/contracts"
-import type { ScoringAcknowledgement } from "@mtk/contracts"
+import type { ScoringAcknowledgement, ScoringParticipants } from "@mtk/contracts"
 import { requireMatchScoringAccess, requireScoringActorId } from "@/lib/scoring-access"
 import { readInningsForCommand } from "@/lib/scoring-reads"
 import { proxyRecordBall } from "@/lib/scoring-service-client"
@@ -36,6 +36,8 @@ export type DeliveryAcknowledgement = {
   clientOpId: string | null
   replayed?: boolean
   scorecard: Awaited<ReturnType<typeof proxyRecordBall>>["scorecard"]
+  /** Batch 100: service-confirmed participant projection (flag-gated). */
+  participants?: ScoringParticipants | null
 }
 
 // Contract-parity: a richly typed web acknowledgement IS a contract
@@ -58,8 +60,19 @@ export async function submitDelivery(accountId: string, tenantId: string, valida
   const delivery = scorerRunsToDelivery(validated)
   if (validated.isWicket && !validated.wicketType) throw new Error("Select a dismissal type")
 
+  // Batch 100: the flat command now carries the scorer's actual wicket
+  // attribution. Previously this mapping silently rewrote it to
+  // `playerId: batsmanId` - correct for striker-out dismissals, wrong for
+  // every off-strike run-out/retirement, and it made canonical crease state
+  // underivable. The striker fallback keeps older clients (which predate the
+  // attribution fields) working; the canonical service still validates the
+  // named player against the batting XI either way.
   const wicket = validated.isWicket && validated.wicketType
-    ? { type: validated.wicketType, playerId: validated.batsmanId }
+    ? {
+      type: validated.wicketType,
+      playerId: validated.wicketPlayerOutId ?? validated.batsmanId,
+      ...(validated.wicketFielderId ? { fielderId: validated.wicketFielderId } : {}),
+    }
     : undefined
 
   const result = await proxyRecordBall({
@@ -89,5 +102,6 @@ export async function submitDelivery(accountId: string, tenantId: string, valida
     clientOpId: validated.clientOpId ?? null,
     replayed: result.replayed ?? false,
     scorecard: result.scorecard,
+    participants: result.participants ?? null,
   }
 }

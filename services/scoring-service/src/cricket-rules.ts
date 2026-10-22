@@ -9,8 +9,12 @@ import { inningsShouldClose, type InningsClosureResult } from '@mtk/database/lib
  * Legacy, ungated matches assume a full XI when no declared count exists.
  * Armed matches pass the distinct active batting-side count from the SAME
  * locked participant validation that admitted the delivery. Strike
- * rotation is client-owned today - batters are not tracked SoT-side, so
- * this module deliberately does NOT pretend to advise the next batter.
+ * rotation was client-owned until Batch 100: canonical striker/non-striker
+ * state is now folded by the service from the official delivery log
+ * (`@mtk/database/lib/scoring-participants`) inside the recording
+ * transaction, and exposed on every record/undo response behind
+ * SCORING_PARTICIPANTS_READY. This module still does not advise the next
+ * batter - the fold describes recorded participants; it never invents one.
  */
 
 export type InningsAdviceInput = {

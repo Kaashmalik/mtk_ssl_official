@@ -87,7 +87,7 @@ export const undoBall = withAuth("match:score", withScoringFence(async (
   revalidatePath(`/matches/${matchId}/scoring`)
   revalidatePath(`/dashboard/matches/${matchId}`)
 
-  return { success: true, scoringRevision: result?.scoringRevision }
+  return { success: true, scoringRevision: result?.scoringRevision, participants: result?.participants ?? null }
 }))
 
 // ─── Create Innings ───────────────────────────────────────────

@@ -1,9 +1,9 @@
 # Pending migrations — apply guide (2026-10-22)
 
-Four additive migrations are committed on `feat/enh-p04-p11` but are **not
+Five additive migrations are committed on the working branch but are **not
 applied** to any environment by this repository work. They back the notification,
-media and broadcast slices. This guide is the operator checklist for reviewing
-and applying them in order.
+media, broadcast and scoring-participant slices. This guide is the operator
+checklist for reviewing and applying them in order.
 
 > Nothing in this guide was executed against a remote or production database.
 > Local unit/integration tests use mocks and are **not** migration or provider
@@ -19,6 +19,18 @@ Apply in filename order during one reviewed maintenance window:
 | 2 | `20261021130000_notification_jobs.sql` | ENH-06-04 durable notification outbox | `notification_jobs` |
 | 3 | `20261021140000_media_assets.sql` | ENH-07-01/02/03 media assets and cleanup | `media_assets`, `media_quotas`, `media_upload_sessions`, `media_bindings`, `media_consents`, `media_processing_events`, `media_cleanup_jobs` |
 | 4 | `20261021150000_broadcast_provider.sql` | ENH-08-01/02/03/04 broadcast plane | `broadcast_connections`, `broadcast_destinations`, `broadcast_sessions`, `broadcast_jobs`, `broadcast_archives` |
+| 5 | `20261022120000_scoring_wicket_attribution.sql` | ENH-03-02/09-02 canonical scorer attribution + striker/non-striker/bowler fold | `match_balls.wicket_player_out_id`, `match_balls.wicket_fielder_id` (nullable, FK → `players` ON DELETE SET NULL) |
+
+Migrations 1-4 are additive new tables. Migration 5 is the only one that touches
+a legacy table: it ADDs two nullable columns to `match_balls` (no rewrite, no
+backfill, `IF NOT EXISTS` idempotent, `BEGIN`/`COMMIT`).
+
+**Gate order for migration 5 (enforced by code, not convention):** apply the
+migration FIRST, then set `SCORING_PARTICIPANTS_READY=true`. With the flag off,
+the scoring service never writes the new columns and the web overlay reader
+never references them, so a pre-migration or flag-off environment keeps
+byte-identical behaviour. Enabling the flag before applying is a live error
+(write/read failures on the missing columns), just like any early flag.
 
 All four are additive, wrap their work in `BEGIN`/`COMMIT`, and use
 `CREATE TABLE/INDEX IF NOT EXISTS` plus guarded policy creation. They do not

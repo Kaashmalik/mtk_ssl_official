@@ -16,6 +16,11 @@ export interface BallData {
   runs: number;
   isWicket: boolean;
   wicketType?: WicketType;
+  /** Batch 100: scorer-named wicket attribution (which batter left, plus the
+   *  dismissing fielder). Optional and absent from historical persisted
+   *  balls; the canonical service validates it against the batting XI. */
+  wicketPlayerOutId?: string;
+  wicketFielderId?: string;
   isWide: boolean;
   isNoBall: boolean;
   isBye: boolean;

@@ -16,7 +16,12 @@
 import { z } from "zod"
 import type { WicketType } from "./status"
 
-/** Bump only with an explicit migration story for queued offline commands. */
+/**
+ * Batch 100: `wicketPlayerOutId`/`wicketFielderId` were added as OPTIONAL,
+ * NULLABLE fields without a version bump - v1 queued commands (which omit
+ * them) still validate unchanged, so an offline queue needs no migration
+ * story and old clients are never refused.
+ */
 export const SCORING_COMMAND_VERSION = 1 as const
 
 export const recordBallCommandSchema = z.object({
@@ -37,6 +42,16 @@ export const recordBallCommandSchema = z.object({
     ])
     .optional()
     .nullable(),
+  /**
+   * Canonical wicket attribution (Batch 100). Which batter actually left, and
+   * (fielding-side) who dismissed them. Optional so v1 queued commands remain
+   * valid; when omitted, the canonical service's fold falls back to
+   * rule-derived attribution (striker out) and corrects itself from
+   * subsequent recorded deliveries. These are NOT stripped silently anymore -
+   * the service persists exactly what the surface declared.
+   */
+  wicketPlayerOutId: z.string().uuid().optional().nullable(),
+  wicketFielderId: z.string().uuid().optional().nullable(),
   isWide: z.boolean().default(false),
   isNoBall: z.boolean().default(false),
   isBye: z.boolean().default(false),
@@ -85,6 +100,10 @@ export type QueuedDeliveryInput = {
   bowlerId?: string | null
   isWicket?: boolean
   wicketType?: WicketType | string | null
+  /** Batch 100: canonical wicket attribution - which batter left, and who
+   *  dismissed them. Optional; older queues simply omit both. */
+  wicketPlayerOutId?: string | null
+  wicketFielderId?: string | null
   isWide?: boolean
   isNoBall?: boolean
   isBye?: boolean
@@ -123,6 +142,8 @@ export function queuedDeliveryToCommand(ball: QueuedDeliveryInput): QueuedDelive
     bowlerId: ball.bowlerId,
     isWicket: !!ball.isWicket,
     wicketType: ball.wicketType ?? null,
+    wicketPlayerOutId: ball.wicketPlayerOutId ?? null,
+    wicketFielderId: ball.wicketFielderId ?? null,
     isWide: !!ball.isWide,
     isNoBall: !!ball.isNoBall,
     isBye: !!ball.isBye,
@@ -142,14 +163,49 @@ export function queuedDeliveryToCommand(ball: QueuedDeliveryInput): QueuedDelive
 }
 
 /**
- * Canonical active-participant state (striker/non-striker/bowler) is owned
- * by the scoring service and deliberately NOT derived client-side from
- * delivery history: rotation across wickets/wides/no-balls is server truth,
- * and promising automatic striker/bowler graphics from client assumptions
- * would invent state. When the service exposes participants, extend this
- * module with the typed projection - until then callers show the hand-picked
- * names only.
+ * ENH-03-02 / ENH-09-02 (Batch 100): canonical active-participant state.
+ *
+ * This is the typed projection the scoring service owns. It is CALLED only
+ * on the server - the scoring service folds the official delivery log inside
+ * its own transaction (and again after an undo), and the web overlay reader
+ * folds the same log from the same shared pure policy in `@mtk/database`.
+ * Browsers and the OBS page never receive rotation rules or raw balls to
+ * derive participants from; they receive this resolved projection or nothing.
+ *
+ * `confirmed === false` means the fold met an event it cannot interpret
+ * consistently (an off-crease wicket attribution, a third batter entering
+ * without a departure, competition-specific retired-hurt returns). Callers
+ * must treat every id as best-effort then: display without claims and never
+ * fire player-introduction celebrations from it.
  */
+export const scoringParticipantsSchema = z.object({
+  /** Batter confirmed to face the NEXT delivery, or null when unconfirmed
+   *  (no recorded deliveries yet, or a dismissal whose replacement has not
+   *  faced a ball). Rotation is policy-derived and every recorded delivery
+   *  re-syncs it - the record always wins over the prediction. */
+  strikerId: z.string().uuid().nullable(),
+  /** The other confirmed crease occupant, or null when fewer than two
+   *  occupants are confirmed. */
+  nonStrikerId: z.string().uuid().nullable(),
+  /** Bowler of the over IN PROGRESS. Deliberately null between overs: the
+   *  next bowler is not server truth until they bowl a ball. */
+  bowlerId: z.string().uuid().nullable(),
+  /** Bowler of the over that JUST completed (null once a new over is in
+   *  progress). Exists so consumers can confirm a bowler change at an over
+   *  boundary without pretending the next bowler is already known. */
+  previousOverBowlerId: z.string().uuid().nullable(),
+  /** The newest crease occupant whose first recorded delivery this innings
+   *  followed the most recent dismissal and who has faced exactly one
+   *  delivery. Null for openers and once established. */
+  incomingBatterId: z.string().uuid().nullable(),
+  /** Every batter confirmed at the crease (max 2 when confirmed). Kept
+   *  separate from the striker/non-striker ends so a post-dismissal innings
+   *  with no confirmed next batter still surfaces the survivor. */
+  creaseBatterIds: z.array(z.string().uuid()),
+  confirmed: z.boolean(),
+  lastBallSequence: z.number().int().nullable(),
+})
+export type ScoringParticipants = z.infer<typeof scoringParticipantsSchema>
 
 /**
  * The canonical acknowledgement envelope. `scorecard` is intentionally
@@ -165,4 +221,9 @@ export type ScoringAcknowledgement = {
   clientOpId: string | null
   replayed?: boolean
   scorecard?: unknown
+  /** Batch 100: the canonical striker/non-striker/bowler projection folded
+   *  inside the recording transaction, present only where
+   *  SCORING_PARTICIPANTS_READY is enabled. Surfaces may show it as
+   *  service-confirmed state; it is never derived client-side. */
+  participants?: ScoringParticipants | null
 }

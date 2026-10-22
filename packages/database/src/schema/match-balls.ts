@@ -53,6 +53,14 @@ export const matchBalls = pgTable("match_balls", {
   runs: integer("runs").default(0).notNull(),
   isWicket: boolean("is_wicket").default(false).notNull(),
   wicketType: wicketTypeEnum("wicket_type"),
+  /** Batch 100: canonical wicket attribution. Which batter actually left
+   *  (the scorer names them - for run_out/retired this is NOT derivable
+   *  from the striker position) and, optionally, the bowling-side fielder
+   *  credited with the dismissal. Persisted only when
+   *  `SCORING_PARTICIPANTS_READY` is on (the migration 20261022120000 must
+   *  exist first), so the flag also guards the write path. */
+  wicketPlayerOutId: uuid("wicket_player_out_id").references(() => players.id, { onDelete: "set null" }),
+  wicketFielderId: uuid("wicket_fielder_id").references(() => players.id, { onDelete: "set null" }),
   isFour: boolean("is_four").default(false).notNull(),
   isSix: boolean("is_six").default(false).notNull(),
   isWide: boolean("is_wide").default(false).notNull(),

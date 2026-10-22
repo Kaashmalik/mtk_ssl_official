@@ -5,7 +5,17 @@
  * compute official results, invent wickets or claim a batter is on strike when
  * the scoring service has not confirmed participant state. Figures below are
  * aggregates of recorded deliveries, labelled as such by the renderer.
+ *
+ * Batch 100: the reader MAY attach `participants` - the canonical
+ * striker/non-striker/bowler projection folded server-side from the official
+ * delivery log behind SCORING_PARTICIPANTS_READY. When attached, the
+ * projection carries service-confirmed names/figures under `participants`
+ * and the legacy `lastBatter`/`lastBowler` aggregates stay side by side.
+ * When absent (flag off, or the fold could not run), participants is null
+ * and the renderer keeps aggregate-only presentation.
  */
+
+import type { ScoringParticipants } from "./scoring"
 
 export type BroadcastOverlayTeamInput = {
   id: string
@@ -36,6 +46,31 @@ export type BroadcastOverlayBallInput = {
   batsmanId: string | null
   bowlerId: string | null
   wicketType: string | null
+  /** Batch 100: scorer-named victim (optional in the log input; the fold's
+   *  self-healing rules cover deliveries recorded before the attribution
+   *  columns existed). */
+  wicketPlayerOutId?: string | null
+}
+
+/** Service-confirmed active participants, parked on the current innings.
+ *  Every id here came from the official delivery log folded server-side by
+ *  `@mtk/database/lib/scoring-participants` - never client inference. */
+export type BroadcastOverlayParticipants = {
+  confirmed: boolean
+  lastBallSequence: number | null
+  striker: { id: string; name: string; runs: number; balls: number } | null
+  nonStriker: { id: string; name: string; runs: number; balls: number } | null
+  bowler: { id: string; name: string; balls: number; runs: number; wickets: number } | null
+  /** Bowler of the over that just completed (the fold's boundary anchor) -
+   *  lets consumers confirm a bowler change during the between-overs gap
+   *  where the next bowler is deliberately still unknown. */
+  previousBowlerId: string | null
+  incomingBatter: { id: string; name: string } | null
+  /** Every confirmed crease occupant, WITHOUT a strike-end claim. After a
+   *  dismissal (before the next recorded delivery names the new striker)
+   *  the striker/non-striker fields are null while this list still names
+   *  the survivor - the honest intermediate state. */
+  crease: Array<{ id: string; name: string; runs: number; balls: number }>
 }
 
 export type BroadcastOverlayPlayer = { id: string; name: string }
@@ -76,6 +111,12 @@ export type BroadcastOverlaySnapshot = {
     }>
     lastBatter: { id: string; name: string; runs: number; balls: number } | null
     lastBowler: { id: string; name: string; balls: number; runs: number; wickets: number } | null
+    /** Service-confirmed striker/non-striker/bowler (Batch 100). Absent or
+     *  `null` unless the server folded the official delivery log with
+     *  SCORING_PARTICIPANTS_READY on AND the fold stayed consistent
+     *  (introductions are claimed only from a confirmed block). Optional so
+     *  pre-Batch-100 snapshots stay assignable without a rebuild. */
+    participants?: BroadcastOverlayParticipants | null
   } | null
 }
 
@@ -140,6 +181,10 @@ export function buildBroadcastOverlaySnapshot(input: {
     primaryColor: string | null
     secondaryColor: string | null
   } | null
+  /** Batch 100: the canonical participant projection folded server-side
+   *  from the same delivery log over `balls`. Absent/null keeps the
+   *  aggregate-only snapshot shape (flag off, fold unavailable). */
+  participants?: ScoringParticipants | null
 }): BroadcastOverlaySnapshot {
   const teamById = new Map(input.teams.map(team => [team.id, team]))
   const playerById = new Map(input.players.map(player => [player.id, player]))
@@ -212,6 +257,7 @@ export function buildBroadcastOverlaySnapshot(input: {
         runs: bowlerBalls.reduce((sum, ball) => sum + overlayBowlerRuns(ball), 0),
         wickets: bowlerBalls.filter(overlayBowlerWicket).length,
       } : null,
+      participants: buildParticipantsProjection(input.participants ?? null, currentBalls, playerById),
     }
   })() : null
 
@@ -232,5 +278,65 @@ export function buildBroadcastOverlaySnapshot(input: {
       teamB: teamProjection(input.match.teamBId),
     },
     current,
+  }
+}
+
+/**
+ * Batch 100: project the canonical participant fold onto the snapshot with
+ * resolved names and the SAME aggregate figure rules as the batter/bowler
+ * blocks. Figures stay aggregates of recorded deliveries; only the
+ * identity ("this batter is on strike") is the service-confirmed part.
+ */
+export function buildParticipantsProjection(
+  participants: ScoringParticipants | null,
+  currentBalls: BroadcastOverlayBallInput[],
+  playerById: Map<string, BroadcastOverlayPlayer>,
+): BroadcastOverlayParticipants | null {
+  if (!participants) return null
+  const nameOf = (id: string | null, fallback: string): string | null => {
+    if (id == null) return null
+    return playerById.get(id)?.name ?? fallback
+  }
+  const batterFigure = (id: string | null) => {
+    if (id == null) return null
+    const faced = currentBalls.filter(ball => ball.batsmanId === id)
+    const name = nameOf(id, "Batter")!
+    return {
+      id,
+      name,
+      runs: faced.reduce((sum, ball) => sum + overlayBatterRuns(ball), 0),
+      balls: faced.filter(ball => !ball.isWide).length,
+    }
+  }
+  const striker = batterFigure(participants.strikerId)
+  const nonStriker = participants.nonStrikerId != null && participants.nonStrikerId !== participants.strikerId
+    ? batterFigure(participants.nonStrikerId)
+    : null
+  const bowler = (() => {
+    if (participants.bowlerId == null) return null
+    const bowled = currentBalls.filter(ball => ball.bowlerId === participants.bowlerId)
+    const name = nameOf(participants.bowlerId, "Bowler")!
+    return {
+      id: participants.bowlerId,
+      name,
+      balls: bowled.filter(overlayLegalBall).length,
+      runs: bowled.reduce((sum, ball) => sum + overlayBowlerRuns(ball), 0),
+      wickets: bowled.filter(overlayBowlerWicket).length,
+    }
+  })()
+  const incomingBatter = (() => {
+    if (participants.incomingBatterId == null) return null
+    return { id: participants.incomingBatterId, name: nameOf(participants.incomingBatterId, "Batter")! }
+  })()
+  return {
+    confirmed: participants.confirmed,
+    lastBallSequence: participants.lastBallSequence,
+    striker,
+    nonStriker,
+    bowler,
+    previousBowlerId: participants.previousOverBowlerId,
+    incomingBatter,
+    crease: participants.creaseBatterIds
+      .map(id => batterFigure(id) ?? { id, name: nameOf(id, "Batter")!, runs: 0, balls: 0 }),
   }
 }

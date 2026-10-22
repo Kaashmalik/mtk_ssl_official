@@ -57,6 +57,9 @@ export type ScoringProxyBallResult = {
     balls: number;
     runRate: number;
   };
+  /** Batch 100: canonical participant projection, flag-gated on the service
+   *  (SCORING_PARTICIPANTS_READY) and absent from older services. */
+  participants?: import("@mtk/contracts").ScoringParticipants | null;
 };
 
 export type ScoringInnings = {

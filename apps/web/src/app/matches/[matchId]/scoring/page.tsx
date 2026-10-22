@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
+import type { ScoringParticipants } from "@mtk/contracts";
 import { activateScoringScope } from "@/lib/activate-scoring-scope";
 import { useScoringStore, BallInput, type InningsState } from "@/stores/scoring-store";
 import { BallInputComponent } from "@/components/scoring/ball-input";
@@ -97,6 +98,25 @@ function ScoringInterface() {
   const [selectedBatsman2] = useState<string>();
   const [selectedBowler, setSelectedBowler] = useState<string>();
 
+  // Batch 100: the canonical crease from the latest service-confirmed
+  // acknowledgement. When available, a run-out asks the scorer WHICH batter
+  // is out instead of silently assuming the striker. Absent/unconfirmed →
+  // the wicket flow behaves exactly as before (the service/fold defaults
+  // the striker and self-corrects from the following deliveries).
+  const [confirmedParticipants, setConfirmedParticipants] = useState<ScoringParticipants | null>(null);
+  const creaseBatters = useMemo(() => {
+    if (confirmedParticipants?.confirmed !== true) return [];
+    const nameOf = (id: string) =>
+      playersData?.teamA.find(player => player.id === id)?.name
+      ?? playersData?.teamB.find(player => player.id === id)?.name
+      ?? "Batter";
+    return confirmedParticipants.creaseBatterIds.slice(0, 2).map(id => ({
+      id,
+      name: nameOf(id),
+      onStrike: confirmedParticipants.strikerId === id,
+    }));
+  }, [confirmedParticipants, playersData]);
+
   const totalOvers = matchData?.match.totalOvers ?? 20;
 
   // Live updates from scoring-service WebSocket (reconnect + backoff)
@@ -110,7 +130,7 @@ function ScoringInterface() {
   const canWrite = !!matchData?.canScore && !sessionFenced &&
     matchData.queueScope.accountId === signedInAccountId && matchData.match.id === matchId;
 
-  const acknowledgeSavedBall = useCallback((result: { ballId: string; clientOpId: string | null; scoringRevision: number }) => {
+  const acknowledgeSavedBall = useCallback((result: { ballId: string; clientOpId: string | null; scoringRevision: number; participants?: ScoringParticipants | null }) => {
     const state = useScoringStore.getState();
     if (state.matchId !== matchId) return;
     for (const innings of [state.innings1, state.innings2, state.superOver]) {
@@ -119,6 +139,10 @@ function ScoringInterface() {
       if (local && result.clientOpId) state.acknowledgeBall(local.id, result.ballId, result.clientOpId, result.scoringRevision);
     }
     useScoringStore.getState().observeScoringRevision(result.scoringRevision);
+    // Batch 100: mirror the service-confirmed crease for run-out attribution.
+    setConfirmedParticipants(
+      result.participants?.confirmed === true ? result.participants : null,
+    );
   }, [matchId]);
 
   // Offline ball queue: replays persisted balls once the connection returns.
@@ -266,6 +290,8 @@ function ScoringInterface() {
       bowlerId: lastBall.bowlerId || null,
       isWicket: lastBall.isWicket,
       wicketType: lastBall.wicketType || null,
+      wicketPlayerOutId: lastBall.wicketPlayerOutId ?? null,
+      wicketFielderId: lastBall.wicketFielderId ?? null,
       isWide: lastBall.isWide,
       isNoBall: lastBall.isNoBall,
       isBye: lastBall.isBye,
@@ -307,6 +333,10 @@ function ScoringInterface() {
         if (useScoringStore.getState().matchId === state.matchId) {
           useScoringStore.getState().acknowledgeBall(lastBall.id, acknowledgement.ballId, ballInput.clientOpId, acknowledgement.scoringRevision);
         }
+        // Batch 100: the same record response carries the confirmed crease.
+        setConfirmedParticipants(
+          acknowledgement.participants?.confirmed === true ? acknowledgement.participants : null,
+        );
         await removeQueuedBall(ballInput.clientOpId, queueScope);
         await refreshOfflineQueue();
         setDbWriteFailed(false);
@@ -361,6 +391,11 @@ function ScoringInterface() {
             const result = unwrapScoringFenceResult(await undoBallAction(state.matchId, lastBall.id, state.handoverEpoch, state.scoringRevision));
             if (useScoringStore.getState().matchId !== state.matchId) return;
             useScoringStore.getState().observeScoringRevision(result.scoringRevision);
+            // Batch 100: an undo refolds the crease server-side; mirror it so
+            // run-out attribution uses the post-undo crease, not the stale one.
+            setConfirmedParticipants(
+              result.participants?.confirmed === true ? result.participants : null,
+            );
             confirmed = true;
             if (lastBall.clientOpId && queueScope) await removeQueuedBall(lastBall.clientOpId, queueScope);
             const snapshot = await getMatchForScoring(state.matchId);
@@ -714,6 +749,7 @@ function ScoringInterface() {
               disabled={!canWrite || isPending || offlineSync.syncing || currentInningsData?.status === "completed"}
               batsmanId={selectedBatsman}
               bowlerId={selectedBowler}
+              creaseBatters={creaseBatters}
               onBallAdded={persistBallToDB}
             />
           </Card>

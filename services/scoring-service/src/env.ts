@@ -27,6 +27,15 @@ export const env = z
     // Enable after the migration, consumer deduplication and staging recovery gates.
     // Enqueueing is always transactional; pausing dispatch never deletes messages.
     SCORING_OUTBOX_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Batch 100 (ENH-03-02/ENH-09-02): enable ONLY after the additive
+    // wicket-attribution migration (20261022120000) is applied in this
+    // environment. When on: the service persists scorer-named wicket
+    // attribution (which batter left, plus the dismissing fielder), folds the
+    // canonical striker/non-striker/bowler projection inside the recording
+    // transaction, and exposes it on every record/undo response. When off:
+    // writes and responses are byte-for-byte the previous behaviour, so the
+    // migration can land in any order without breaking a running service.
+    SCORING_PARTICIPANTS_READY: z.enum(["true", "false"]).default("false"),
   })
   .parse(process.env);
 
