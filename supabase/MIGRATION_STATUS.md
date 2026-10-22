@@ -26,6 +26,53 @@
 > This note records file existence, not application acceptance; the applied
 > ledger must be updated only after the reviewed staging/production run.
 
+> **20 October 2026 (Batch 178) - league_application_replies APPLIED to the LIVE database**
+> `20261020120000_league_application_replies.sql` (office, PR #5, ENH-02-02)
+> was merged with its header comment saying "LOCAL ONLY - apply before wiring
+> ... in a deployment", but PR #5 ALSO merged the wiring
+> (`packages/database/src/schema/league-application-replies.ts`,
+> `replyLeagueApplication`, `getMyLeagueApplication` thread + applicant
+> composer/admin console) and the merge auto-deployed to production. The live
+> database had no such table, so any reply write or thread read on
+> www.cricketleague.tech would fail. APPLIED + LEDGERED
+> (verification-first): precheck confirmed `league_applications` exists and
+> the replies table did not; transactional apply; verified afterwards -
+> table present, CHECKs `league_application_reply_side` +
+> `league_application_reply_body_bounded`, index
+> `league_application_replies_thread_idx`, FKs to `league_applications` /
+> `users` (both ON DELETE CASCADE), grants to postgres/service_role/ssl as
+> expected for a tenant-scoped app table (no anon grant). Additive only; no
+> existing rows touched. `--db` gate re-run: missingInDb (none),
+> untrackedInDb (none). Ledger hygiene: the data-only owner-domain cutover
+> row (20261020110000, owner_domain_cutover_cricketleague) was REMOVED from
+> `supabase_migrations.schema_migrations` - it is not a folder migration and
+> the --db gate correctly flagged it untracked; its register is this file
+> (see the domain cutover entry), so the migration ledger table stays exactly
+> the folder's mirror. NOTE for the office: a migration marked LOCAL ONLY
+> must not ship in the same merge as the code that depends on it, or the
+> deploy order inverts (code live, table missing).
+
+> **20 October 2026 (Batch 176) - legacy platform-role league memberships REPAIRED + CHECK added**
+> The live database still carried a pre-ISO-06 shape: `20260623` backfilled
+> `user_tenant_roles` from `users.tenant_ids` using `users.role`, so the
+> seeded platform super_admin ended up with a LEAGUE membership of
+> `super_admin`. `20261012100136` (ISO-06) states "a global platform role is
+> never copied into league authority" and maps platform roles to `fan` (or
+> `league_owner` for the tenant's actual owner), but its backfill used
+> `ON CONFLICT DO NOTHING`, so the legacy row was never repaired - and every
+> league reader rejects a platform role in a membership
+> (`requireActiveLeagueContext`, `getDashboardContext`, tenant membership
+> resolution). Result in production: every league console page failed with
+> "Forbidden: league access unavailable" for the seeded owner.
+> `20261020100000_normalize_tenant_membership_platform_roles.sql` repairs the
+> rows with ISO-06's own mapping and adds CHECK
+> `user_tenant_roles_no_platform_role` so the shape cannot return. APPLIED +
+> LEDGERED (verification-first): owner membership is now `league_owner`,
+> 0 platform-role memberships remain, `users.role` (platform `super_admin`)
+> untouched. `--db` gate re-run: missingInDb (none), untrackedInDb (none).
+> NOTE for the office: the same backfill pattern (copying `users.role` into a
+> membership) must not be reintroduced.
+
 > **19 October 2026 (Batch 171c) - drop_users_tenant_ids APPLIED remotely - drift gate FULLY GREEN**
 > The platform console deployment shipped (Vercel `mtk-ssl` <- github
 > `mtk_ssl_official@main`, live at https://mtk-ssl.vercel.app), satisfying

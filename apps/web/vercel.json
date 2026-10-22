@@ -1,1 +1,1 @@
-{"$schema": "https://openapi.vercel.sh/vercel.json", "framework": "nextjs", "installCommand": "cd ../.. && pnpm install --frozen-lockfile", "buildCommand": "cd ../.. && pnpm --filter @mtk/database build && pnpm --filter @mtk/web build"}
+{"$schema": "https://openapi.vercel.sh/vercel.json", "framework": "nextjs", "installCommand": "cd ../.. && pnpm install --frozen-lockfile", "buildCommand": "cd ../.. && pnpm --filter @mtk/database build && pnpm --filter @mtk/web build", "regions": ["sin1"]}

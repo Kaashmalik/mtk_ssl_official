@@ -92,10 +92,13 @@ describe.skipIf(!optedIn)("PUB-03 record surfaces staged acceptance (live, READ-
       if (matchRow) {
         const match = await readers.readPublishedMatch(tenantId, matchRow.id)
         if (match) {
+          // The keys are ASCII-sorted by the assertion, so the expectation
+          // must be written in ASCII order too (select order never matches
+          // sort() - this literal's original order could never pass).
           expect(Object.keys(match).sort()).toEqual([
-            "id", "tournamentId", "status", "matchFormat", "matchType", "totalOvers",
-            "scheduledDate", "venueId", "teamAId", "teamBId", "tossWinnerId", "tossDecision",
-            "winnerId", "result", "manOfMatchId", "streamSource", "streamStatus", "liveStreamUrl",
+            "id", "liveStreamUrl", "manOfMatchId", "matchFormat", "matchType", "result",
+            "scheduledDate", "status", "streamSource", "streamStatus", "teamAId", "teamBId",
+            "tossDecision", "tossWinnerId", "totalOvers", "tournamentId", "venueId", "winnerId",
           ])
           expect(match.status).not.toBe("cancelled")
         }
