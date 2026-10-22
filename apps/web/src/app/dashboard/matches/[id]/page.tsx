@@ -24,6 +24,8 @@ import { readOpenReactionReports } from "@/lib/fan-report-records"
 import { readActiveFanBlocks } from "@/lib/fan-block-records"
 import { readMatchAvailabilitySummary, readMyAvailability } from "@/lib/match-availability"
 import { readMatchCorrectionRequests } from "@/lib/scorecard-corrections"
+import { readBroadcastControlData } from "@/lib/broadcast-sessions"
+import type { BroadcastControlData } from "@mtk/contracts"
 import { AvailabilityCard, type AvailabilityAnswer } from "@/components/matches/availability-card"
 import { MatchPredictionCard } from "@/components/matches/prediction-card"
 import { readMyPredictionView } from "@/lib/fan-predictions"
@@ -102,6 +104,17 @@ let viewerIsLeagueOwner = false
       .where(and(eq(userTenantRoles.userId, availabilityView.userId), eq(userTenantRoles.tenantId, match.tenantId)))
       .limit(1)
     viewerLeagueOwner = viewerMember?.role === "league_owner"
+  }
+  // Broadcast control data is owner-only. A read failure (for example before
+  // the additive migration is applied) falls back to the manual link path
+  // instead of failing the match page.
+  let broadcastControl: BroadcastControlData | undefined
+  if (viewerLeagueOwner) {
+    try {
+      broadcastControl = await readBroadcastControlData(match.tenantId, match.id)
+    } catch {
+      broadcastControl = undefined
+    }
   }
   const correctionRequests = await readMatchCorrectionRequests(id, match.tenantId)
   const myOpenRequest = availabilityView.userId
@@ -466,7 +479,7 @@ let viewerIsLeagueOwner = false
           players={matchPlayers}
         />
         <div className="mt-3 space-y-3">
-          <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} />
+          <StreamStartModal matchId={match.id} currentStatus={match.streamStatus} broadcast={broadcastControl} />
           {viewerLeagueOwner && <BroadcastOverlayButton matchId={match.id} />}
           <ScorerAssign matchId={match.id} currentScorerId={match.scorerId} currentBackupScorerId={match.backupScorerId} />
           <UmpireAssign matchId={match.id} currentUmpire1Id={match.umpire1Id} currentUmpire2Id={match.umpire2Id} />

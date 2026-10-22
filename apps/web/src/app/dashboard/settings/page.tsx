@@ -58,6 +58,9 @@ export default async function SettingsPage() {
       <Link href="/dashboard/settings/fan-interactions" className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4">
         Fan interactions — reaction reports and blocked fans
       </Link>
+      <Link href="/dashboard/settings/broadcast" className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4">
+        Live broadcast — approved provider destinations
+      </Link>
       <MotionWrapper variant="fadeInUp" delay={0.05}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Link href="/dashboard/settings">

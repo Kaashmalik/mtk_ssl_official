@@ -10,6 +10,8 @@
  * server adapters behind these decisions.
  */
 
+import { z } from "zod"
+
 export const BROADCAST_PROVIDER_VALUES = ["youtube", "facebook"] as const
 export type BroadcastProvider = (typeof BROADCAST_PROVIDER_VALUES)[number]
 
@@ -55,6 +57,30 @@ export const BROADCAST_ACTION_VALUES = [
   "fail",
 ] as const
 export type BroadcastAction = (typeof BROADCAST_ACTION_VALUES)[number]
+
+/** Durable provider outbox actions. `archive` reconciles provider processing. */
+export const BROADCAST_JOB_ACTION_VALUES = ["prepare", "start", "end", "reconcile", "archive"] as const
+export type BroadcastJobAction = (typeof BROADCAST_JOB_ACTION_VALUES)[number]
+
+export const broadcastProviderSchema = z.enum(BROADCAST_PROVIDER_VALUES)
+
+/**
+ * Operator intent commands. A provider URL is deliberately not parsed here:
+ * provider-specific host/ID validation lives in broadcast-playback.ts so the
+ * exact same allowlist is used by public playback and attach.
+ */
+export const broadcastPrepareCommandSchema = z.object({
+  destinationId: z.string().uuid(),
+}).strict()
+
+export const broadcastAttachCommandSchema = z.object({
+  provider: broadcastProviderSchema,
+  destinationId: z.string().uuid(),
+  url: z.string().trim().min(1).max(2048),
+}).strict()
+
+export type BroadcastPrepareCommand = z.infer<typeof broadcastPrepareCommandSchema>
+export type BroadcastAttachCommand = z.infer<typeof broadcastAttachCommandSchema>
 
 export type BroadcastReconcileDecision = {
   action: BroadcastAction
@@ -245,8 +271,13 @@ export function broadcastObservedFromProvider(
       created: "provisioning",
       ready: "ready",
       testing: "provisioning",
+      teststarting: "provisioning",
       live: "live",
       live_starting: "provisioning",
+      livestarting: "provisioning",
+      active: "live",
+      upcoming: "provisioning",
+      rescheduled: "provisioning",
       complete: "ended",
       completed: "ended",
       revoked: "failed",
@@ -259,10 +290,100 @@ export function broadcastObservedFromProvider(
     scheduled_live: "provisioning",
     live_now: "live",
     live_stopped: "ended",
-    vod: "processing",
+    // Facebook's VOD state is the playable recording. Do not strand it in
+    // "processing" forever, which would hide a real replay from the catalogue.
+    vod: "replay_ready",
     processing: "processing",
     ready: "replay_ready",
     error: "failed",
   }
   return map[normalized] ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Operator projections
+// ---------------------------------------------------------------------------
+
+/** Never includes credentials, ingest keys or provider response bodies. */
+export type BroadcastDestinationOption = {
+  id: string
+  provider: BroadcastProvider
+  name: string
+  kind: BroadcastDestinationKind
+  isDefault: boolean
+  connectionDisplayName: string
+  connectionStatus: "active" | "expired" | "revoked"
+}
+
+export type BroadcastSessionSummary = {
+  id: string
+  sessionNumber: number
+  provider: BroadcastProvider
+  desiredState: BroadcastDesiredState
+  observedState: BroadcastObservedState
+  destinationId: string
+  destinationName: string
+  providerVideoId: string | null
+  playbackAvailable: boolean
+  scheduledStartAt: string | null
+  startedAt: string | null
+  endedAt: string | null
+  lastErrorCode: string | null
+  revision: number
+  attached: boolean
+}
+
+export type BroadcastControlData = {
+  destinations: BroadcastDestinationOption[]
+  sessions: BroadcastSessionSummary[]
+}
+
+export type BroadcastOperatorAction = "start" | "end" | "wait" | "none"
+
+/**
+ * The single operator-next-step policy. A ready preparation may be started;
+ * a started request is never presented as live while waiting; only an
+ * observed live session offers End.
+ */
+export function broadcastOperatorAction(input: {
+  desired: BroadcastDesiredState
+  observed: BroadcastObservedState
+}): BroadcastOperatorAction {
+  if (input.observed === "live" || input.observed === "interrupted") return "end"
+  // A provider object that is ready but was left behind by an ended/failed
+  // intent still needs an explicit cleanup transition.
+  if (input.observed === "ready" && (input.desired === "ended" || input.desired === "failed")) return "end"
+  if (input.desired === "failed" || input.desired === "cancelled") return "none"
+  if (input.desired === "ended" || input.observed === "ended") return "none"
+  if (input.desired === "ready" && input.observed === "ready") return "start"
+  if (
+    input.desired === "preparing"
+    || input.desired === "ready"
+    || input.desired === "starting"
+    || input.desired === "live"
+    || input.desired === "ending"
+    || input.observed === "unconfigured"
+    || input.observed === "provisioning"
+    || input.observed === "ready"
+    || input.observed === "processing"
+    || input.observed === "replay_ready"
+  ) return "wait"
+  return "none"
+}
+
+/** Ingest details may be revealed only after the provider prepared a session. */
+export function broadcastCanRevealIngest(input: {
+  desired: BroadcastDesiredState
+  observed: BroadcastObservedState
+  attached?: boolean
+}): boolean {
+  if (input.attached) return false
+  if (input.desired === "failed" || input.desired === "cancelled") return false
+  return input.observed === "ready"
+    || input.observed === "live"
+    || input.observed === "interrupted"
+    || input.desired === "ready"
+    || input.desired === "starting"
+    || input.desired === "live"
+    || input.desired === "ending"
 }

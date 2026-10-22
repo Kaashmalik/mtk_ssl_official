@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+  broadcastAttachCommandSchema,
+  broadcastCanRevealIngest,
   broadcastDestinationDecision,
   broadcastLeaseDecision,
   broadcastObservedFromProvider,
+  broadcastOperatorAction,
+  broadcastPrepareCommandSchema,
   broadcastPublicState,
   broadcastReconcileDecision,
 } from "../broadcast"
@@ -58,8 +62,12 @@ describe("ENH-08-02: desired versus observed lifecycle", () => {
 
   it("maps provider statuses through an allowlist", () => {
     expect(broadcastObservedFromProvider("youtube", "live")).toBe("live")
+    expect(broadcastObservedFromProvider("youtube", "liveStarting")).toBe("provisioning")
+    expect(broadcastObservedFromProvider("youtube", "testStarting")).toBe("provisioning")
+    expect(broadcastObservedFromProvider("youtube", "active")).toBe("live")
     expect(broadcastObservedFromProvider("youtube", "complete")).toBe("ended")
     expect(broadcastObservedFromProvider("facebook", "LIVE_NOW")).toBe("live")
+    expect(broadcastObservedFromProvider("facebook", "VOD")).toBe("replay_ready")
     expect(broadcastObservedFromProvider("facebook", "arbitrary")).toBeNull()
   })
 
@@ -129,5 +137,43 @@ describe("ENH-08-01: ownership, destination and lease", () => {
       ownerId: "worker-a",
       expiresAt: new Date(now.getTime() - 1),
     })).toMatchObject({ granted: true })
+  })
+})
+
+describe("ENH-08-02: operator commands and next action", () => {
+  it("validates only the shaped operator commands", () => {
+    expect(broadcastPrepareCommandSchema.safeParse({
+      destinationId: "00000000-0000-4000-8000-0000000000a1",
+    }).success).toBe(true)
+    expect(broadcastPrepareCommandSchema.safeParse({ destinationId: "foreign" }).success).toBe(false)
+    expect(broadcastAttachCommandSchema.safeParse({
+      provider: "youtube",
+      destinationId: "00000000-0000-4000-8000-0000000000a1",
+      url: "https://youtu.be/dQw4w9WgXcQ",
+    }).success).toBe(true)
+    expect(broadcastAttachCommandSchema.safeParse({
+      provider: "vimeo",
+      destinationId: "00000000-0000-4000-8000-0000000000a1",
+      url: "https://vimeo.com/1",
+    }).success).toBe(false)
+  })
+
+  it("never offers Start before provider readiness and only End an observed live", () => {
+    expect(broadcastOperatorAction({ desired: "preparing", observed: "provisioning" })).toBe("wait")
+    expect(broadcastOperatorAction({ desired: "ready", observed: "ready" })).toBe("start")
+    expect(broadcastOperatorAction({ desired: "starting", observed: "ready" })).toBe("wait")
+    expect(broadcastOperatorAction({ desired: "starting", observed: "live" })).toBe("end")
+    expect(broadcastOperatorAction({ desired: "live", observed: "unconfigured" })).toBe("wait")
+    expect(broadcastOperatorAction({ desired: "ended", observed: "ready" })).toBe("end")
+    expect(broadcastOperatorAction({ desired: "failed", observed: "ready" })).toBe("end")
+    expect(broadcastOperatorAction({ desired: "failed", observed: "failed" })).toBe("none")
+    expect(broadcastOperatorAction({ desired: "ended", observed: "ended" })).toBe("none")
+  })
+
+  it("reveals ingest only for a prepared, non-attached session", () => {
+    expect(broadcastCanRevealIngest({ desired: "ready", observed: "ready" })).toBe(true)
+    expect(broadcastCanRevealIngest({ desired: "ready", observed: "ready", attached: true })).toBe(false)
+    expect(broadcastCanRevealIngest({ desired: "preparing", observed: "provisioning" })).toBe(false)
+    expect(broadcastCanRevealIngest({ desired: "failed", observed: "failed" })).toBe(false)
   })
 })

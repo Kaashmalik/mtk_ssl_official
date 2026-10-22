@@ -15,6 +15,8 @@ const PERMANENT_CODES = new Set([
   "provider_refused",
   "credentials_expired",
   "credentials_revoked",
+  "credentials_reference_invalid",
+  "credentials_reference_not_allowed",
   "destination_not_found",
   "destination_not_owned",
   "invalid_request",

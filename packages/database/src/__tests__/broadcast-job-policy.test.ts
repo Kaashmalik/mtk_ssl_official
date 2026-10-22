@@ -12,6 +12,8 @@ describe("ENH-08-02: broadcast job retry policy", () => {
       .toEqual({ state: "failed", reason: "credentials_revoked" })
     expect(broadcastJobRetryDecision({ attempts: 3, code: "provider_refused" }))
       .toEqual({ state: "failed", reason: "provider_refused" })
+    expect(broadcastJobRetryDecision({ attempts: 0, code: "credentials_reference_not_allowed" }))
+      .toEqual({ state: "failed", reason: "credentials_reference_not_allowed" })
   })
 
   it("retries transport uncertainty with a growing bounded delay", () => {
