@@ -92,4 +92,13 @@ describe("White-label metadata (Batch 115)", () => {
     expect(shortTenantLabel({ appName: "Falcon Premier League" })).toBe("Falcon")
     expect(resolveBrandName({ appName: "   " })).toBe("Shakir Super League")
   })
+
+  it("a branded tenant's apple-web-app label carries the TENANT's short label, not the platform's (Batch 127)", async () => {
+    const { buildTenantBrandMetadata } = await load()
+    const branded = buildTenantBrandMetadata(base(), { appName: "Falcon Premier League" }) as unknown as Record<string, any>
+    expect(branded.appleWebApp?.title).toBe("Falcon")
+    // The platform base stays the platform's where no brand applies.
+    const plain = buildTenantBrandMetadata(base(), null) as unknown as Record<string, any>
+    expect(plain.appleWebApp).toBeUndefined()
+  })
 })

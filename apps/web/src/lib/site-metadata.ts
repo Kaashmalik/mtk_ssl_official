@@ -63,7 +63,11 @@ export function buildPageMetadata(options: { title: string; description: string;
     alternates: { canonical: options.path },
     openGraph: {
       type: "website",
-      siteName: "Shakir Super League",
+      // Batch 127: siteName is intentionally ABSENT here — a hardcoded
+      // platform value in per-route metadata used to override the layout's
+      // white-labeled brand on every public page of a branded tenant.
+      // Next merges openGraph field-by-field, so the layout's (tenant's)
+      // siteName propagates to every route.
       title: options.title,
       description: options.description,
       url: options.path,

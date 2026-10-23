@@ -41,6 +41,9 @@ export function buildTenantBrandMetadata(base: Metadata, brand: BrandPresentatio
       template: `%s | ${appName}`,
     }
     branded.openGraph = { ...(base.openGraph ?? {}), siteName: appName }
+    // Batch 127: the installed iOS web-app label is visible white-label
+    // surface too — same short-label rule as the PWA manifest.
+    branded.appleWebApp = { ...(typeof base.appleWebApp === "object" ? base.appleWebApp : {}), title: shortTenantLabel(brand) }
   }
   if (icon) {
     const previous = base.icons && !Array.isArray(base.icons) ? base.icons : {}
@@ -98,14 +101,14 @@ function shortAppName(appName: string): string {
 /** Batch 125: the ONE sanitized answer for every VISIBLE brand surface
  * (hero navbar, auth screens, invoices) — the same defend-in-depth
  * sanitization as the metadata layer, platform name as the fallback. */
-export function resolveBrandName(brand: { appName?: string } | null | undefined): string {
-  return safeAppName(brand?.appName) ?? PLATFORM_NAME
+export function resolveBrandName(brand: { appName?: string | null } | null | undefined): string {
+  return safeAppName(brand?.appName ?? undefined) ?? PLATFORM_NAME
 }
 
 /** The short label for tight surfaces ("Creating your X account"), computed
  * by the same rule as the PWA short name. */
-export function shortTenantLabel(brand: { appName?: string } | null | undefined): string {
-  const appName = safeAppName(brand?.appName)
+export function shortTenantLabel(brand: { appName?: string | null } | null | undefined): string {
+  const appName = safeAppName(brand?.appName ?? undefined)
   return appName ? shortAppName(appName) : PLATFORM_SHORT_LABEL
 }
 
