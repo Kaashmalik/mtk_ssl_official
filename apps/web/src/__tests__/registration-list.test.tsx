@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { RegistrationList, type Registration } from "@/components/registrations/registration-list"
 
 const mocks = vi.hoisted(() => ({
-  approve: vi.fn(), reject: vi.fn(), updateSquad: vi.fn(), options: vi.fn(), withdraw: vi.fn(),
+  approve: vi.fn(), reject: vi.fn(), updateSquad: vi.fn(), options: vi.fn(), withdraw: vi.fn(), bulk: vi.fn(),
   success: vi.fn(), error: vi.fn(),
   buttons: [] as Array<{ label: string; click: () => void; disabled?: boolean; role?: string; checked?: boolean }>,
   // useState over persistent slots: re-rendering re-executes the component so
@@ -25,7 +25,7 @@ vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error }
 vi.mock("@/app/actions/registrations", () => ({
   approveRegistration: mocks.approve, rejectRegistration: mocks.reject,
   updateRegistrationSquad: mocks.updateSquad, getRegistrationSquadOptions: mocks.options,
-  withdrawRegistration: mocks.withdraw,
+  withdrawRegistration: mocks.withdraw, bulkReviewRegistrations: mocks.bulk,
 }))
 vi.mock("@mtk/ui/components/ui/button", () => ({ Button: ({ children, onClick, disabled, role, "aria-checked": checked, "aria-label": label }: {
   children?: ReactNode; onClick?: () => void; disabled?: boolean; role?: string; "aria-checked"?: boolean; "aria-label"?: string
@@ -73,6 +73,7 @@ beforeEach(() => {
   mocks.options.mockResolvedValue([{ id: P1, name: "A" }, { id: P2, name: "B" }, { id: P3, name: "C" }])
   mocks.updateSquad.mockResolvedValue({ success: true, changed: true, registration: { id: REG_ID, status: "pending" } })
   mocks.withdraw.mockResolvedValue({ success: true })
+  mocks.bulk.mockResolvedValue({ success: true, results: [] })
 })
 
 /** Renders a fresh pass; with the slot-backed useState this simulates the re-render after state changes. */
@@ -175,5 +176,61 @@ describe("RegistrationList console squad editing (ENH-05-03 slice 4)", () => {
     // The editor is closed again: no half-open dialog with a failed roster behind it.
     expect(button(/save squad/i)).toHaveLength(0)
     expect(mocks.error).toHaveBeenCalledWith(expect.stringMatching(/Failed to load the team's players|DB down/))
+  })
+})
+
+describe("RegistrationList bulk review (Batch 120)", () => {
+  const ALPHA = "00000000-0000-4000-8000-000000000010"
+  const BETA = "00000000-0000-4000-8000-000000000011"
+
+  it("only pending rows are selectable, and selecting them reveals the bulk bar", async () => {
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" }), row({ id: BETA, teamName: "Beta", status: "approved" as const })] })
+    const checkboxes = button(/select (alpha|beta)/i).filter(b => b.role === "checkbox")
+    expect(checkboxes).toHaveLength(1) // Beta is approved: it cannot be bulk-reviewed
+    expect(button(/approve selected/i)).toHaveLength(0)
+
+    checkboxes[0].click()
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" }), row({ id: BETA, teamName: "Beta", status: "approved" as const })] })
+    expect(button(/approve selected/i)).toHaveLength(1)
+  })
+
+  it("bulk approve composes the single commands and reports the honest aggregate", async () => {
+    mocks.bulk.mockResolvedValue({
+      success: true,
+      results: [
+        { id: ALPHA, ok: true, status: "approved", tournamentId: "00000000-0000-4000-8000-000000000007" },
+        { id: BETA, ok: false, error: "This tournament is already at its maximum number of teams" },
+      ],
+    })
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" }), row({ id: BETA, teamName: "Beta" })] })
+    const select = button(/select (alpha|beta)/i).filter(b => b.role === "checkbox")
+    select[0].click()
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" }), row({ id: BETA, teamName: "Beta" })] })
+    button(/select (alpha|beta)/i).filter(b => b.role === "checkbox")[1].click()
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" }), row({ id: BETA, teamName: "Beta" })] })
+    button(/approve selected/i)[0].click()
+    await flush()
+    expect(mocks.bulk).toHaveBeenCalledWith("approve", [ALPHA, BETA])
+    expect(mocks.success).toHaveBeenCalledWith(expect.stringMatching(/1 registration reviewed/))
+    expect(mocks.error).toHaveBeenCalledWith("This tournament is already at its maximum number of teams")
+  })
+
+  it("bulk reject requires the shared reason dialog and passes the reason through", async () => {
+    mocks.bulk.mockResolvedValue({ success: true, results: [{ id: ALPHA, ok: true, status: "rejected", tournamentId: "00000000-0000-4000-8000-000000000007" }] })
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" })] })
+    button(/select alpha/i).filter(b => b.role === "checkbox")[0].click()
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" })] })
+    button(/reject selected/i)[0].click()
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" })] })
+    // The shared dialog is open (its title renders) with a Confirm button.
+    const confirm = button(/confirm reject/i)
+    expect(confirm.length).toBeGreaterThan(0)
+    // The rejection reason lives in the rejectionReason state slot (index 3):
+    // set it as the textarea would, then confirm the bulk rejection.
+    mocks.slots[3] = "Squad does not meet the published minimum"
+    render({ initialRegistrations: [row({ id: ALPHA, teamName: "Alpha" })] })
+    button(/confirm reject/i)[0].click()
+    await flush()
+    expect(mocks.bulk).toHaveBeenCalledWith("reject", [ALPHA], "Squad does not meet the published minimum")
   })
 })

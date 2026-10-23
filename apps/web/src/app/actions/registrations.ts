@@ -15,6 +15,7 @@ import {
   confirmLeagueRegistrationPayment, registerTeamSchema, confirmPaymentSchema,
   updateRegistrationSquad as updateRegistrationSquadCommand, updateSquadSchema,
 } from "@/lib/registration-management"
+import { bulkReviewLeagueRegistrations, type BulkReviewOperation } from "@/lib/registration-bulk"
 
 async function mutationTenant(permission: Permission) {
   const tenantId = await resolveActiveTenantId()
@@ -62,6 +63,27 @@ export const rejectRegistration = withAuth("registration:manage", async (registr
   revalidatePath("/dashboard/registrations")
   revalidatePath(`/tournaments/${reg.tournamentId}`)
   return { success: true, registration: { id: reg.id, status: reg.status } }
+})
+
+/** Batch 120: bulk approve/reject for the console — composition of the SAME
+ * audited single commands (each its own transaction + revalidation). The
+ * per-item outcomes are returned verbatim; every successful item's surfaces
+ * are revalidated. */
+export const bulkReviewRegistrations = withAuth("registration:manage", async (
+  operation: BulkReviewOperation, ids: string[], reason?: string,
+) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  const tenantId = await mutationTenant("registration:manage")
+  const { results } = await bulkReviewLeagueRegistrations(userId, tenantId, { operation, ids, reason })
+  revalidatePath("/dashboard/registrations")
+  for (const result of results) {
+    if (result.ok) {
+      revalidatePath(`/dashboard/tournaments/${result.tournamentId}`)
+      revalidatePath(`/tournaments/${result.tournamentId}`)
+    }
+  }
+  return { success: true, results }
 })
 
 /** A league owner, or the team's manager/captain, withdraws a pending/approved entry. */
