@@ -3,6 +3,43 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **23 October 2026 (Batch 101 apply session) - the Batch 96/100 chain APPLIED to the LIVE
+> project + one migration file corrected pre-adoption**
+> The five pending migrations were applied to the live project
+> (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`, in folder order:
+> `20261021120000_notification_reads`, `20261021130000_notification_jobs`,
+> `20261021140000_media_assets`, `20261021150000_broadcast_provider`,
+> `20261022120000_scoring_wicket_attribution`. Verification-first preflight
+> (users/tenants/notifications/matches present, `matches_id_tenant_key` present,
+> zero `20261021*`/`20261022*` ledger rows, none of the new objects present,
+> all four roles exist) ran before any write. Post-apply verification, all green:
+> all 14 new tables present, `relrowsecurity`/`relforcerowsecurity` = `t/t` on every
+> one, ZERO `anon`/`authenticated`/`PUBLIC` grants, `match_balls` gained
+> `wicket_player_out_id`/`wicket_fielder_id` (uuid, nullable, FK -> players ON DELETE
+> SET NULL). The MCP assigned server-timestamp ledger versions; they were reconciled
+> in one transaction to the folder's original stamps so `supabase_migrations
+> .schema_migrations` stays exactly the folder's mirror (same hygiene as Batch 178).
+>
+> **FILE DEFECT found and fixed pre-adoption:** `20261021150000_broadcast_provider.sql`
+> could never apply to a virgin database - `broadcast_jobs.attempts` carried BOTH an
+> anonymous column-level `CHECK (attempts >= 0)` (which Postgres auto-names
+> `broadcast_jobs_attempts_check`, table_column_check convention) AND an explicit
+> `CONSTRAINT broadcast_jobs_attempts_check CHECK (attempts <= max_attempts)`, a
+> guaranteed per-table 42710. The platform error ("check constraint ... already exists"
+> with no such constraint anywhere in the catalog) misled debugging for several rounds;
+> the diagnosis that cracked it was creating the table WITHOUT the named constraint and
+> observing the auto-name occupy it. Fix (aligns the file with the Drizzle source of
+> truth, `packages/database/src/schema/broadcast.ts` which has ONE composite named
+> check): drop the column-level check, fold it into the named one ->
+> `CONSTRAINT broadcast_jobs_attempts_check CHECK (attempts >= 0 AND attempts <=
+> max_attempts)`; `broadcast-schema.test.ts` pinned-substring updated; database package
+> tests green. This is the same pre-adoption correction discipline as Batch 171c.
+>
+> GATE DISCIPLINE UNCHANGED: every runtime flag in
+> `docs/deployment/PENDING_MIGRATIONS_2026-10-22.md` section 5 stays
+> unset/false until its own provider/worker/credential acceptance lands. DB
+> migration alone enables nothing.
+
 > **22 October 2026 (Batch 100) - `20261022120000_scoring_wicket_attribution.sql` LOCAL ONLY, NOT applied**
 > Additive wicket-attribution columns on the legacy `match_balls` table:
 > `wicket_player_out_id uuid NULL REFERENCES players(id) ON DELETE SET NULL` and

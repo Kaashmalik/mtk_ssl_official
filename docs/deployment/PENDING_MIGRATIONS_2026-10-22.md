@@ -1,5 +1,19 @@
 # Pending migrations — apply guide (2026-10-22)
 
+> **STATUS UPDATE (2026-10-23): ALL FIVE APPLIED + LEDGERED** to the live
+> project (`anxstufkbqnjkxgksfkn`) via the Supabase MCP `apply_migration`, in
+> the order below, with section 2's preflight run first and section 4's
+> post-apply verification all green (14 tables, RLS forced, zero
+> anon/authenticated/PUBLIC grants, wicket columns present, ledger reconciled
+> to the folder's original stamps). One pre-adoption correction was required:
+> `20261021150000_broadcast_provider.sql` had a self-colliding CHECK name
+> (`broadcast_jobs_attempts_check` was both the auto-name of the column-level
+> `CHECK (attempts >= 0)` and the explicit table-level constraint) — fixed in
+> the file to the single composite check the Drizzle schema declares; see the
+> 23 October 2026 entry in `supabase/MIGRATION_STATUS.md`. Section 5's gates:
+> still ALL unset/false; applying the schema enables nothing by itself.
+> The rest of this guide is retained as the historical checklist.
+
 Five additive migrations are committed on the working branch but are **not
 applied** to any environment by this repository work. They back the notification,
 media, broadcast and scoring-participant slices. This guide is the operator
