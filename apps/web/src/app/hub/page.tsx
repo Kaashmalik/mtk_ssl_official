@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { unstable_noStore as noStore } from "next/cache"
 import { buildPageMetadata } from "@/lib/site-metadata"
 import { readListedHubLeagues } from "@/lib/public-hub"
+import { buildHubItemList } from "@/lib/hub-structured-data"
+import { JsonLd } from "@/components/json-ld"
 
 export const metadata = buildPageMetadata({
   title: "Public cricket hub",
@@ -32,7 +34,14 @@ export default async function HubPage() {
     failed = true
   }
 
+  const hubItemList = failed ? null : buildHubItemList(read)
+
   return (
+    <>
+      {/* Batch 118: the platform->league discovery edge as an ItemList —
+          only leagues with a verified public host are advertised, and a
+          failed/unverifiable read renders NOTHING (never fabricated). */}
+      {hubItemList ? <JsonLd data={hubItemList} /> : null}
     <div className="max-w-4xl mx-auto space-y-6 p-4">
       <h1 className="text-2xl font-bold">Public cricket hub</h1>
       <p className="text-sm text-muted-foreground">
@@ -79,5 +88,6 @@ export default async function HubPage() {
         ))}
       </div>
     </div>
+    </>
   )
 }
