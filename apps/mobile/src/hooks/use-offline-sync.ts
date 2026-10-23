@@ -2,10 +2,10 @@ import { useEffect, useRef } from "react";
 import * as Network from "expo-network";
 import { Platform } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
+import { queuedDeliveryToCommand, scoringParticipantsSchema } from "@mtk/contracts";
 import { useOfflineStore } from "@/store/offline-store";
 import { appApiUrl } from "@/lib/app-api";
 import { isScoringAcknowledgement } from "@/lib/scoring-ack";
-import { queuedDeliveryToCommand } from "@mtk/contracts";
 
 /**
  * SCORE-08/09: flushes queued offline deliveries THROUGH THE AUTHENTICATED
@@ -22,8 +22,10 @@ import { queuedDeliveryToCommand } from "@mtk/contracts";
 export function useOfflineSync() {
   const syncInFlight = useRef(false);
   const { isSignedIn, getToken, userId } = useAuth();
-  const { isOnline, setOnline, getPendingBalls, markBallSynced, markBallConflicted, clearSyncedBalls } =
-    useOfflineStore();
+  const {
+    isOnline, setOnline, getPendingBalls, markBallSynced, markBallConflicted,
+    clearSyncedBalls, recordCreaseAck,
+  } = useOfflineStore();
 
   const logSyncError = (error: unknown) => {
     if (__DEV__) {
@@ -98,6 +100,23 @@ export function useOfflineSync() {
             const acknowledgement: unknown = res.ok ? await res.json() : null;
             if (isScoringAcknowledgement(res.status, acknowledgement, ball.id)) {
               markBallSynced(ball.id);
+              // Batch 102: cache the service-confirmed crease projection so
+              // the run-out victim picker asks from OBSERVED canonical state
+              // (the service folds the delivery log; this device only caches
+              // what the service said). When SCORING_PARTICIPANTS_READY is
+              // off the ack carries participants:null and nothing is cached.
+              if (ball.inningsId && acknowledgement && typeof acknowledgement === "object") {
+                const parsed = scoringParticipantsSchema.safeParse(
+                  (acknowledgement as { participants?: unknown }).participants
+                );
+                if (parsed.success) {
+                  recordCreaseAck(ball.inningsId, {
+                    strikerId: parsed.data.strikerId,
+                    nonStrikerId: parsed.data.nonStrikerId,
+                    confirmed: parsed.data.confirmed,
+                  });
+                }
+              }
             } else {
               logSyncError(new Error(`Scoring acknowledgement rejected (HTTP ${res.status})`));
               break;

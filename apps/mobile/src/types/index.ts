@@ -70,6 +70,9 @@ export interface BallData {
   runs: number;
   isWicket: boolean;
   wicketType?: string;
+  /** Batch 102: canonical wicket attribution mirror of the offline store. */
+  wicketPlayerOutId?: string;
+  wicketFielderId?: string;
   batsmanId?: string;
   bowlerId?: string;
   timestamp: number;

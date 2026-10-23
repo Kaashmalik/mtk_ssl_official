@@ -14,6 +14,11 @@ export interface BallData {
   runs: number;
   isWicket: boolean;
   wicketType?: string;
+  /** Batch 102: canonical wicket attribution (ENH-03-02). Optional — the
+   *  contracts adapter forwards both; older queued entries omit them and the
+   *  server fold default (striker) + self-heal still applies. */
+  wicketPlayerOutId?: string;
+  wicketFielderId?: string;
   batsmanId?: string;
   bowlerId?: string;
   isWide?: boolean;
@@ -31,11 +36,32 @@ export interface BallData {
   synced: boolean;
 }
 
+/**
+ * Batch 102: the last service-confirmed crease projection for an innings,
+ * captured from a record acknowledgement. This is OBSERVED canonical state
+ * (the scoring service folds the delivery log; the device only caches what
+ * the service said) — it feeds the run-out victim picker. An absent/stale or
+ * unconfirmed entry means the picker is not offered and the record carries
+ * no victim id; the server fold default + self-heal still applies.
+ */
+export interface CreaseAck {
+  strikerId: string | null;
+  nonStrikerId: string | null;
+  confirmed: boolean;
+  observedAt: number;
+}
+
+/** Bounded memory: at most this many innings keep a cached crease ack. */
+const MAX_CREASE_ACKS = 40;
+
 interface OfflineStore {
   isOnline: boolean;
   pendingBalls: BallData[];
+  creaseByInnings: Record<string, CreaseAck>;
   setOnline: (online: boolean) => void;
   addPendingBall: (ball: BallData) => void;
+  /** Batch 102: cache the crease projection from a record acknowledgment. */
+  recordCreaseAck: (inningsId: string, ack: Omit<CreaseAck, "observedAt">) => void;
   markBallSynced: (ballId: string) => void;
   markBallConflicted: (ballId: string) => void;
   clearSyncedBalls: () => void;
@@ -58,11 +84,28 @@ export const useOfflineStore = create<OfflineStore>()(
     (set, get) => ({
       isOnline: true,
       pendingBalls: [],
+      creaseByInnings: {},
       setOnline: (online) => set({ isOnline: online }),
       addPendingBall: (ball) =>
         set((state) => ({
           pendingBalls: [...state.pendingBalls, ball],
         })),
+      recordCreaseAck: (inningsId, ack) =>
+        set((state) => {
+          const next: Record<string, CreaseAck> = {
+            ...state.creaseByInnings,
+            [inningsId]: { ...ack, observedAt: Date.now() },
+          };
+          // Bounded memory: keep only the most recent innings acks.
+          const oldestFirst = Object.entries(next).sort(
+            ([, a], [, b]) => a.observedAt - b.observedAt
+          );
+          while (oldestFirst.length > MAX_CREASE_ACKS) {
+            const [staleId] = oldestFirst.shift()!;
+            delete next[staleId];
+          }
+          return { creaseByInnings: next };
+        }),
       markBallSynced: (ballId) =>
         set((state) => ({
           pendingBalls: state.pendingBalls.map((ball) =>

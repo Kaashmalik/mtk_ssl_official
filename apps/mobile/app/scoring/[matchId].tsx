@@ -11,6 +11,10 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
+import {
+  resolveWicketVictimId,
+  victimOptionsFromParticipants,
+} from "@mtk/contracts";
 import { useMatchStore } from "@/store/match-store";
 import { useOfflineStore, BallData } from "@/store/offline-store";
 import { authedFetch, clerkConfigured } from "@/lib/app-api";
@@ -51,11 +55,19 @@ function AuthenticatedScoring() {
   // Mounted only inside ClerkProvider (gate above).
   const { isSignedIn, userId } = useAuth();
   const { addPendingBall, getPendingBalls, getConflictedBalls } = useOfflineStore();
+  // Batch 102: the last service-confirmed crease per innings (captured from
+  // record acknowledgements). OBSERVED canonical state only — never derived.
+  const creaseByInnings = useOfflineStore((state) => state.creaseByInnings);
 
   const [hydrated, setHydrated] = useState<MobileMatchState | null>(null);
   const [players, setPlayers] = useState<PlayersResponse | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Batch 102: a run-out may dismiss EITHER crease occupant. When the last
+  // service-confirmed crease shows both occupants, the scorer is asked which
+  // batter left (mirroring the web picker); otherwise the record is written
+  // WITHOUT a victim id and the server fold default + self-heal applies.
+  const [victimPick, setVictimPick] = useState<"run_out" | null>(null);
 
   const [batsmanId, setBatsmanId] = useState("");
   const [bowlerId, setBowlerId] = useState("");
@@ -127,9 +139,15 @@ function AuthenticatedScoring() {
   const pendingCount = getPendingBalls(matchId, userId).length;
   const overs = Math.floor((innings.totalBalls ?? 0) / 6);
   const ballThisOver = (innings.totalBalls ?? 0) % 6;
+  // Batch 102: victim candidates come ONLY from the last service-confirmed
+  // crease ack (the contracts policy refuses to guess from a rotation rule —
+  // the server fold stays the only participant-derivation authority).
+  const victimOptions = victimOptionsFromParticipants(creaseByInnings[innings.id]);
+  const victimName = (id: string) =>
+    battingPlayers.find((player) => player.id === id)?.name ?? "Unknown batter";
 
   const localRecord = (
-    runType: { kind: "runs"; value: number } | { kind: "wicket" | "wide" | "noball" | "bye" | "legbye"; wicketType?: BallData["wicketType"] }
+    runType: { kind: "runs"; value: number } | { kind: "wicket" | "wide" | "noball" | "bye" | "legbye"; wicketType?: BallData["wicketType"]; wicketPlayerOutId?: BallData["wicketPlayerOutId"] }
   ) => {
     if (!batsmanId || !bowlerId || !innings) {
       // The server refuses incomplete deliveries; do not queue what cannot
@@ -137,6 +155,7 @@ function AuthenticatedScoring() {
       return;
     }
     if (runType.kind === "wicket" && !runType.wicketType) {
+      setVictimPick(null); // fresh panel: never resurface a cancelled victim choice
       setPendingWicket(true); // the dismissal type is part of the official record - never guessed
       return;
     }
@@ -159,6 +178,16 @@ function AuthenticatedScoring() {
       runs: runType.kind === "runs" ? runType.value : runType.kind === "wicket" ? 0 : 1,
       isWicket: runType.kind === "wicket",
       wicketType: runType.kind === "wicket" ? runType.wicketType : undefined,
+      // Batch 102: the validated run-out victim (or nothing — the server
+      // fold owns the striker default and self-heal whenever the recorded
+      // choice cannot be re-validated against the confirmed candidates).
+      wicketPlayerOutId: runType.kind === "wicket"
+        ? resolveWicketVictimId({
+            wicketType: runType.wicketType,
+            options: victimOptions,
+            chosenId: runType.wicketPlayerOutId,
+          }) ?? undefined
+        : undefined,
       isWide: runType.kind === "wide",
       isNoBall: runType.kind === "noball",
       isBye: runType.kind === "bye",
@@ -250,21 +279,60 @@ function AuthenticatedScoring() {
 
       {pendingWicket && (
         <View style={styles.wicketPanel}>
-          <Text style={styles.pickLabel}>How was the batter out?</Text>
-          <View style={styles.row}>
-            {(["bowled", "caught", "lbw", "run_out", "stumped", "hit_wicket"] as const).map((kind) => (
-              <TouchableOpacity
-                key={kind}
-                style={styles.chip}
-                onPress={() => { setPendingWicket(false); localRecord({ kind: "wicket", wicketType: kind }); }}
-              >
-                <Text style={styles.chipText}>{kind.replace("_", " ")}</Text>
+          {victimPick == null ? (
+            <>
+              <Text style={styles.pickLabel}>How was the batter out?</Text>
+              <View style={styles.row}>
+                {(["bowled", "caught", "lbw", "run_out", "stumped", "hit_wicket"] as const).map((kind) => (
+                  <TouchableOpacity
+                    key={kind}
+                    style={styles.chip}
+                    onPress={() => {
+                      // Batch 102: a run-out can leave EITHER crease
+                      // occupant. With a confirmed two-occupant crease the
+                      // scorer names the batter who left (the striker
+                      // default was silently wrong for off-strike
+                      // run-outs); without one, record without attribution
+                      // and the server fold default + self-heal applies.
+                      if (kind === "run_out" && victimOptions.length === 2) {
+                        setVictimPick(kind);
+                        return;
+                      }
+                      setPendingWicket(false);
+                      localRecord({ kind: "wicket", wicketType: kind });
+                    }}
+                  >
+                    <Text style={styles.chipText}>{kind.replace("_", " ")}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity onPress={() => setPendingWicket(false)}>
+                <Text style={styles.hintLine}>Cancel</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity onPress={() => setPendingWicket(false)}>
-            <Text style={styles.hintLine}>Cancel</Text>
-          </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.pickLabel}>Which batter is out?</Text>
+              {victimOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.id}
+                  style={styles.chip}
+                  onPress={() => {
+                    setVictimPick(null);
+                    setPendingWicket(false);
+                    localRecord({ kind: "wicket", wicketType: victimPick, wicketPlayerOutId: option.id });
+                  }}
+                >
+                  <Text style={styles.chipText}>
+                    {victimName(option.id)}{option.onStrike ? " (on strike)" : " (non-striker)"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity onPress={() => setVictimPick(null)}>
+                <Text style={styles.hintLine}>Back</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       )}
 

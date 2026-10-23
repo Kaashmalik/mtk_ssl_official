@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { wicketRequiresVictimAttribution } from "@mtk/contracts";
 import { Button } from "@mtk/ui";
 import { WicketType } from "@/stores/scoring-store";
 import { X } from "lucide-react";
@@ -24,19 +25,16 @@ interface WicketSelectorProps {
   creaseBatters?: Array<{ id: string; name: string; onStrike: boolean }>;
 }
 
-/** Dismissal types whose victim is rule-fixed to the striker (they faced the
- *  ball). Only run_out needs the scorer to name the batter who left. */
-function needsVictimAttribution(type: WicketType): boolean {
-  return type === "run_out";
-}
-
+/** Batch 102: the "which dismissal asks for the victim" rule now lives in
+ *  @mtk/contracts (wicketRequiresVictimAttribution) so the mobile picker
+ *  cannot drift from this one; the local copy is gone. */
 export function WicketSelector({ onSelect, onCancel, creaseBatters }: WicketSelectorProps) {
   const [pendingType, setPendingType] = useState<WicketType | null>(null);
-  const victimStep = pendingType != null && needsVictimAttribution(pendingType)
+  const victimStep = pendingType != null && wicketRequiresVictimAttribution(pendingType)
     && Array.isArray(creaseBatters) && creaseBatters.length === 2;
 
   const choose = (type: WicketType) => {
-    if (needsVictimAttribution(type) && Array.isArray(creaseBatters) && creaseBatters.length === 2) {
+    if (wicketRequiresVictimAttribution(type) && Array.isArray(creaseBatters) && creaseBatters.length === 2) {
       setPendingType(type);
       return;
     }
