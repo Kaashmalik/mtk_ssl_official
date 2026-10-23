@@ -56,6 +56,19 @@ describe("Match OG image render data (Batch 119) — same gates, bounded values"
     expect(data!.accentA).toMatch(/^#[\da-fA-F]{6}$/)
   })
 
+  it("a live match is labelled LIVE on the card — status truth reaches the canvas (Batch 121)", async () => {
+    mocks.tenant.mockResolvedValue(TENANT)
+    mocks.match.mockResolvedValue({ id: MATCH, status: "live", matchFormat: "t20", scheduledDate: "2026-10-01", result: null, teamAId: teamA.id, teamBId: teamB.id })
+    mocks.teams.mockResolvedValue({ teamA, teamB })
+    const { resolveMatchOgRenderData } = await import("../lib/match-og-image")
+    const data = await resolveMatchOgRenderData(MATCH)
+    expect(data!.live).toBe(true)
+    // A completed match with a result is never labelled live.
+    mocks.match.mockResolvedValue({ id: MATCH, status: "completed", matchFormat: "t20", scheduledDate: "2026-10-01", result: "Falcons won by 4 wickets", teamAId: teamA.id, teamBId: teamB.id })
+    const completed = await resolveMatchOgRenderData(MATCH)
+    expect(completed!.live).toBe(false)
+  })
+
   it("an unpublished, foreign, half-resolved, or failed read yields null — no card for a hidden match", async () => {
     const { resolveMatchOgRenderData } = await import("../lib/match-og-image")
     mocks.tenant.mockResolvedValue(TENANT)

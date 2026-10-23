@@ -42,6 +42,9 @@ describe("Hub discovery ItemList (Batch 118) — only verified hosts are adverti
     expect(data.itemListElement.map((item: any) => item.item.url)).toEqual(["https://alpha.example.com", "https://beta.example.com"])
     expect(data.itemListElement.map((item: any) => item.position)).toEqual([1, 2])
     expect(JSON.stringify(data)).not.toContain("No-Domain League")
+    // Batch 121: the counts live in the card too — the same numbers the
+    // rendered hub page shows, truthfully pluralized.
+    expect(data.itemListElement[0].item.description).toBe("3 published competitions · 1 live fixture")
   })
 
   it("a null read (or one where nothing is verifiable) builds nothing — no fabricated entries", async () => {

@@ -44,6 +44,12 @@ export default async function MatchOgImage({ params }: { params: Promise<{ match
           <div style={{ width: 28, height: 64, backgroundColor: data.accentB, display: "flex" }} />
         </div>
         <div style={{ marginTop: 28, fontSize: 40, color: "#cbd5e1" }}>{data.subLine}</div>
+        {data.live ? (
+          <div style={{ marginTop: 20, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: "#ef4444", display: "flex" }} />
+            <div style={{ fontSize: 32, fontWeight: 700, color: "#ef4444" }}>LIVE</div>
+          </div>
+        ) : null}
         <div style={{ marginTop: 16, fontSize: 28, color: "#64748b" }}>Shakir Super League — Match Centre</div>
       </div>
     ),
