@@ -14,8 +14,16 @@ import { readRequestBrand } from "@/lib/request-brand";
 import { brandVariables } from "@/lib/brand-presentation";
 
 import { buildRootMetadata } from "@/lib/site-metadata";
+import { buildTenantBrandMetadata } from "@/lib/white-label-metadata";
 
-export const metadata: Metadata = buildRootMetadata();
+export async function generateMetadata(): Promise<Metadata> {
+  // Batch 115 white-label: the tenant's own product name and favicon are
+  // rendered SERVER-side per host from the request brand — crawlers see the
+  // tenant's brand directly, and pages without a specific title still read
+  // as the tenant's product. A tenant without branding keeps the platform
+  // default untouched (buildTenantBrandMetadata returns the seed as-is).
+  return buildTenantBrandMetadata(buildRootMetadata(), await readRequestBrand());
+}
 
 export default async function RootLayout({
   children,
