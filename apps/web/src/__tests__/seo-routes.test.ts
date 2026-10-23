@@ -174,6 +174,21 @@ describe("SEO routes and metadata (Batches 112-117)", () => {
     expect(meta.twitter.card).toBe("summary_large_image")
   })
 
+  it("the OG image route files exist at the share surfaces (Batch 119)", async () => {
+    const fs = await import("node:fs")
+    const path = await import("node:path")
+    const root = path.resolve(__dirname, "../app")
+    // These files are NOT imported here: next/og pulls satori/wasm that the
+    // node test environment cannot execute. Their behavior claims live in
+    // the match-og-image lib pins; this pins only the convention wiring.
+    for (const file of ["opengraph-image.tsx", path.join("matches", "[matchId]", "opengraph-image.tsx")]) {
+      expect(fs.existsSync(path.join(root, file)), `missing OG image route ${file}`).toBe(true)
+    }
+    const matchRoute = fs.readFileSync(path.join(root, "matches", "[matchId]", "opengraph-image.tsx"), "utf8")
+    expect(matchRoute).toContain("resolveMatchOgRenderData") // the gates are the same ones the render uses
+    expect(matchRoute).toContain("notFound") // hidden match -> no card, not a placeholder
+  })
+
   it("the home page emits Organization and WebSite structured data (Batch 113)", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://ssl.example.com"
     const React = (await import("react")).default
