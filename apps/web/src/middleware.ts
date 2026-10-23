@@ -22,7 +22,8 @@ const isPublicRoute = createRouteMatcher([
   "/api/auth/(.*)",
   "/verify-otp",
   // PWA assets must load pre-auth or the app cannot be installed.
-  "/manifest.json",
+  // (The manifest is now the per-host /manifest.webmanifest route, which the
+  // matcher's file-extension regex already excludes — no entry needed.)
   "/sw.js",
   "/icons/(.*)",
   "/favicon.ico",

@@ -10,6 +10,7 @@ import "./globals.css";
 import { Toaster } from "@mtk/ui/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
 import { TenantBrandingProvider } from "@/components/tenant-branding-provider";
+import { SkipLink } from "@/components/skip-link";
 import { readRequestBrand } from "@/lib/request-brand";
 import { brandVariables } from "@/lib/brand-presentation";
 
@@ -40,8 +41,11 @@ export default async function RootLayout({
       <body style={brandVariables(branding)} className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}>
         <NextIntlClientProvider>
         <Providers>
+          <SkipLink />
           <TenantBrandingProvider branding={branding} />
+          <div id="main-content">
           {children}
+          </div>
           <Toaster />
         </Providers>
         </NextIntlClientProvider>
