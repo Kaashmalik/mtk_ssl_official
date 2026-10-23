@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
+import { normalizeGraphicsOffsetValue } from "@mtk/contracts"
 import { BroadcastOverlay } from "@/components/broadcast/broadcast-overlay"
 import { broadcastOverlaySecret, verifyBroadcastOverlayToken } from "@/lib/broadcast-overlay-token"
 import { readBroadcastOverlaySnapshot } from "@/lib/broadcast-overlay-reads"
@@ -11,6 +12,11 @@ import { readBroadcastOverlaySnapshot } from "@/lib/broadcast-overlay-reads"
  * secret or a valid token this route is indistinguishable from a missing
  * match. The page renders transparent so OBS can composite original graphics
  * over camera/video; it never wraps or masks a provider player.
+ *
+ * ENH-09-04: `?offsetMs=` is an explicit operator graphics offset (an
+ * A/V-calibration RENDERING delay for animated events, never an official-data
+ * delay). It is clamped by the shared latency policy; absent/junk falls back
+ * to the operator's stored preference inside the component.
  */
 
 export const dynamic = "force-dynamic"
@@ -25,10 +31,10 @@ export default async function BroadcastOverlayPage({
   searchParams,
 }: {
   params: Promise<{ broadcastId: string }>
-  searchParams: Promise<{ token?: string; animations?: string }>
+  searchParams: Promise<{ token?: string; animations?: string; offsetMs?: string }>
 }) {
   const { broadcastId } = await params
-  const { token, animations } = await searchParams
+  const { token, animations, offsetMs } = await searchParams
   let payload
   try {
     payload = verifyBroadcastOverlayToken(token ?? "", broadcastOverlaySecret())
@@ -65,6 +71,7 @@ export default async function BroadcastOverlayPage({
           tenantId={payload.tenantId}
           token={token ?? ""}
           animations={mode}
+          graphicsOffsetMs={normalizeGraphicsOffsetValue(offsetMs)}
         />
       </main>
     </>

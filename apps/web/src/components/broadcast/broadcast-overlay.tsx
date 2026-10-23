@@ -2,13 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  clampGraphicsOffsetMs,
+  GRAPHICS_OFFSET_MS_MAX,
+  GRAPHICS_OFFSET_MS_MIN,
+  GRAPHICS_OFFSET_MS_STEP,
   planBroadcastCelebrations,
   pruneBroadcastCelebrations,
+  SNAPSHOT_STALE_AFTER_MS,
   type BroadcastCelebrationEvent,
   type BroadcastOverlayParticipants,
   type BroadcastOverlaySnapshot,
 } from "@mtk/contracts"
 import { getScoringSocket } from "@/lib/scoring-socket"
+import { persistOverlayOffsetMs, readOverlayOffsetMs } from "@/lib/broadcast-overlay-settings"
+import {
+  dueHeldCelebrations,
+  ingestHeldCelebrations,
+  pruneQueuedCelebrations,
+  type HeldCelebration,
+} from "@/lib/broadcast-latency-buffer"
 
 /**
  * ENH-09-01/03: read-only scoreboard for OBS.
@@ -24,6 +36,17 @@ import { getScoringSocket } from "@/lib/scoring-socket"
  * (strike-marked)/non-striker figures and the over's bowler from that
  * canonical state; an unconfirmed or absent projection falls back to the
  * aggregate-only presentation below.
+ *
+ * Batch 101 (ENH-09-04): operator A/V calibration. Celebrations may be HELD
+ * for a bounded graphics offset (`?offsetMs=` or the on-page panel) so burned
+ * animations line up with the programme feed. The offset delays ANIMATED
+ * EVENTS only - the scoreboard numbers still render from the last confirmed
+ * official snapshot immediately, and no official persistence is ever delayed.
+ * An undo/correction prises events out of the delay buffer too, so a retracted
+ * claim can never appear on stream just because it was held. A stale-snapshot
+ * indicator is shown ONLY while the page has focus: an operator rehearsing in
+ * a browser tab sees a dropped connection, while the unfocused OBS browser
+ * source on air does not display diagnostic chrome to viewers.
  */
 
 type AnimationMode = "full" | "reduced" | "off"
@@ -34,12 +57,16 @@ export function BroadcastOverlay({
   tenantId,
   token,
   animations,
+  graphicsOffsetMs,
 }: {
   initial: BroadcastOverlaySnapshot
   matchId: string
   tenantId: string
   token: string
   animations: AnimationMode
+  /** ENH-09-04: `?offsetMs=` value already normalized server-side, or null
+   *  when the URL did not configure one (stored preference then applies). */
+  graphicsOffsetMs?: number | null
 }) {
   const [snapshot, setSnapshot] = useState<BroadcastOverlaySnapshot | null>(initial)
   const [unavailable, setUnavailable] = useState(false)
@@ -49,6 +76,51 @@ export function BroadcastOverlay({
   const seenEventIds = useRef(new Set<string>())
   const [queue, setQueue] = useState<BroadcastCelebrationEvent[]>([])
   const [activeEvent, setActiveEvent] = useState<BroadcastCelebrationEvent | null>(null)
+
+  // ── Batch 101: operator graphics offset ────────────────────────────
+  // An explicit `?offsetMs=` prop is a deliberate operator configuration and
+  // also becomes the stored preference; otherwise the stored one applies.
+  const [eventOffsetMs, setEventOffsetMs] = useState(() => graphicsOffsetMs ?? 0)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (graphicsOffsetMs != null) {
+      persistOverlayOffsetMs(graphicsOffsetMs, window.localStorage)
+      return
+    }
+    setEventOffsetMs(readOverlayOffsetMs({ storage: window.localStorage }))
+    // Run once on mount; the URL prop is fixed per page load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const updateOffset = useCallback((next: number) => {
+    const clamped = clampGraphicsOffsetMs(next)
+    setEventOffsetMs(clamped)
+    if (typeof window !== "undefined") persistOverlayOffsetMs(clamped, window.localStorage)
+  }, [])
+
+  // ── Batch 101: stale-snapshot visibility for OPERATORS ─────────────
+  const lastSuccessfulPollAt = useRef(Date.now())
+  const [onFocusTab, setOnFocusTab] = useState(false)
+  const [, tickStaleCheck] = useState(0)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const update = () => {
+      setOnFocusTab(document.hasFocus())
+      tickStaleCheck(count => count + 1)
+    }
+    // The interval re-evaluates staleness while idle; focus/blur catch a
+    // window gaining/losing focus between ticks.
+    const interval = window.setInterval(update, 2_000)
+    window.addEventListener("focus", update)
+    window.addEventListener("blur", update)
+    update()
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener("focus", update)
+      window.removeEventListener("blur", update)
+    }
+  }, [])
+  const showStaleIndicator = onFocusTab && !unavailable
+    && Date.now() - lastSuccessfulPollAt.current > SNAPSHOT_STALE_AFTER_MS
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return
@@ -68,6 +140,8 @@ export function BroadcastOverlay({
       if (!response.ok) return
       const next = await response.json() as BroadcastOverlaySnapshot
       if (next.matchId !== matchId) return
+      // Batch 101: any applied snapshot is fresh evidence of a live read.
+      lastSuccessfulPollAt.current = Date.now()
       setSnapshot(next)
       setUnavailable(false)
     } catch {
@@ -112,10 +186,30 @@ export function BroadcastOverlay({
     }
   }, [matchId, tenantId, refresh])
 
+  // ── Batch 101: latency buffer ──────────────────────────────────────
+  // Planned celebrations wait here for `revealAt` instead of jumping into the
+  // on-screen queue, so an operator can align burned graphics with the
+  // programme A/V. Held events stay subject to the SAME undo pruning as the
+  // queue: a retracted event can never surface merely because it was held.
+  // The state machine below delegates to lib/broadcast-latency-buffer, whose
+  // sequencing is pinned by __tests__/broadcast-latency-buffer.test.ts.
+  const pendingRef = useRef<HeldCelebration[]>([])
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      const { due, held } = dueHeldCelebrations(pendingRef.current, now)
+      if (due.length === 0) return
+      pendingRef.current = held
+      setQueue(current => [...current, ...due].slice(-4))
+    }, 50)
+    return () => window.clearInterval(timer)
+  }, [])
+
   useEffect(() => {
     if (!snapshot) {
       previousSnapshot.current = null
       seenEventIds.current.clear()
+      pendingRef.current = []
       setQueue([])
       setActiveEvent(null)
       return
@@ -124,6 +218,7 @@ export function BroadcastOverlay({
     const previous = previousSnapshot.current
     previousSnapshot.current = snapshot
     if (animations === "off") {
+      pendingRef.current = []
       setQueue([])
       setActiveEvent(null)
       return
@@ -137,20 +232,28 @@ export function BroadcastOverlay({
       events = []
     }
 
+    // Prune queued, on-screen-queued and STILL-HELD events against the new
+    // official snapshot (undo / revision regression), dropping their dedup
+    // ids exactly like the pre-offset flow did.
     setQueue(current => {
-      const nextQueue = pruneBroadcastCelebrations(current, snapshot)
-      const kept = new Set(nextQueue.map(event => event.id))
-      for (const event of current) {
-        if (!kept.has(event.id)) seenEventIds.current.delete(event.id)
-      }
-      for (const event of events) {
-        if (seenEventIds.current.has(event.id)) continue
-        seenEventIds.current.add(event.id)
-        nextQueue.push(event)
-      }
-      return nextQueue.slice(-4)
+      const { kept, forgottenIds } = pruneQueuedCelebrations(current, snapshot)
+      for (const id of forgottenIds) seenEventIds.current.delete(id)
+      return kept
     })
-  }, [snapshot, animations])
+    // Fold this poll's newly planned events into the hold buffer: prunes
+    // survivors, dedups, and anchors `revealAt` at plan time. The offset is a
+    // rendering delay for animations only, re-checked against the wall clock.
+    const ingest = ingestHeldCelebrations({
+      planned: events,
+      held: pendingRef.current,
+      seenIds: seenEventIds.current,
+      snapshot,
+      now: Date.now(),
+      offsetMs: eventOffsetMs,
+    })
+    pendingRef.current = ingest.held
+    seenEventIds.current = ingest.seenIds
+  }, [snapshot, animations, eventOffsetMs])
 
   useEffect(() => {
     if (!snapshot || !activeEvent) return
@@ -220,6 +323,58 @@ export function BroadcastOverlay({
 
   return (
     <div className="absolute inset-0 flex flex-col justify-between p-14">
+      {/* Batch 101 (ENH-09-04): operator-only diagnostics. The stale indicator
+          renders ONLY while this page has window focus - an operator
+          rehearsing in a browser tab sees a dropped feed within
+          SNAPSHOT_STALE_AFTER_MS, while the unfocused OBS browser source on
+          air stays clean for viewers. Scoreboard numbers themselves are never
+          hidden or replaced by this badge. */}
+      {showStaleIndicator && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute right-6 top-6 z-50 rounded-lg bg-red-900/95 px-5 py-2.5 text-xl font-bold tracking-wide text-white shadow-lg"
+        >
+          STALE DATA — CHECK CONNECTION
+        </div>
+      )}
+
+      {/* Batch 101 (ENH-09-04): operator A/V calibration. Holds ANIMATED
+          EVENTS back by the offset so burned graphics match the programme
+          timeline; the offset never delays reading an official snapshot or
+          official persistence. The panel stays at 15% opacity (nearly
+          invisible in OBS) and reveals on hover/focus for the operator. */}
+      <div className="absolute bottom-8 left-8 z-50 flex items-center gap-3 rounded-xl bg-black/85 px-4 py-2.5 text-base text-white opacity-15 shadow-lg transition-opacity hover:opacity-100 focus-within:opacity-100">
+        <span className="font-semibold tracking-wide text-white/80">A/V OFFSET</span>
+        <button
+          type="button"
+          onClick={() => updateOffset(eventOffsetMs - GRAPHICS_OFFSET_MS_STEP)}
+          disabled={eventOffsetMs <= GRAPHICS_OFFSET_MS_MIN}
+          className="min-h-[44px] min-w-[44px] rounded-md bg-white/10 text-2xl font-bold hover:bg-white/20 disabled:opacity-30"
+        >
+          −
+        </button>
+        <span aria-live="polite" className="min-w-[18ch] text-center text-lg font-bold tabular-nums">
+          {(eventOffsetMs / 1000).toFixed(2)} s
+        </span>
+        <button
+          type="button"
+          onClick={() => updateOffset(eventOffsetMs + GRAPHICS_OFFSET_MS_STEP)}
+          disabled={eventOffsetMs >= GRAPHICS_OFFSET_MS_MAX}
+          className="min-h-[44px] min-w-[44px] rounded-md bg-white/10 text-2xl font-bold hover:bg-white/20 disabled:opacity-30"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => updateOffset(0)}
+          disabled={eventOffsetMs === 0}
+          className="min-h-[44px] rounded-md bg-white/10 px-3 text-sm font-bold hover:bg-white/20 disabled:opacity-30"
+        >
+          Reset
+        </button>
+        <span className="text-xs text-white/50">?offsetMs=</span>
+      </div>
       <style>{`
         @keyframes overlay-pop {
           0% { transform: scale(.6); opacity: 0; }
