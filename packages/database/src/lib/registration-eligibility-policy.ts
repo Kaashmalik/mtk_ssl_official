@@ -62,6 +62,15 @@ export function canRejectRegistration(status: string): boolean {
   return status === "pending" || status === "waitlisted"
 }
 
+/**
+ * ENH-05-03: a registered squad may be corrected while the entry still awaits
+ * review — exactly the transition set as approval/rejection. An owner's or
+ * manager's later edit can never rewrite history the review already saw.
+ */
+export function canEditRegistrationSquad(status: string): boolean {
+  return status === "pending" || status === "waitlisted"
+}
+
 /** Payment state transitions: only forward, never silently refunding. */
 export function canSetPaymentStatus(current: string, next: string): boolean {
   const allowed: Record<string, readonly string[]> = {

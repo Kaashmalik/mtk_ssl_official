@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { wicketFielderRequirement } from "@mtk/contracts";
 import { Button } from "@mtk/ui";
 import { BallInput, WicketType, useScoringStore } from "@/stores/scoring-store";
 import { WicketSelector } from "./wicket-selector";
@@ -27,11 +28,15 @@ interface BallInputProps {
    *  service-confirmed acknowledgement. When provided, a run-out asks the
    *  scorer WHICH batter is out instead of silently assuming the striker. */
   creaseBatters?: Array<{ id: string; name: string; onStrike: boolean }>;
+  /** Batch 103: the fielding-side squad. When provided, caught asks for the
+   *  catcher (the bowler included - caught and bowled) and run_out/stumped
+   *  offer the dismissing fielder. */
+  fielders?: Array<{ id: string; name: string }>;
   onBallAdded?: () => void | Promise<void>;
   disabled?: boolean;
 }
 
-export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, onBallAdded, disabled = false }: BallInputProps) {
+export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, fielders, onBallAdded, disabled = false }: BallInputProps) {
   const submitting = useRef(false);
   const [saving, setSaving] = useState(false);
   const [showWicketSelector, setShowWicketSelector] = useState(false);
@@ -52,7 +57,7 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, onBallA
     }
   };
 
-  const submitBall = async (input: BallInput, wicketType?: WicketType, runs?: number, wicketPlayerOutId?: string) => {
+  const submitBall = async (input: BallInput, wicketType?: WicketType, runs?: number, wicketPlayerOutId?: string, wicketFielderId?: string) => {
     if (!currentInnings || disabled || submitting.current) return;
     submitting.current = true;
     setSaving(true);
@@ -71,6 +76,12 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, onBallA
         // types whose victim is not rule-fixed (the service/fold default the
         // striker for bowled/caught/lbw/stumped/hit_wicket).
         wicketPlayerOutId: wicketType === "run_out" ? wicketPlayerOutId : undefined,
+        // Batch 103: the dismissing fielder - collected only for dismissal
+        // types that ask for one; the canonical service re-validates the id
+        // against the fielding XI regardless of what this surface sent.
+        wicketFielderId: wicketType && wicketFielderRequirement(wicketType) !== "none"
+          ? wicketFielderId
+          : undefined,
         isWide: input === "WD",
         isNoBall: input === "NB",
         isBye: input === "B",
@@ -90,9 +101,9 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, onBallA
     }
   };
 
-  const handleWicketSelect = async (wicketType: WicketType, wicketPlayerOutId?: string) => {
+  const handleWicketSelect = async (wicketType: WicketType, wicketPlayerOutId?: string, wicketFielderId?: string) => {
     if (pendingWicket) {
-      await submitBall(pendingWicket, wicketType, undefined, wicketPlayerOutId);
+      await submitBall(pendingWicket, wicketType, undefined, wicketPlayerOutId, wicketFielderId);
     }
   };
 
@@ -117,6 +128,7 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, onBallA
         <WicketSelector
           onSelect={handleWicketSelect}
           creaseBatters={creaseBatters}
+          fielders={fielders}
           onCancel={() => {
             setShowWicketSelector(false);
             setPendingWicket(null);

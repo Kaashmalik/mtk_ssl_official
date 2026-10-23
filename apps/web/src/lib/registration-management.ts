@@ -2,7 +2,7 @@ import { randomUUID } from "crypto"
 import { teamManagementGrant } from "@mtk/database/lib/resource-grants"
 import {
   db, users, tenants, userTenantRoles, teams, tournaments, players,
-  leagueRegistrations, payments, auditLogs, membershipGrantsAccess,
+  leagueRegistrations, payments, auditLogs, membershipGrantsAccess, canEditRegistrationSquad,
   type LeagueRegistration, type Team, type Tournament,
 } from "@mtk/database"
 import { and, eq, inArray, count, sql } from "drizzle-orm"
@@ -10,7 +10,7 @@ import { z } from "zod"
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Operation = "REGISTRATION_CREATE" | "REGISTRATION_APPROVE" | "REGISTRATION_REJECT"
-  | "REGISTRATION_PAYMENT" | "REGISTRATION_WITHDRAW"
+  | "REGISTRATION_PAYMENT" | "REGISTRATION_WITHDRAW" | "REGISTRATION_SQUAD"
 
 // Review writers lock account -> league -> membership -> tournament -> team ->
 // registration. READ COMMITTED reads after waits must recheck current authority
@@ -28,6 +28,7 @@ async function actorContext(tx: Tx, clerkId: string, tenantId: string, operation
   const member = await tx.query.userTenantRoles.findFirst({ where: and(
     eq(userTenantRoles.userId, initial.id), eq(userTenantRoles.tenantId, tenantId)) })
   const mayDelegate = operation === "REGISTRATION_CREATE" || operation === "REGISTRATION_WITHDRAW"
+    || operation === "REGISTRATION_SQUAD"
   if (!actor || actor.id !== initial.id || actor.clerkId !== clerkId || actor.isActive !== true
     || !league || league.id !== tenantId || league.isActive !== true
     || !member || member.userId !== actor.id || member.tenantId !== tenantId || !membershipGrantsAccess(member)
@@ -98,6 +99,12 @@ export const registerTeamSchema = z.object({
 export const confirmPaymentSchema = z.object({
   method: z.enum(["jazzcash", "easypaisa", "bank_transfer"]),
   transactionReference: z.string().trim().min(3).max(100),
+}).strict()
+
+/** ENH-05-03: the same squad shape the create command accepts — order is the declared batting intent, dupes are refused. */
+export const updateSquadSchema = z.object({
+  squadPlayerIds: z.array(z.string().uuid()).min(1, "Select at least 1 player").max(30)
+    .refine((ids) => new Set(ids).size === ids.length, "A player can only be selected once"),
 }).strict()
 
 export async function createLeagueRegistration(clerkId: string, tenantId: string, input: z.input<typeof registerTeamSchema>) {
@@ -256,5 +263,58 @@ export async function confirmLeagueRegistrationPayment(clerkId: string, tenantId
     await audit(tx, context, tenantId, "REGISTRATION_PAYMENT", id, { paymentStatus: "unpaid" },
       { paymentStatus: "paid" }, ["paymentStatus"])
     return { paymentId: payment.id }
+  }, { isolationLevel: "read committed" })
+}
+
+/**
+ * ENH-05-03 (Batch 105): the squad outlives creation. The registered team's
+ * manager/captain (or the owner) corrects the squad while the entry still
+ * AWAITS review (`canEditRegistrationSquad` — the exact transition set as
+ * approval/rejection), so an eleven can never be silently rewritten behind a
+ * review that already happened. Every submitted id is re-validated against the
+ * team's ACTIVE roster and the team's squad cap, mirroring creation. Lock
+ * order matches the module contract: account -> league -> membership ->
+ * tournament (share) -> team (share) -> registration (update). An identical
+ * replay is an honest pure read with no audit. The audit records the SIZES of
+ * the transition, never a replicated squad list.
+ */
+export async function updateRegistrationSquad(clerkId: string, tenantId: string, id: string,
+  input: z.input<typeof updateSquadSchema>) {
+  z.string().uuid().parse(id)
+  const parsed = updateSquadSchema.parse(input)
+  return db.transaction(async (tx) => {
+    const context = await actorContext(tx, clerkId, tenantId, "REGISTRATION_SQUAD")
+    const initial = await findRegistration(tx, tenantId, id)
+    await lockTournament(tx, tenantId, initial.tournamentId, "share")
+    const team = await lockTeam(tx, tenantId, initial.teamId, "share")
+    if (team.isActive !== true) throw new Error("Team is unavailable in this league")
+    delegateAuthority(context, team)
+    const registration = await lockRegistration(tx, tenantId, id)
+    if (!canEditRegistrationSquad(registration.status)) {
+      throw new Error("This registration has already been reviewed and its squad can no longer be edited")
+    }
+    const squad = await tx.select({ id: players.id }).from(players)
+      .where(and(eq(players.tenantId, tenantId), eq(players.teamId, team.id), eq(players.isActive, true),
+        inArray(players.id, parsed.squadPlayerIds)))
+    if (squad.length !== parsed.squadPlayerIds.length) {
+      throw new Error("Every selected squad member must be an active player on this team")
+    }
+    if (team.maxSquadSize && parsed.squadPlayerIds.length > team.maxSquadSize) {
+      throw new Error(`This team may register no more than ${team.maxSquadSize} players`)
+    }
+    const previous = registration.squadPlayerIds ?? []
+    const same = previous.length === parsed.squadPlayerIds.length &&
+      previous.every((playerId, index) => playerId === parsed.squadPlayerIds[index])
+    if (same) return { ...registration, changed: false as const }
+    const now = new Date()
+    const [updated] = await tx.update(leagueRegistrations)
+      .set({ squadPlayerIds: parsed.squadPlayerIds, updatedAt: now })
+      .where(and(eq(leagueRegistrations.id, id), eq(leagueRegistrations.tenantId, tenantId),
+        eq(leagueRegistrations.status, registration.status))).returning()
+    if (!updated) throw new Error("Registration changed. Reload before saving.")
+    await audit(tx, context, tenantId, "REGISTRATION_SQUAD", id,
+      { ...registrationSnapshot(registration), squadSize: previous.length },
+      { ...registrationSnapshot(updated), squadSize: parsed.squadPlayerIds.length }, ["squadPlayerIds"])
+    return { ...updated, changed: true as const }
   }, { isolationLevel: "read committed" })
 }

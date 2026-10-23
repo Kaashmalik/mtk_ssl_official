@@ -12,6 +12,7 @@ import {
 import {
   createLeagueRegistration, approveLeagueRegistration, rejectLeagueRegistration, withdrawLeagueRegistration,
   confirmLeagueRegistrationPayment, registerTeamSchema, confirmPaymentSchema,
+  updateRegistrationSquad as updateRegistrationSquadCommand, updateSquadSchema,
 } from "@/lib/registration-management"
 
 async function mutationTenant(permission: Permission) {
@@ -89,6 +90,32 @@ export const confirmRegistrationPayment = withAuth("registration:manage", async 
   const result = await confirmLeagueRegistrationPayment(userId, tenantId, registrationId, input)
   revalidatePath("/dashboard/registrations")
   return { success: true, ...result }
+})
+
+export type UpdateRegistrationSquadInput = z.input<typeof updateSquadSchema>
+
+/**
+ * ENH-05-03: the registered team's manager/captain (or the owner) corrects the
+ * squad while the entry still awaits review. The service revalidates team
+ * pointer authority, the active roster and the review transition itself — the
+ * action only scopes the tenant and permission.
+ */
+export const updateRegistrationSquad = withAuth("registration:create", async (
+  registrationId: string,
+  input: UpdateRegistrationSquadInput,
+) => {
+  const { userId } = await auth()
+  if (!userId) throw new Error("Unauthorized")
+  z.string().uuid().parse(registrationId)
+  const tenantId = await mutationTenant("registration:create")
+  const updated = await updateRegistrationSquadCommand(userId, tenantId, registrationId, input)
+  // An identical replay is an honest pure read: no caches are invalidated as
+  // if a change had landed.
+  if (updated.changed) {
+    revalidatePath(`/dashboard/tournaments/${updated.tournamentId}`)
+    revalidatePath("/dashboard/registrations")
+  }
+  return { success: true, changed: updated.changed, registration: { id: updated.id, status: updated.status } }
 })
 
 export const getRegistrations = withAuth("registration:manage", async (tournamentId?: string) => {

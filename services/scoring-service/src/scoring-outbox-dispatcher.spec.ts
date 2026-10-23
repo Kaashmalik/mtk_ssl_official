@@ -15,7 +15,10 @@ const EVENT = '00000000-0000-4000-8000-000000000003';
 function pending() {
   return { id: '42', tenantId: TENANT, matchId: MATCH, eventId: EVENT, topic: BALL_TOPIC,
     payload: { eventId: EVENT, tenantId: TENANT, matchId: MATCH, timestamp: '2026-10-16T12:00:00Z', data: { tenantId: TENANT, matchId: MATCH, inningsId: EVENT },
-      type: 'FOUR_HIT', inning: 1, over: 0, ball: 1, sequenceNumber: 1, runs: 4, batsmanId: TENANT, bowlerId: MATCH } };
+      type: 'FOUR_HIT', inning: 1, over: 0, ball: 1, sequenceNumber: 1, runs: 4,
+      // ENH-09-02: canonical revision + stable match_balls identity on every ball envelope.
+      scoringRevision: 1, ballId: MATCH,
+      batsmanId: TENANT, bowlerId: MATCH } };
 }
 
 describe('Durable scoring outbox worker (transaction/transport doubles, not real PostgreSQL)', () => {
@@ -132,6 +135,19 @@ expect(query.sql).toContain('candidate.attempts < 8');
     expect(await worker.drain()).toBe(0);
   });
   it.each([null, {}, { ...pending().payload, sequenceNumber: 0 }, { ...pending().payload, type: 'OTHER' }])('rejects malformed delivery payload %s', payload => {
+    expect(() => validateOutboxMessage(BALL_TOPIC, payload, TENANT, MATCH, EVENT)).toThrow();
+  });
+  it('dispatches a BALL_UNDONE correction envelope to the ball topic', async () => {
+    // ENH-09-02: an undo may omit batsman/bowler attribution (legacy balls can
+    // be null), but it must carry the stable ballId and post-undo revision.
+    const { batsmanId: _b, bowlerId: _w, ...undone } = pending().payload;
+    tx.execute.mockResolvedValueOnce([{ ...pending(), payload: { ...undone, type: 'BALL_UNDONE', runs: 0 } }]);
+    expect(await worker.dispatchOne()).toBe(true);
+    expect(publisher.publishBallEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'BALL_UNDONE', ballId: MATCH, scoringRevision: 1 }));
+  });
+  it.each(['scoringRevision', 'ballId'])('rejects a ball envelope missing %s', key => {
+    const payload = { ...pending().payload } as Record<string, unknown>;
+    delete payload[key];
     expect(() => validateOutboxMessage(BALL_TOPIC, payload, TENANT, MATCH, EVENT)).toThrow();
   });
 });
