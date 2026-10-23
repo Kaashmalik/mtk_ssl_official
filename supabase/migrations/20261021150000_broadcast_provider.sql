@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS public.broadcast_jobs (
   session_id uuid NOT NULL,
   action text NOT NULL CHECK (action IN ('prepare','start','end','reconcile','archive')),
   state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','running','succeeded','failed','dead')),
-  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  attempts integer NOT NULL DEFAULT 0,
   max_attempts integer NOT NULL DEFAULT 8 CHECK (max_attempts > 0),
   idempotency_key text NOT NULL,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS public.broadcast_jobs (
   payload jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(payload) = 'object'),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT broadcast_jobs_attempts_check CHECK (attempts <= max_attempts),
+  CONSTRAINT broadcast_jobs_attempts_check
+    CHECK (attempts >= 0 AND attempts <= max_attempts),
   CONSTRAINT broadcast_jobs_session_tenant_fk
     FOREIGN KEY (session_id, tenant_id)
     REFERENCES public.broadcast_sessions (id, tenant_id) ON DELETE CASCADE

@@ -81,7 +81,8 @@ describe("ENH-08-02: durable jobs and archive references", () => {
     expect(unique?.config.unique).toBe(true)
     expect(columnNames(unique?.config.columns)).toEqual(["tenant_id", "idempotency_key"])
     expect(config.checks.map(check => check.name)).toContain("broadcast_jobs_attempts_check")
-    expect(migration).toContain("CONSTRAINT broadcast_jobs_attempts_check CHECK (attempts <= max_attempts)")
+    expect(migration).toContain("CONSTRAINT broadcast_jobs_attempts_check")
+    expect(migration).toContain("CHECK (attempts >= 0 AND attempts <= max_attempts)")
   })
 
   it("keeps archive state tied to a session and never implies provider readiness", () => {
