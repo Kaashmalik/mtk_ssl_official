@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { RegistrationList, type Registration } from "@/components/registrations/registration-list"
 
 const mocks = vi.hoisted(() => ({
-  approve: vi.fn(), reject: vi.fn(), updateSquad: vi.fn(), options: vi.fn(),
+  approve: vi.fn(), reject: vi.fn(), updateSquad: vi.fn(), options: vi.fn(), withdraw: vi.fn(),
   success: vi.fn(), error: vi.fn(),
   buttons: [] as Array<{ label: string; click: () => void; disabled?: boolean; role?: string; checked?: boolean }>,
   // useState over persistent slots: re-rendering re-executes the component so
@@ -25,6 +25,7 @@ vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error }
 vi.mock("@/app/actions/registrations", () => ({
   approveRegistration: mocks.approve, rejectRegistration: mocks.reject,
   updateRegistrationSquad: mocks.updateSquad, getRegistrationSquadOptions: mocks.options,
+  withdrawRegistration: mocks.withdraw,
 }))
 vi.mock("@mtk/ui/components/ui/button", () => ({ Button: ({ children, onClick, disabled, role, "aria-checked": checked, "aria-label": label }: {
   children?: ReactNode; onClick?: () => void; disabled?: boolean; role?: string; "aria-checked"?: boolean; "aria-label"?: string
@@ -71,6 +72,7 @@ beforeEach(() => {
   ;(useState as unknown as { index?: number }).index = 0
   mocks.options.mockResolvedValue([{ id: P1, name: "A" }, { id: P2, name: "B" }, { id: P3, name: "C" }])
   mocks.updateSquad.mockResolvedValue({ success: true, changed: true, registration: { id: REG_ID, status: "pending" } })
+  mocks.withdraw.mockResolvedValue({ success: true })
 })
 
 /** Renders a fresh pass; with the slot-backed useState this simulates the re-render after state changes. */
@@ -140,6 +142,19 @@ describe("RegistrationList console squad editing (ENH-05-03 slice 4)", () => {
     await button(/save squad/i)[0].click()
     expect(mocks.error).toHaveBeenCalledWith(expect.stringMatching(/no longer be edited/))
     expect(mocks.success).not.toHaveBeenCalled()
+  })
+
+  it("withdraw is offered from pending and approved, and a withdrawn row loses every action", async () => {
+    render({ initialRegistrations: [row(), row({ id: P1, status: "approved" }), row({ id: P2, status: "waitlisted" })] })
+    expect(button(/withdraw/i)).toHaveLength(2)
+    render({ initialRegistrations: [row()] })
+    button(/withdraw/i)[0].click()
+    render()
+    await button(/confirm withdrawal/i)[0].click()
+    expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(REG_ID)
+    expect(mocks.success).toHaveBeenCalled()
+    render({ initialRegistrations: [row({ status: "withdrawn" })] })
+    expect(button(/approve|reject|edit squad|withdraw/i)).toHaveLength(0)
   })
 
   it("refuses an empty squad submit and surfaces a failed options load by closing the editor", async () => {

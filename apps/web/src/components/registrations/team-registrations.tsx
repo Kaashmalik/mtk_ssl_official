@@ -6,8 +6,9 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@mtk/ui/components/ui/dialog"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
-import { updateRegistrationSquad } from "@/app/actions/registrations"
-import { canEditRegistrationSquad } from "@mtk/database/lib/registration-eligibility-policy"
+import { updateRegistrationSquad, withdrawRegistration } from "@/app/actions/registrations"
+import { canEditRegistrationSquad, canWithdrawRegistrationEntry, describeEligibility, evaluateSquadEligibility } from "@mtk/database/lib/registration-eligibility-policy"
+import { WithdrawDialog } from "@/components/registrations/withdraw-dialog"
 
 /**
  * ENH-05-03 slice 2: the registered team's own tournament entries on the team
@@ -38,6 +39,10 @@ export function TeamRegistrations({ registrations, roster, canManage }: TeamRegi
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  // ENH-05-03 slice 5: withdrawing this team's OWN entry, with the shared
+  // truthful confirmation. The service re-checks the transition server-side.
+  const [withdrawTarget, setWithdrawTarget] = useState<TeamRegistrationEntry | null>(null)
+  const [withdrawing, setWithdrawing] = useState(false)
 
   const openEditor = (entry: TeamRegistrationEntry) => {
     setSelected(entry.squadPlayerIds.filter(id => roster.some(player => player.id === id)))
@@ -68,6 +73,33 @@ export function TeamRegistrations({ registrations, roster, canManage }: TeamRegi
     }
   }
 
+  const confirmWithdraw = async () => {
+    const id = withdrawTarget?.id
+    if (!id) return
+    setWithdrawing(true)
+    try {
+      const res = await withdrawRegistration(id)
+      if (res.success) {
+        setEntries(prev => prev.map(entry => entry.id === id ? {
+          ...entry,
+          status: "withdrawn",
+          eligibility: describeEligibility(evaluateSquadEligibility({
+            approvalStatus: "withdrawn", paymentStatus: entry.paymentStatus,
+            squadSize: entry.squadPlayerIds.length, minSquadSize: -1,
+          })),
+        } : entry))
+        toast.success("Registration withdrawn. You can register again while the window is open.")
+        setWithdrawTarget(null)
+      } else {
+        toast.error("Failed to withdraw the registration")
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to withdraw the registration")
+    } finally {
+      setWithdrawing(false)
+    }
+  }
+
   const editing = entries.find(entry => entry.id === editingId) ?? null
 
   return (
@@ -86,6 +118,11 @@ export function TeamRegistrations({ registrations, roster, canManage }: TeamRegi
               {canManage && canEditRegistrationSquad(entry.status) ? (
                 <Button variant="outline" size="sm" onClick={() => openEditor(entry)} disabled={saving}>
                   Edit squad
+                </Button>
+              ) : null}
+              {canManage && canWithdrawRegistrationEntry(entry.status) ? (
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setWithdrawTarget(entry)} disabled={withdrawing}>
+                  Withdraw
                 </Button>
               ) : null}            </div>
           </div>
@@ -145,6 +182,16 @@ export function TeamRegistrations({ registrations, roster, canManage }: TeamRegi
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {withdrawTarget && (
+        <WithdrawDialog
+          teamName="This team"
+          tournamentName={withdrawTarget.tournamentName}
+          saving={withdrawing}
+          onConfirm={confirmWithdraw}
+          onClose={() => setWithdrawTarget(null)}
+        />
+      )}
     </div>
   )
 }

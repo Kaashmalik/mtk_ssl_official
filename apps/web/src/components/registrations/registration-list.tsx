@@ -8,8 +8,9 @@ import { Textarea } from "@mtk/ui/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@mtk/ui/components/ui/dialog"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
-import { approveRegistration, rejectRegistration, updateRegistrationSquad, getRegistrationSquadOptions } from "@/app/actions/registrations"
-import { canEditRegistrationSquad, describeEligibility, evaluateSquadEligibility } from "@mtk/database/lib/registration-eligibility-policy"
+import { approveRegistration, rejectRegistration, updateRegistrationSquad, getRegistrationSquadOptions, withdrawRegistration } from "@/app/actions/registrations"
+import { canEditRegistrationSquad, canWithdrawRegistrationEntry, describeEligibility, evaluateSquadEligibility } from "@mtk/database/lib/registration-eligibility-policy"
+import { WithdrawDialog } from "@/components/registrations/withdraw-dialog"
 
 export interface Registration {
   id: string
@@ -42,6 +43,36 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
   const [selected, setSelected] = useState<string[]>([])
   const [options, setOptions] = useState<{ id: string; name: string }[] | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const [withdrawTarget, setWithdrawTarget] = useState<Registration | null>(null)
+  const [withdrawing, setWithdrawing] = useState(false)
+
+  const confirmWithdraw = async () => {
+    const reg = withdrawTarget
+    if (!reg) return
+    setWithdrawing(true)
+    try {
+      const res = await withdrawRegistration(reg.id)
+      if (res.success) {
+        setRegistrations(prev => prev.map(row => row.id === reg.id ? {
+          ...row,
+          status: "withdrawn" as const,
+          eligibility: describeEligibility(evaluateSquadEligibility({
+            approvalStatus: "withdrawn", paymentStatus: row.paymentStatus,
+            squadSize: row.squadPlayerIds.length, minSquadSize: -1,
+          })),
+        } : row))
+        toast.success("Registration withdrawn. The team can register again while the window is open.")
+        setWithdrawTarget(null)
+      } else {
+        toast.error("Failed to withdraw the registration")
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to withdraw the registration")
+    } finally {
+      setWithdrawing(false)
+    }
+  }
 
   const openSquadEditor = async (reg: Registration) => {
     setEditingReg(reg)
@@ -187,6 +218,17 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
                             Edit squad
                           </Button>
                         )}
+                        {canWithdrawRegistrationEntry(reg.status) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            disabled={withdrawing}
+                            onClick={() => setWithdrawTarget(reg)}
+                          >
+                            Withdraw
+                          </Button>
+                        )}
                         {isPending && (
                           <>
                             <Button
@@ -310,6 +352,16 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {withdrawTarget && (
+        <WithdrawDialog
+          teamName={withdrawTarget.teamName}
+          tournamentName={withdrawTarget.tournamentName}
+          saving={withdrawing}
+          onConfirm={confirmWithdraw}
+          onClose={() => setWithdrawTarget(null)}
+        />
+      )}
     </div>
   )
 }

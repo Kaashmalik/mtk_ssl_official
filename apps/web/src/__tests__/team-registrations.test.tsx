@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { TeamRegistrations, type TeamRegistrationEntry } from "@/components/registrations/team-registrations"
 
 const mocks = vi.hoisted(() => ({
-  updateSquad: vi.fn(), success: vi.fn(), error: vi.fn(),
+  updateSquad: vi.fn(), withdraw: vi.fn(), success: vi.fn(), error: vi.fn(),
   buttons: [] as Array<{ label: string; click: () => void; disabled?: boolean; role?: string; checked?: boolean }>,
   // useState over persistent slots: re-rendering re-executes the component so
   // freshly captured handlers close over the CURRENT state, exactly as a real
@@ -21,7 +21,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   return [value, set]
 } }))
 vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error } }))
-vi.mock("@/app/actions/registrations", () => ({ updateRegistrationSquad: mocks.updateSquad }))
+vi.mock("@/app/actions/registrations", () => ({ updateRegistrationSquad: mocks.updateSquad, withdrawRegistration: mocks.withdraw }))
 vi.mock("@mtk/ui/components/ui/button", () => ({ Button: ({ children, onClick, disabled, role, "aria-checked": checked, "aria-label": label }: {
   children?: ReactNode; onClick?: () => void; disabled?: boolean; role?: string; "aria-checked"?: boolean; "aria-label"?: string
 }) => {
@@ -55,6 +55,7 @@ beforeEach(() => {
   mocks.buttons.length = 0
   mocks.slots.length = 0
   mocks.updateSquad.mockResolvedValue({ success: true, changed: true, registration: { id: REG, status: "pending" } })
+  mocks.withdraw.mockResolvedValue({ success: true })
   vi.stubGlobal("React", React)
 })
 afterEach(() => {
@@ -145,5 +146,19 @@ describe("TeamRegistrations (ENH-05-03 slice 2)", () => {
     expect(save.disabled).toBe(true)
     save.click()
     expect(mocks.updateSquad).not.toHaveBeenCalled()
+  })
+
+  it("offers a withdrawal of its own entry only from pending or approved, and the row tells the truth afterwards", async () => {
+    mocks.withdraw.mockResolvedValue({ success: true })
+    render({ registrations: [entry(), entry({ id: P2, status: "approved" }), entry({ id: P3, status: "rejected" })] })
+    expect(button(/withdraw/i)).toHaveLength(2) // rejected entries never offer it
+    button(/withdraw/i)[0].click()
+    render()
+    await button(/confirm withdrawal/i)[0].click()
+    expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(REG)
+    expect(mocks.success).toHaveBeenCalled()
+    // A withdrawn entry is terminal for squad edits on the fresh render.
+    render({ registrations: [entry({ status: "withdrawn" })] })
+    expect(button(/edit squad/i)).toHaveLength(0)
   })
 })
