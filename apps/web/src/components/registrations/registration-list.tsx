@@ -15,6 +15,7 @@ interface Registration {
   teamName: string
   tournamentName: string
   squadCount: number
+  eligibility: string
   registrationFee: string
   notes: string | null
   status: "pending" | "approved" | "rejected" | "withdrawn" | "waitlisted"
@@ -102,7 +103,10 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-sm font-medium">{reg.tournamentName}</TableCell>
+                  <TableCell className="text-sm font-medium">
+                    {reg.tournamentName}
+                    <span className="block text-xs text-muted-foreground" role="status">{reg.eligibility}</span>
+                  </TableCell>
                   <TableCell className="text-sm tabular-nums">{reg.squadCount} players</TableCell>
                   <TableCell className="text-sm tabular-nums">PKR {Number(reg.registrationFee).toLocaleString()}</TableCell>
                   <TableCell>
