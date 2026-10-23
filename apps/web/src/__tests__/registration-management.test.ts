@@ -5,7 +5,7 @@ import {
   registerTeam, approveRegistration, rejectRegistration, withdrawRegistration,
   confirmRegistrationPayment, getRegistrations, getMyRegistrations, updateRegistrationSquad,
 } from "@/app/actions/registrations"
-import { readTeamRegistrations, readRegistrationSquadOptions } from "@/lib/registration-reads"
+import { readTeamRegistrations, readRegistrationSquadOptions, readRegistrationDetail } from "@/lib/registration-reads"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), permission: vi.fn(), tenant: vi.fn(), fallback: vi.fn(), transaction: vi.fn(), execute: vi.fn(),
@@ -499,5 +499,30 @@ describe("Registration squad options read (ENH-05-03 slice 4)", () => {
     mocks.state.squad = []
     mocks.select.mockImplementation(() => { throw new Error("DB down") })
     await expect(readRegistrationSquadOptions(TENANT, TEAM)).rejects.toThrow("DB down")
+  })
+})
+
+describe("Registration detail read (ENH-05-03 slice 6)", () => {
+  beforeEach(() => {
+    mocks.state.registrationRows = [{ ...registration, teamName: "Tigers", tournamentName: "Cup" }]
+    mocks.state.squad = [{ id: PLAYER, name: "P" }]
+  })
+  it("projects the bounded review columns plus squad names, with a bounded explicit-id roster join", async () => {
+    const detail = await readRegistrationDetail(TENANT, REG)
+    expect(detail).toMatchObject({ id: REG, teamName: "Tigers", tournamentName: "Cup", teamId: TEAM })
+    expect(detail!.squad).toEqual([{ id: PLAYER, name: "P" }])
+    for (const key of ["paymentTransactionId", "registeredBy", "approvedBy"]) {
+      expect(detail).not.toHaveProperty(key)
+    }
+  })
+  it("returns null for a foreign id instead of a fabricated row", async () => {
+    mocks.state.registrationRows = []
+    expect(await readRegistrationDetail(TENANT, REG)).toBeNull()
+  })
+  it("refuses a malformed id before SQL and propagates read failures", async () => {
+    await expect(readRegistrationDetail(TENANT, "bad")).rejects.toThrow()
+    expect(mocks.queries.filter(query => query.sql)).toHaveLength(0)
+    mocks.select.mockImplementation(() => { throw new Error("DB down") })
+    await expect(readRegistrationDetail(TENANT, REG)).rejects.toThrow("DB down")
   })
 })

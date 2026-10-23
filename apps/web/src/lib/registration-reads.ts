@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server"
 import { db, users, userTenantRoles, tenants, leagueRegistrations, teams, tournaments, players, membershipGrantsAccess } from "@mtk/database"
 import { teamManagementGrant } from "@mtk/database/lib/resource-grants"
-import { and, eq, asc, desc, count } from "drizzle-orm"
+import { and, eq, asc, desc, count, inArray } from "drizzle-orm"
 import { z } from "zod"
 import { resolveActiveTenantId, requirePermissionServer } from "./rbac-server"
 import { hasPermission, type Permission, type UserRole } from "./rbac"
@@ -165,6 +165,31 @@ export type RegistrationFormOptions = {
   teams: { id: string; name: string }[]
   tournaments: { id: string; name: string; registrationOpen: boolean }[]
   players: { id: string; name: string; teamId: string | null }[]
+}
+
+/**
+ * ENH-05-03 slice 6: one registration's DETAIL for an authority holder — the
+ * review console cast (registration:manage) OR the entry's own team pointer
+ * grant (the manager/captain allowlist every write path already uses). The
+ * projection matches the list reads: payment transaction references and
+ * actor/approver UUIDs are NEVER projected; squad member NAMES are resolved
+ * for the team's own ids only.
+ */
+export async function readRegistrationDetail(tenantId: string, registrationId: string) {
+  z.string().uuid().parse(registrationId)
+  const [reg] = await db.select({ ...registrationReviewColumns, teamName: teams.name, tournamentName: tournaments.name })
+    .from(leagueRegistrations)
+    .innerJoin(teams, and(eq(teams.id, leagueRegistrations.teamId), eq(teams.tenantId, tenantId)))
+    .innerJoin(tournaments, and(eq(tournaments.id, leagueRegistrations.tournamentId), eq(tournaments.tenantId, tenantId)))
+    .where(and(eq(leagueRegistrations.id, registrationId), eq(leagueRegistrations.tenantId, tenantId)))
+    .limit(1)
+  if (!reg) return null
+  const ids = reg.squadPlayerIds ?? []
+  const squad = ids.length ? await db.select({ id: players.id, name: players.name })
+    .from(players)
+    .where(and(eq(players.tenantId, tenantId), inArray(players.id, ids)))
+    .orderBy(asc(players.name), asc(players.id)) : []
+  return { ...reg, squad }
 }
 
 /**
