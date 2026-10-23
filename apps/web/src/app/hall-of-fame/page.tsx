@@ -6,6 +6,14 @@ import { unstable_noStore as noStore } from "next/cache"
 import { Trophy, Calendar } from "lucide-react"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedHallOfFame } from "@/lib/public-visibility"
+import { buildPageMetadata } from "@/lib/site-metadata"
+
+export const metadata = buildPageMetadata({
+  title: "Hall of fame",
+  description:
+    "Persisted champions of completed, published competitions — written once at completion, never re-derived or guessed.",
+  path: "/hall-of-fame",
+})
 
 export const dynamic = "force-dynamic"
 

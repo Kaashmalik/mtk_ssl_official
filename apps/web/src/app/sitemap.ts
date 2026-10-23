@@ -12,7 +12,7 @@ function appUrl(): string {
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = appUrl()
   const now = new Date()
-  return ["/", "/hub", "/leaderboards", "/hall-of-fame", "/matches", "/sign-in"].map(path => ({
+  return ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments", "/sign-in"].map(path => ({
     url: `${base}${path}`,
     lastModified: now,
     changeFrequency: path === "" ? "daily" : "weekly",

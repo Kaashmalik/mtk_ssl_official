@@ -1,9 +1,17 @@
 import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { unstable_noStore as noStore } from "next/cache"
+import { buildPageMetadata } from "@/lib/site-metadata"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublicBattingLeaderboard, readPublicBowlingLeaderboard, readPublicFieldingLeaderboard, readPublicTournamentOptions, readPublicWicketkeepingLeaderboard, type PublicTournamentOption } from "@/lib/public-visibility"
 import { parsePublicLeaderboardSearch, PUBLIC_LEADERBOARD_MAX_MINIMUM, PUBLIC_LEADERBOARD_FORMATS, publicLeaderboardFormatLabel, type PublicLeaderboardSearch } from "@/lib/leaderboard-filters"
+
+export const metadata = buildPageMetadata({
+  title: "Cricket leaderboards",
+  description:
+    "Published batting, bowling, wicketkeeping and fielding leaderboards — only statistics from tournaments that have been explicitly published appear here.",
+  path: "/leaderboards",
+})
 
 export default async function LeaderboardsPage({ searchParams }: { searchParams?: Promise<PublicLeaderboardSearch> }) {
   noStore()

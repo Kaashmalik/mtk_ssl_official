@@ -1,6 +1,13 @@
 import Image from "next/image";
 import { getTenantWithBranding } from "@/lib/tenant";
+import { buildPageMetadata } from "@/lib/site-metadata";
 import { ClerkSignIn } from "./clerk-sign-in";
+
+export const metadata = buildPageMetadata({
+  title: "Sign in",
+  description: "Sign in to the Shakir Super League cricket platform.",
+  path: "/sign-in",
+});
 
 async function getTenantBranding() {
   return getTenantWithBranding();
