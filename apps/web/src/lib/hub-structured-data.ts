@@ -13,7 +13,7 @@ export type ItemListData = {
   "@context": "https://schema.org"
   "@type": "ItemList"
   numberOfItems: number
-  itemListElement: Array<{ "@type": "ListItem"; position: number; item: { "@type": "Organization"; name: string; url: string } }>
+  itemListElement: Array<{ "@type": "ListItem"; position: number; item: { "@type": "Organization"; name: string; url: string; description: string } }>
 }
 
 export function buildHubItemList(read: HubLeaguesRead | null): ItemListData | null {
@@ -27,7 +27,14 @@ export function buildHubItemList(read: HubLeaguesRead | null): ItemListData | nu
     itemListElement: admitted.map((league, index) => ({
       "@type": "ListItem",
       position: index + 1,
-      item: { "@type": "Organization", name: league.name, url: league.url as string },
+      item: {
+        "@type": "Organization",
+        name: league.name,
+        url: league.url as string,
+        // Batch 121: the same truthful counts the rendered hub card shows,
+        // pluralized identically — machine readers see exactly what humans see.
+        description: `${league.publishedCompetitions} published ${league.publishedCompetitions === 1 ? "competition" : "competitions"} · ${league.liveMatches} live ${league.liveMatches === 1 ? "fixture" : "fixtures"}`,
+      },
     })),
   }
 }

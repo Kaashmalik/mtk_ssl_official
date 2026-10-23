@@ -19,6 +19,9 @@ export type MatchOgRenderData = {
   subLine: string
   accentA: string
   accentB: string
+  /** Batch 121: the canvas may draw a LIVE pill only when this is true — the
+   * truth comes from the same gated read, never from the wall clock. */
+  live: boolean
 }
 
 function hexColor(value: string | null | undefined, fallback: string): string {
@@ -43,6 +46,7 @@ export async function resolveMatchOgRenderData(matchId: string): Promise<MatchOg
       subLine: facts.join(" · ") || "Match centre",
       accentA: hexColor(teamA.primaryColor, PLATFORM_ACCENT_A),
       accentB: hexColor(teamB.primaryColor, PLATFORM_ACCENT_B),
+      live: match.status === "live",
     }
   } catch {
     return null
