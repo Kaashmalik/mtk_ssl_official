@@ -99,6 +99,12 @@ describe("TeamRegistrations (ENH-05-03 slice 2)", () => {
     expect(html).toContain("No tournament registrations")
   })
 
+  it("a withdrawn entry points back to the registration form honestly (slice 7)", () => {
+    const html = renderToStaticMarkup(<TeamRegistrations registrations={[entry({ status: "withdrawn", eligibility: "Not eligible yet: registration must be approved." })]} roster={ROSTER} canManage />)
+    expect(html).toMatch(/withdrawn — you can register this team again/i)
+    expect(html).toContain('href="/dashboard/registrations/new"')
+  })
+
   it("offers the squad edit only while the entry awaits review", () => {
     render({ registrations: [entry({ id: REG, status: "pending" }), entry({ id: P2, status: "approved" }), entry({ id: P3, status: "waitlisted" })] })
     expect(button(/edit squad/i)).toHaveLength(2)

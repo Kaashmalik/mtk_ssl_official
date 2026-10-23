@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@mtk/ui/components/ui/dialog"
@@ -110,6 +111,12 @@ export function TeamRegistrations({ registrations, roster, canManage }: TeamRegi
             <div className="space-y-1">
               <p className="text-sm font-semibold">{entry.tournamentName}</p>
               <p className="text-xs text-muted-foreground" role="status">{entry.eligibility}</p>
+              {entry.status === "withdrawn" && (
+                <p className="text-xs text-muted-foreground">
+                  Withdrawn — you can register this team again while registration is open.{" "}
+                  <Link href="/dashboard/registrations/new" className="text-primary underline">Register again</Link>
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <Badge variant="outline" className="text-xs capitalize">{entry.status}</Badge>
