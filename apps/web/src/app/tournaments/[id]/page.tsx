@@ -10,6 +10,14 @@ import { Calendar, Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones } from "@/lib/public-visibility"
+import { resolvePublicTournamentMetadata } from "@/lib/public-tournament-metadata"
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  // Bounded, fail-closed metadata: the same publication predicates as the
+  // render below decide whether this page is indexable at all.
+  return resolvePublicTournamentMetadata(id)
+}
 import { readFanTournamentPolls, readMyPollVoteSafe } from "@/lib/tournament-polls"
 import { readAwardDisputeAffordanceSafe } from "@/lib/award-dispute-records"
 import { AwardDisputeAffordance, AwardDisputePendingNotice } from "@/components/tournaments/award-dispute-affordance"
