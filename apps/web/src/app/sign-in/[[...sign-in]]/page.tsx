@@ -1,20 +1,24 @@
 import Image from "next/image";
 import { getTenantWithBranding } from "@/lib/tenant";
 import { buildPageMetadata } from "@/lib/site-metadata";
+import { resolveBrandName } from "@/lib/white-label-metadata";
 import { ClerkSignIn } from "./clerk-sign-in";
 
-export const metadata = buildPageMetadata({
-  title: "Sign in",
-  description: "Sign in to the Shakir Super League cricket platform.",
-  path: "/sign-in",
-});
-
-async function getTenantBranding() {
-  return getTenantWithBranding();
+// Batch 127: the sign-in page is already tenant-styled; its metadata now
+// follows the same branded read, per host, instead of a static export with
+// the platform name hardcoded (which a branded tenant's share previews and
+// browser tabs advertised).
+export async function generateMetadata() {
+  const tenantData = await getTenantWithBranding();
+  return buildPageMetadata({
+    title: "Sign in",
+    description: `Sign in to ${resolveBrandName(tenantData?.branding ?? null)} cricket platform.`,
+    path: "/sign-in",
+  });
 }
 
 export default async function SignInPage() {
-  const tenantData = await getTenantBranding();
+  const tenantData = await getTenantWithBranding();
   const branding = tenantData?.branding;
 
   // Apply custom styling if branding exists

@@ -7,7 +7,7 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Card } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
-import { Trophy, Activity, Users, Zap, ArrowRight, PlayCircle } from "lucide-react"
+import { Trophy, Activity, Users, Zap, ArrowRight, Compass } from "lucide-react"
 import Link from "next/link"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
@@ -113,9 +113,12 @@ export function HomeContent({ brandName }: { brandName: string }) {
                 size="xl"
                 variant="neo-glass"
                 className="group border border-white/25 bg-white/10 text-white backdrop-blur-md hover:bg-white/20"
+                asChild
               >
-                <PlayCircle className="mr-2 h-5 w-5 group-hover:text-primary transition-colors" />
-                Watch Demo
+                <Link href="/hub">
+                  <Compass className="mr-2 h-5 w-5 group-hover:text-primary transition-colors" />
+                  Explore the platform
+                </Link>
               </Button>
             </div>
 
