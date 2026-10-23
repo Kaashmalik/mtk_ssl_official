@@ -82,4 +82,14 @@ describe("White-label metadata (Batch 115)", () => {
     const manifest = buildTenantManifest({ appName: "Falcon", primaryColor: "expression(alert(1))" }) as unknown as Record<string, any>
     expect(manifest.theme_color).toBe("#22c55e")
   })
+
+  it("resolveBrandName/shortTenantLabel give every visible surface the same sanitized answer (Batch 125)", async () => {
+    const { resolveBrandName, shortTenantLabel } = await load()
+    expect(resolveBrandName(null)).toBe("Shakir Super League")
+    expect(resolveBrandName({ appName: "Falcon Premier League" })).toBe("Falcon Premier League")
+    expect(resolveBrandName({ appName: "  Evil\u0007<noscript>x</noscript> " })).not.toMatch(/<noscript>|\u0007/)
+    expect(shortTenantLabel(null)).toBe("SSL")
+    expect(shortTenantLabel({ appName: "Falcon Premier League" })).toBe("Falcon")
+    expect(resolveBrandName({ appName: "   " })).toBe("Shakir Super League")
+  })
 })

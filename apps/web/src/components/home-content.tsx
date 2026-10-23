@@ -1,5 +1,7 @@
 "use client"
 
+import * as React from "react"
+
 import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Card } from "@mtk/ui/components/ui/card"
@@ -10,7 +12,7 @@ import Link from "next/link"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
 
-export function HomeContent() {
+export function HomeContent({ brandName }: { brandName: string }) {
   const clerkReady = useClerkReady()
 
   return (
@@ -25,7 +27,7 @@ export function HomeContent() {
           <div className="rounded-xl bg-primary/10 p-2 backdrop-blur-md border border-primary/20">
             <Trophy className="h-6 w-6 text-primary" />
           </div>
-          <span className="text-xl font-bold tracking-tight">Shakir Super League</span>
+          <span className="text-xl font-bold tracking-tight">{brandName}</span>
         </div>
         <div className="flex items-center gap-4">
           <ThemeToggle />
