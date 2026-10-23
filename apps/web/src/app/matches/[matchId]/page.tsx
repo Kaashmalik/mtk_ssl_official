@@ -23,6 +23,8 @@ import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
 import { deriveMatchRecap } from "@mtk/database/lib/match-recap"
 import { deriveInningsOverlay, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
 import { resolvePublicMatchMetadata } from "@/lib/public-match-metadata"
+import { buildMatchSportsEvent } from "@/lib/sports-event-structured-data"
+import { JsonLd } from "@/components/json-ld"
 
 export async function generateMetadata({ params }: { params: Promise<{ matchId: string }> }) {
   const { matchId } = await params
@@ -291,8 +293,23 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
     wicket: "bg-red-600 text-white",
   }
 
+  // Batch 122: SportsEvent structured data from the ALREADY-gated reads —
+  // the venue string is honest (null when the match has no venue), the
+  // competitors are the published team names, and a hidden match emits nothing.
+  const matchEvent = buildMatchSportsEvent({
+    heading: `${teamA.name} vs ${teamB.name}`,
+    // ISO date (no timezone leakage into the schema.org value).
+    scheduledDate: match.scheduledDate ? match.scheduledDate.toISOString().slice(0, 10) : null,
+    status: match.status,
+    venue: match.venueId ? venueName : null,
+    teamAName: teamA.name,
+    teamBName: teamB.name,
+  })
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6 p-4">
+    <>
+      {matchEvent ? <JsonLd data={matchEvent} /> : null}
+      <div className="max-w-4xl mx-auto space-y-6 p-4">
       <Card className="overflow-hidden border-none shadow-xl relative text-white">
         <div className="absolute inset-0 z-0" style={{ background: `linear-gradient(135deg, ${teamAColor}, ${teamBColor})`, opacity: 0.85 }} />
         <div className="absolute inset-0 z-0 bg-black/20" />
@@ -523,5 +540,6 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
         </Tabs>
       )}
     </div>
+    </>
   )
 }

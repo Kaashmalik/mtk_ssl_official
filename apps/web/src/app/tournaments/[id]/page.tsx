@@ -11,6 +11,8 @@ import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones } from "@/lib/public-visibility"
 import { resolvePublicTournamentMetadata } from "@/lib/public-tournament-metadata"
+import { buildTournamentSportsEvent } from "@/lib/sports-event-structured-data"
+import { JsonLd } from "@/components/json-ld"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -147,6 +149,10 @@ export default async function PublicTournamentPage({ params }: { params: Promise
 
   const groupStandings = computeGroupStandings({ teams: registeredTeams, matches: standingsInputs })
 
+  // Batch 122: SportsEvent structured data from the ALREADY-gated read —
+  // a hidden competition emits no script at all.
+  const sportsEvent = buildTournamentSportsEvent(tournament)
+
   // FAN-03 (Batch 165): the approved form-guide analytic package - a pure,
   // rule-versioned fold over the SAME official published match rows the
   // standings consume. Only resulted/voided matches contribute letters; an
@@ -219,9 +225,11 @@ export default async function PublicTournamentPage({ params }: { params: Promise
     .sort((a, b) => a.round - b.round || (a.matchNumber ?? 0) - (b.matchNumber ?? 0))
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 p-4">
-      <div className="flex items-start justify-between">
-        <div>
+    <>
+      {sportsEvent ? <JsonLd data={sportsEvent} /> : null}
+      <div className="max-w-4xl mx-auto space-y-6 p-4">
+        <div className="flex items-start justify-between">
+          <div>
           <h1 className="text-2xl font-bold">{tournament.name}</h1>
           <p className="text-sm text-muted-foreground">{tournament.description}</p>
         </div>
@@ -399,5 +407,6 @@ export default async function PublicTournamentPage({ params }: { params: Promise
         </CardContent>
       </Card>
     </div>
+    </>
   )
 }
