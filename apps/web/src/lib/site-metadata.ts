@@ -34,7 +34,7 @@ export function buildRootMetadata(): Metadata {
       title: "Shakir Super League - Pakistan's #1 Cricket Platform",
       description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
     },
-    manifest: "/manifest.json",
+    manifest: "/manifest.webmanifest",
     appleWebApp: {
       capable: true,
       title: "SSL",

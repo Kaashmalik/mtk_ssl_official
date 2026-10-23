@@ -56,4 +56,30 @@ describe("White-label metadata (Batch 115)", () => {
     const insecure = buildTenantBrandMetadata(base(), { appName: "Falcon", faviconUrl: "http://insecure.example.com/x.ico" } as any) as unknown as Record<string, any>
     expect(JSON.stringify(insecure.icons ?? {})).not.toContain("insecure.example.com")
   })
+
+  it("the PWA manifest stays platform-branded for an unconfigured tenant (Batch 123)", async () => {
+    const { buildTenantManifest } = await load()
+    const manifest = buildTenantManifest(null) as unknown as Record<string, any>
+    expect(manifest.name).toBe("Shakir Super League")
+    expect(manifest.short_name).toBe("SSL")
+    expect(manifest.theme_color).toBe("#22c55e")
+    expect(JSON.stringify(manifest.icons)).toContain("icon-192.png")
+  })
+
+  it("a branded tenant's installed PWA carries THE TENANT'S name and theme color (Batch 123)", async () => {
+    const { buildTenantManifest } = await load()
+    const manifest = buildTenantManifest({ appName: "Falcon Premier League", primaryColor: "#1d4ed8" }) as unknown as Record<string, any>
+    expect(manifest.name).toBe("Falcon Premier League")
+    expect(manifest.short_name).toBe("Falcon")
+    expect(manifest.theme_color).toBe("#1d4ed8")
+    // start_url, display, icons stay the platform's — behavior never regresses.
+    expect(manifest.start_url).toBe("/dashboard")
+    expect(JSON.stringify(manifest.icons)).toContain("icon-192.png")
+  })
+
+  it("a hostile theme color never reaches the manifest canvas", async () => {
+    const { buildTenantManifest } = await load()
+    const manifest = buildTenantManifest({ appName: "Falcon", primaryColor: "expression(alert(1))" }) as unknown as Record<string, any>
+    expect(manifest.theme_color).toBe("#22c55e")
+  })
 })

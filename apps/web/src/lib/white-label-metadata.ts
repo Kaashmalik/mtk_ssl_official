@@ -48,3 +48,58 @@ export function buildTenantBrandMetadata(base: Metadata, brand: BrandPresentatio
   }
   return branded
 }
+
+/**
+ * Batch 123: the PWA manifest goes white-label too. The platform manifest
+ * (formerly `public/manifest.json`) is the SEED — behavior fields (start_url,
+ * scope, display, icons) never change, so no tenant's installed app regresses.
+ * A branded tenant's installed app carries THE TENANT'S name and theme color,
+ * re-validated here even though `brandPresentation` filters at the boundary —
+ * the manifest is render-critical, so it defends in depth exactly like the
+ * metadata layer above.
+ */
+
+const PLATFORM_MANIFEST = {
+  name: "Shakir Super League",
+  short_name: "SSL",
+  description: "Pakistan's #1 Cricket Tournament & League Management Platform",
+  start_url: "/dashboard",
+  scope: "/",
+  display: "standalone",
+  orientation: "portrait-primary",
+  background_color: "#0a0a0a",
+  theme_color: "#22c55e",
+  lang: "en",
+  dir: "ltr",
+  categories: ["sports", "entertainment"],
+  icons: [
+    { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+  ],
+} as const
+
+const PLATFORM_THEME_COLOR = "#22c55e"
+
+function safeThemeColor(value: string | undefined): string {
+  return typeof value === "string" && /^#[\da-fA-F]{6}$/.test(value) ? value : PLATFORM_THEME_COLOR
+}
+
+/** PWA short-name convention: the longest whole-word prefix fitting 12 chars;
+ * a hard cut only when the first word alone exceeds the cap. */
+function shortAppName(appName: string): string {
+  if (appName.length <= 12) return appName
+  const cut = appName.slice(0, 12)
+  const spaceIndex = cut.lastIndexOf(" ")
+  return spaceIndex >= 4 ? cut.slice(0, spaceIndex) : cut
+}
+
+export function buildTenantManifest(brand: BrandPresentation | null): object {
+  const appName = safeAppName(brand?.appName)
+  if (!appName) return { ...PLATFORM_MANIFEST }
+  return {
+    ...PLATFORM_MANIFEST,
+    name: appName,
+    short_name: shortAppName(appName),
+    theme_color: safeThemeColor(brand?.primaryColor),
+  }
+}
