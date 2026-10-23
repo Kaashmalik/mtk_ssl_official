@@ -3,20 +3,22 @@
 import { useEffect } from "react";
 import type { BrandPresentation } from "@/lib/brand-presentation";
 
-/** Colors/fonts are server-rendered on the body. This owns only reversible browser metadata. */
+/** Colors/fonts are server-rendered on the body; titles and the tenant icon
+ * are now SERVER-rendered via the root generateMetadata (Batch 115 white
+ * label). This owns only the favicon swap for tenants whose icon asset lives
+ * outside the metadata-icons path — and deliberately no longer clobbers
+ * document.title: that erased per-page titles (match centres, leaderboards)
+ * on branded tenants and was invisible to crawlers. */
 export function TenantBrandingProvider({ branding }: { branding: BrandPresentation | null }) {
   useEffect(() => {
-    const originalTitle = document.title;
-    const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'));
+    const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]') );
     const originals = links.map(link => ({ link, href: link.getAttribute("href") }));
     let added: HTMLLinkElement | undefined;
-    if (branding?.appName) document.title = branding.appName;
     if (branding?.faviconUrl) {
       if (links.length) links.forEach(link => { link.href = branding.faviconUrl!; });
       else { added = document.createElement("link"); added.rel = "icon"; added.href = branding.faviconUrl; document.head.appendChild(added); }
     }
     return () => {
-      document.title = originalTitle;
       for (const { link, href } of originals) {
         if (href === null) link.removeAttribute("href"); else link.setAttribute("href", href);
       }
