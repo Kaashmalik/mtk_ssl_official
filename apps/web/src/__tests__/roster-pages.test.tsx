@@ -18,12 +18,13 @@ import { GuardianConsentCard } from "@/components/players/guardian-consent-card"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), context: vi.fn(), permission: vi.fn(), team: vi.fn(), player: vi.fn(),
   squad: vi.fn(), teams: vi.fn(), players: vi.fn(), editable: vi.fn(), options: vi.fn(), teamHistory: vi.fn(), playerHistory: vi.fn(),
-  follow: vi.fn(), select: vi.fn(), where: vi.fn() }))
+  follow: vi.fn(), select: vi.fn(), where: vi.fn(), registrations: vi.fn() }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: (href: string) => { throw new Error(`redirect:${href}`) },
   notFound: () => { throw new Error("not-found") } }))
 vi.mock("next/cache", () => ({ unstable_noStore: vi.fn() }))
 vi.mock("@/lib/rbac-server", () => ({ requirePermissionServer: mocks.permission }))
+vi.mock("@/lib/registration-reads", () => ({ readTeamRegistrations: mocks.registrations }))
 vi.mock("@/lib/roster-reads", async original => ({ ...await original<typeof import("@/lib/roster-reads")>(),
   requireRosterReadContext: mocks.context, readRosterTeam: mocks.team, readRosterPlayer: mocks.player,
   readRosterSquad: mocks.squad, readRosterTeams: mocks.teams, readRosterPlayers: mocks.players,
@@ -91,6 +92,7 @@ beforeEach(() => {
   mocks.teamHistory.mockResolvedValue({ fixtures: [], names: [], innings: [] })
   mocks.playerHistory.mockResolvedValue({ batting: [], bowling: [], fixtures: [], names: [], competitions: [] })
   mocks.follow.mockResolvedValue({ following: false, followers: 0 })
+  mocks.registrations.mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
   mocks.select.mockReturnValue({ from: () => ({ where: mocks.where }) })
   mocks.where.mockReturnValue({ limit: async () => [] })
 })

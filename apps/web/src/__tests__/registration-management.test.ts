@@ -5,6 +5,7 @@ import {
   registerTeam, approveRegistration, rejectRegistration, withdrawRegistration,
   confirmRegistrationPayment, getRegistrations, getMyRegistrations, updateRegistrationSquad,
 } from "@/app/actions/registrations"
+import { readTeamRegistrations } from "@/lib/registration-reads"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), permission: vi.fn(), tenant: vi.fn(), fallback: vi.fn(), transaction: vi.fn(), execute: vi.fn(),
@@ -415,5 +416,42 @@ describe("Registration reads are exact-league scoped and projection-bounded", ()
   it("propagates a read failure instead of returning a false empty state", async () => {
     mocks.select.mockImplementation(() => { throw new Error("DB down") })
     await expect(getRegistrations()).rejects.toThrow("DB down")
+  })
+})
+
+describe("Team-scoped registration reads (ENH-05-03 slice 2)", () => {
+  beforeEach(() => {
+    mocks.state.registrationRows = [{ ...registration, teamName: "Tigers", tournamentName: "Cup" }]
+  })
+  it("reads one team's submissions joined inside the exact active league, bounded", async () => {
+    const result = await readTeamRegistrations(TENANT, TEAM, {})
+    expect(result.data).toHaveLength(1)
+    expect(result.pagination).toMatchObject({ page: 1, pageSize: 50 })
+    for (const join of mocks.queries.find(query => query.joins.length)!.joins) {
+      expect(join.params).toContain(TENANT)
+    }
+    const where = mocks.queries.find(query => query.sql)
+    expect(where!.params).toEqual(expect.arrayContaining([TENANT, TEAM]))
+    // The bounded page is a hard refusal, not a silent clamp.
+    await expect(readTeamRegistrations(TENANT, TEAM, { pageSize: 500 })).rejects.toThrow()
+  })
+  it("never projects payment references or actor/approver UUIDs into team rows", async () => {
+    await readTeamRegistrations(TENANT, TEAM, {})
+    for (const query of mocks.queries) {
+      for (const key of ["paymentTransactionId", "registeredBy", "approvedBy"]) {
+        expect(query.fields).not.toHaveProperty(key)
+      }
+    }
+  })
+  it("refuses a malformed team id before SQL and keeps status filters exact", async () => {
+    await expect(readTeamRegistrations(TENANT, "bad", {})).rejects.toThrow()
+    expect(mocks.queries).toHaveLength(0)
+    await expect(readTeamRegistrations(TENANT, TEAM, { status: "future" as never })).rejects.toThrow()
+    await readTeamRegistrations(TENANT, TEAM, { status: "pending" })
+    expect(mocks.queries.filter(query => query.sql)).toHaveLength(2)
+  })
+  it("propagates a read failure instead of a false empty state", async () => {
+    mocks.select.mockImplementation(() => { throw new Error("DB down") })
+    await expect(readTeamRegistrations(TENANT, TEAM, {})).rejects.toThrow("DB down")
   })
 })

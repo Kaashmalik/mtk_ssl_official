@@ -10,8 +10,11 @@ import { deleteTeam } from "@/app/actions/teams"
 import { requireRosterReadContext, readRosterTeam, readRosterSquad, readRosterPlayers, canManageRosterTeam } from "@/lib/roster-reads"
 import { readRosterTeamHistory, readRosterFollowState } from "@/lib/roster-history"
 import { requirePermissionServer } from "@/lib/rbac-server"
+import { readTeamRegistrations } from "@/lib/registration-reads"
+import { describeEligibility, evaluateSquadEligibility } from "@mtk/database/lib/registration-eligibility-policy"
 import { DeleteButton } from "@/components/shared/delete-button"
 import { FollowButton } from "@/components/shared/follow-button"
+import { TeamRegistrations } from "@/components/registrations/team-registrations"
 import { TeamRosterManager } from "@/components/teams/team-roster-manager"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
@@ -37,6 +40,24 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
 
   const canManage = canManageRosterTeam(context, team)
   const canArchive = team.isActive && context.role === "league_owner"
+  // ENH-05-03 slice 2: this team's tournament entries with the shared policy's
+  // truthful eligibility. The tournament minimum squad size is not configurable
+  // in the schema yet, so its blocker is shown honestly instead of hidden.
+  const regsResult = await readTeamRegistrations(context.tenantId, id, { pageSize: 100 })
+  const teamRegistrations = regsResult.data.map(reg => {
+    const status = String(reg.status ?? "pending")
+    const paymentStatus = String(reg.paymentStatus ?? "unpaid")
+    return {
+      id: reg.id,
+      tournamentName: reg.tournamentName ?? "TBD Tournament",
+      status,
+      paymentStatus,
+      squadPlayerIds: reg.squadPlayerIds ?? [],
+      eligibility: describeEligibility(evaluateSquadEligibility({
+        approvalStatus: status, paymentStatus, squadSize: (reg.squadPlayerIds ?? []).length, minSquadSize: -1,
+      })),
+    }
+  })
   const { following: followingState, followers: followersCount } = await readRosterFollowState(context.tenantId, context.actorId, "team", id)
   const playersResult = canManage ? await readRosterPlayers(context.tenantId, { pageSize: 100, unassigned: true, isActive: true, status: "active" }) : null
   const availablePlayers = (playersResult?.data ?? []).map(p => ({ id: p.id, name: p.name, teamId: p.teamId }))
@@ -191,6 +212,7 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
         <Tabs defaultValue="squad" className="space-y-4">
           <TabsList>
             <TabsTrigger value="squad">Squad ({team.players.length})</TabsTrigger>
+            <TabsTrigger value="registrations">Registrations ({teamRegistrations.length})</TabsTrigger>
             <TabsTrigger value="matches">Matches ({resolvedMatches.length})</TabsTrigger>
           </TabsList>
 
@@ -232,6 +254,14 @@ export default async function TeamDetailPage({ params }: { params: Promise<{ id:
                 </div>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="registrations" className="space-y-4">
+            <TeamRegistrations
+              registrations={teamRegistrations}
+              roster={team.players.map(p => ({ id: p.id, name: p.name }))}
+              canManage={canManage}
+            />
           </TabsContent>
 
           <TabsContent value="matches">

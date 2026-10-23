@@ -116,6 +116,29 @@ export async function readActorRegistrations(tenantId: string, actorId: string, 
   return { data, pagination: page(current, pageSize, Number(total.total)) }
 }
 
+/**
+ * ENH-05-03 slice 2: one team's own tournament entries, for the manager-facing
+ * surface. Same exact-league joins and bounded page as the review list.
+ */
+export async function readTeamRegistrations(tenantId: string, teamId: string, input: z.input<typeof registrationReviewFilters>) {
+  z.string().uuid().parse(teamId)
+  const { tournamentId, status, page: current, pageSize } = registrationReviewFilters.parse(input)
+  const where = and(eq(leagueRegistrations.tenantId, tenantId), eq(leagueRegistrations.teamId, teamId),
+    tournamentId ? eq(leagueRegistrations.tournamentId, tournamentId) : undefined,
+    status ? eq(leagueRegistrations.status, status) : undefined)
+  const [data, [total]] = await Promise.all([
+    db.select({ ...registrationReviewColumns, teamName: teams.name, tournamentName: tournaments.name })
+      .from(leagueRegistrations)
+      .innerJoin(teams, and(eq(teams.id, leagueRegistrations.teamId), eq(teams.tenantId, tenantId)))
+      .innerJoin(tournaments, and(eq(tournaments.id, leagueRegistrations.tournamentId), eq(tournaments.tenantId, tenantId)))
+      .where(where)
+      .orderBy(desc(leagueRegistrations.createdAt), desc(leagueRegistrations.id))
+      .limit(pageSize).offset((current - 1) * pageSize),
+    db.select({ total: count() }).from(leagueRegistrations).where(where),
+  ])
+  return { data, pagination: page(current, pageSize, Number(total.total)) }
+}
+
 /** Active, unassigned-to-any-registration eligibility options for the active league. */
 export async function readRegistrationTournamentOptions(tenantId: string) {
   const rows = await db.select({ id: tournaments.id, name: tournaments.name, entryFee: tournaments.entryFee, maxTeams: tournaments.maxTeams })
