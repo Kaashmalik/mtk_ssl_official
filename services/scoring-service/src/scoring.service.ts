@@ -481,7 +481,7 @@ export class ScoringService {
           is_wicket: isWicket, is_wide: isWide, is_no_ball: isNoBall,
           is_bye: isBye, is_leg_bye: isLegBye,
         },
-      }).returning({ id: scoringEvents.id, sequenceNumber: scoringEvents.sequenceNumber });
+      }).returning({ id: scoringEvents.id, sequenceNumber: scoringEvents.sequenceNumber, createdAt: scoringEvents.createdAt });
 
       // 6. Incrementally update innings aggregates (O(1) - no recalculation)
       await tx.update(matchInnings)
@@ -641,7 +641,12 @@ export class ScoringService {
         batsmanName: batsmanPlayer?.name,
         bowlerName: bowlerPlayer?.name,
         sequenceNumber: recordedEvent.sequenceNumber,
-        timestamp: new Date().toISOString(),
+        // ENH-09-02: canonical post-ball revision, stable match_balls identity
+        // and the persisted scoring_events commit time (never the app clock).
+        scoringRevision: result.scoringRevision,
+        ballId: insertedBall.id,
+        timestamp: (recordedEvent.createdAt instanceof Date
+          ? recordedEvent.createdAt : new Date(recordedEvent.createdAt)).toISOString(),
       };
 
       // Persist the intro ahead of the first ball in the same match stream.
@@ -794,7 +799,7 @@ export class ScoringService {
         .where(eq(scoringEvents.aggregateId, ball.inningsId));
       const nextSeq = Number(lastEvent[0]?.seq || 0) + 1;
 
-      await tx.insert(scoringEvents).values({
+      const [undoEvent] = await tx.insert(scoringEvents).values({
         tenantId: innings.tenantId,
         matchId: matchId,
         inningsId: ball.inningsId,
@@ -815,7 +820,7 @@ export class ScoringService {
           is_leg_bye: isLegBye,
           batsman_runs: delta.batterRuns,
         },
-      });
+      }).returning({ id: scoringEvents.id, sequenceNumber: scoringEvents.sequenceNumber, createdAt: scoringEvents.createdAt });
 
       // 4. Delete the ball record (cascade will handle related data)
       await tx.delete(matchBalls)
@@ -876,6 +881,39 @@ export class ScoringService {
           : null,
         scoringRevision: await commitScoringRevision(tx, match, actorId, expectedRevision, 'undo_ball', { ballId }),
       };
+
+      // ENH-09-02: durable consumers can only retract what the outbox told
+      // them. Journal the correction inside this transaction, AFTER its
+      // revision commit, so a failed audit never publishes an undo envelope.
+      // The envelope reuses the recorded ball's stable identity (ballId).
+      const undoPublish: ScoringBallEventPayload = {
+        type: 'BALL_UNDONE',
+        data: {
+          tenantId, matchId, inningsId: ball.inningsId,
+          runs: totalRuns, over: ball.overNumber, ball: ball.ballNumber,
+        },
+        eventId: undoEvent.id,
+        matchId,
+        tenantId,
+        inning: updatedInnings.inningsNumber,
+        over: ball.overNumber,
+        ball: ball.ballNumber,
+        runs: totalRuns,
+        ...(ball.batsmanId ? { batsmanId: ball.batsmanId } : {}),
+        ...(ball.bowlerId ? { bowlerId: ball.bowlerId } : {}),
+        // Only claim the dismissal that the ball row actually records; never
+        // fabricate a wicket type the official record does not contain.
+        ...(isWicket && ball.wicketType && ball.wicketPlayerOutId
+          ? { wicket: { type: ball.wicketType, playerOut: ball.wicketPlayerOutId,
+              ...(ball.wicketFielderId ? { dismissedBy: ball.wicketFielderId } : {}) } }
+          : {}),
+        sequenceNumber: undoEvent.sequenceNumber,
+        timestamp: (undoEvent.createdAt instanceof Date
+          ? undoEvent.createdAt : new Date(undoEvent.createdAt)).toISOString(),
+        scoringRevision: result.scoringRevision,
+        ballId,
+      };
+      await enqueueScoringMessage(tx, { topic: BALL_TOPIC, payload: undoPublish });
 
       return result;
     }, { isolationLevel: 'read committed' });

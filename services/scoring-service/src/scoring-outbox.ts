@@ -14,10 +14,22 @@ export function validateOutboxMessage(topic: string, input: unknown, tenantId: s
   const parsed = envelope.parse(input);
   if (parsed.tenantId !== tenantId || parsed.matchId !== matchId || parsed.eventId !== eventId) throw new Error('Outbox envelope mismatch');
   if (topic === BALL_TOPIC) {
-    z.object({ type: z.enum(['BALL_RECORDED', 'SIX_HIT', 'FOUR_HIT', 'WICKET']),
-      sequenceNumber: z.number().int().positive(), inning: z.number().int().min(1).max(3),
+    // ENH-09-02: every ball envelope carries the canonical post-event revision
+    // and the stable match_balls identity; an undo correction reuses ballId
+    // from the recorded envelope so durable consumers can retract the delivery.
+    const ball = z.object({ type: z.enum(['BALL_RECORDED', 'SIX_HIT', 'FOUR_HIT', 'WICKET', 'BALL_UNDONE']),
+      sequenceNumber: z.number().int().positive(), scoringRevision: z.number().int().nonnegative(),
+      ballId: z.string().uuid(), inning: z.number().int().min(1).max(3),
       over: z.number().int().nonnegative(), ball: z.number().int().min(1).max(6),
-      runs: z.number().int().nonnegative(), batsmanId: z.string().uuid(), bowlerId: z.string().uuid() }).parse(input);
+      runs: z.number().int().nonnegative() }).parse(input);
+    if (ball.type === 'BALL_UNDONE') {
+      // Attribution is optional on a correction: pre-v2 balls may have null
+      // batsman/bowler ids, and the undo must not fail its envelope validation.
+      z.object({ batsmanId: z.string().uuid().optional(), bowlerId: z.string().uuid().optional(),
+        wicket: z.object({ type: z.string(), playerOut: z.string(), dismissedBy: z.string().optional() }).optional() }).parse(input);
+    } else {
+      z.object({ batsmanId: z.string().uuid(), bowlerId: z.string().uuid() }).parse(input);
+    }
     z.string().uuid().parse(eventId);
     if (parsed.data.tenantId !== tenantId || parsed.data.matchId !== matchId) throw new Error('Nested outbox scope mismatch');
     z.string().uuid().parse(parsed.data.inningsId);

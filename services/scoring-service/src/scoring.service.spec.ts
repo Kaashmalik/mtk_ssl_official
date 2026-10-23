@@ -106,7 +106,11 @@ function createTransaction() {
       seq: String(Math.max(0, ...state.events.map((event) => event.sequenceNumber))),
     }] }) })),
     insert: jest.fn((table) => ({ values: (values: Record<string, any>) => {
-      const row = { ...values, id: uuid(), createdAt: new Date() };
+      // scoring_events rows carry a fixed canonical commit time so envelope
+      // pins can prove the published timestamp is the persisted event time,
+      // not the service clock at publish.
+      const row = { ...values, id: uuid(),
+        createdAt: table === scoringEvents ? new Date('2026-10-12T12:00:00.000Z') : new Date() };
       if (table === matchBalls) state.balls.push(row);
       if (table === scoringEvents) state.events.push(row);
       if (table === auditLogs) state.audits.push(row);
@@ -658,7 +662,37 @@ describe('Canonical delivery record, replay and undo', () => {
     expect(mockTx.state.outbox).toHaveLength(1);
     expect(mockTx.state.outbox[0]).toMatchObject({ topic: 'ssl.scoring.ball-events', tenantId: TENANT, matchId: MATCH,
       eventId: mockTx.state.events[0].id, payload: { type: 'FOUR_HIT', eventId: mockTx.state.events[0].id,
-        data: { tenantId: TENANT, matchId: MATCH, inningsId: INNINGS }, runs: 4, sequenceNumber: 1 } });
+        data: { tenantId: TENANT, matchId: MATCH, inningsId: INNINGS }, runs: 4, sequenceNumber: 1,
+        // ENH-09-02: the envelope carries the canonical post-ball revision and
+        // the stable match_balls identity, timed by the persisted event.
+        scoringRevision: 1, ballId: mockTx.state.balls[0].id,
+        timestamp: mockTx.state.events[0].createdAt.toISOString() } });
+  });
+  it('journals a BALL_UNDONE correction envelope with the stable ball identity and post-undo revision', async () => {
+    const saved = await service.recordBall(TENANT, ACTOR, ball({ runs: 4 }));
+    await service.undoBall(TENANT, ACTOR, MATCH, saved.ballId, 0, 1);
+    const undoEvent = mockTx.state.events.find(event => event.eventType === 'ball_undone');
+    expect(undoEvent).toBeDefined();
+    expect(mockTx.state.outbox).toHaveLength(2);
+    expect(mockTx.state.outbox[1]).toMatchObject({ topic: 'ssl.scoring.ball-events', tenantId: TENANT, matchId: MATCH,
+      eventId: undoEvent.id, payload: { type: 'BALL_UNDONE', eventId: undoEvent.id, ballId: saved.ballId,
+        scoringRevision: 2, runs: 4, sequenceNumber: undoEvent.sequenceNumber,
+        timestamp: undoEvent.createdAt.toISOString(),
+        data: { tenantId: TENANT, matchId: MATCH, inningsId: INNINGS } } });
+  });
+  it('rolls back the undo without a correction envelope when the revision audit fails', async () => {
+    await service.recordBall(TENANT, ACTOR, ball({ runs: 4 }));
+    const insert = mockTx.insert.getMockImplementation()!;
+    mockTx.insert.mockImplementation(table => {
+      if (table === auditLogs) throw new Error('Audit storage failed');
+      return insert(table);
+    });
+    await expect(service.undoBall(TENANT, ACTOR, MATCH, mockTx.state.balls[0].id, 0, 1))
+      .rejects.toThrow('Audit storage failed');
+    // Only the recorded-ball envelope may survive in the journal; the undo
+    // correction must never be enqueued ahead of its own revision commit.
+    expect(mockTx.state.outbox.map(row => row.payload.type)).toEqual(['FOUR_HIT']);
+    expect(mockTx.state.events.filter(event => event.eventType === 'ball_undone')).toHaveLength(0);
   });
   it.each(['scheduled', 'toss'])('journals the %s-to-live intro before the first delivery, once only', async status => {
     mockTx.state.match.status = status;

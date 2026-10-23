@@ -11,12 +11,18 @@ const MATCH_EVENTS_TOPIC = 'ssl.match.events';
  * Two consumers depend on this topic:
  *  - ai-commentary-service reads the raw ball fields (top-level spread below
  *    matches its `BallEvent` interface: matchId, tenantId, inning, over, ball,
- *    runs, extras, wicket, batsmanId, bowlerId, timestamp).
+ *    runs, extras, wicket, batsmanId, bowlerId, timestamp). It ignores
+ *    BALL_UNDONE corrections.
  *  - notification-service reads `event.type` + `event.data` (SIX_HIT /
- *    FOUR_HIT) for boundary alerts.
+ *    FOUR_HIT) for boundary alerts; BALL_UNDONE falls through silently.
+ *
+ * ENH-09-02: every envelope carries `scoringRevision` (the canonical commit
+ * revision AFTER this event) and `ballId` (the stable match_balls identity), so
+ * durable consumers can dedupe, order and retract deliveries. `timestamp` is
+ * the persisted scoring_events commit time, never the service clock at publish.
  */
 export interface ScoringBallEventPayload {
-  type: 'BALL_RECORDED' | 'SIX_HIT' | 'FOUR_HIT' | 'WICKET';
+  type: 'BALL_RECORDED' | 'SIX_HIT' | 'FOUR_HIT' | 'WICKET' | 'BALL_UNDONE';
   data: Record<string, unknown>;
 
   eventId: string;
@@ -28,12 +34,18 @@ export interface ScoringBallEventPayload {
   runs: number;
   extras?: { type: string; runs: number };
   wicket?: { type: string; playerOut: string; dismissedBy?: string };
-  batsmanId: string;
-  bowlerId: string;
+  // Present on every recorded-delivery envelope; an undo correction may omit
+  // them when the retracted ball row has no persisted attribution (pre-v2).
+  batsmanId?: string;
+  bowlerId?: string;
   batsmanName?: string;
   bowlerName?: string;
   sequenceNumber: number;
   timestamp: string;
+  /** Canonical scoring revision after this event committed (ENH-09-02). */
+  scoringRevision: number;
+  /** Stable match_balls id; an undo envelope reuses it to retract the delivery. */
+  ballId: string;
 }
 
 /**

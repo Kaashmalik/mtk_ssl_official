@@ -110,6 +110,15 @@ export class CommentaryController {
 
   @MessagePattern('ssl.scoring.ball-events')
   async handleBallEvent(@Payload() event: BallEvent, @Ctx() context: KafkaContext): Promise<Commentary | null> {
+    // ENH-09-02: the scoring outbox also journals undo corrections. Generating
+    // commentary for a retracted delivery would be a false claim; ignore the
+    // correction without claiming it (retraction-aware commentary is future
+    // work). The ballEnvelope never constrained `type`, so this skip must run
+    // before validation.
+    if ((event as { type?: string } | null)?.type === 'BALL_UNDONE') {
+      this.logger.log(`Ignoring BALL_UNDONE correction for ${event?.matchId ?? 'unknown match'}`);
+      return null;
+    }
     const parsed = CommentaryController.ballEnvelope.safeParse(event);
     if (!parsed.success) {
       this.logger.warn('Ball event failed validation; ignoring without generation or claim');

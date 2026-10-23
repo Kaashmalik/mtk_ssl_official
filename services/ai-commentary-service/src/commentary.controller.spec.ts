@@ -114,4 +114,14 @@ describe('Commentary consumer idempotency (dedupe doubles, not real Redis/Kafka)
     expect(dedupe.acquire).not.toHaveBeenCalled();
     expect(commentary.generateMatchIntro).not.toHaveBeenCalled();
   });
+
+  it('ignores a BALL_UNDONE retraction without claiming or generating commentary', async () => {
+    // ENH-09-02: the scoring outbox now journals undo corrections. Generating
+    // commentary for a retracted delivery would be a false claim on stream;
+    // retraction-aware commentary is future work.
+    const undone = { ...ballEvent, type: 'BALL_UNDONE', eventId: `${MATCH}:undone-1` };
+    expect(await controller.handleBallEvent(undone as never, context({ headers: { 'idempotency-key': 'event-4' } }))).toBeNull();
+    expect(dedupe.acquire).not.toHaveBeenCalled();
+    expect(commentary.generateCommentary).not.toHaveBeenCalled();
+  });
 });
