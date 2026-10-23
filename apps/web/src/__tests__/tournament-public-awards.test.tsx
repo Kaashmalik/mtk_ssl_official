@@ -21,6 +21,11 @@ vi.mock("@/lib/public-visibility", () => ({
     return Promise.resolve(null)
   },
   readPublishedTournamentMilestones: () => Promise.resolve({ centuries: [], fiveFors: [] }),
+  // Batch 124: the Most Runs / Most Wickets reads — no published stats in
+  // these scenarios, so the leaders card never mounts on top of the awards
+  // assertions.
+  readPublicBattingLeaderboard: () => Promise.resolve([]),
+  readPublicBowlingLeaderboard: () => Promise.resolve([]),
 }))
 vi.mock("@/components/tournaments/knockout-bracket", () => ({ KnockoutBracket: () => null }))
 // PUB-04 disputes: the affordance read is mocked at the module boundary so
