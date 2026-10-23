@@ -8,7 +8,8 @@ import { Textarea } from "@mtk/ui/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@mtk/ui/components/ui/dialog"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
-import { approveRegistration, rejectRegistration, updateRegistrationSquad, getRegistrationSquadOptions, withdrawRegistration } from "@/app/actions/registrations"
+import { approveRegistration, rejectRegistration, updateRegistrationSquad, getRegistrationSquadOptions, withdrawRegistration, bulkReviewRegistrations } from "@/app/actions/registrations"
+import type { BulkReviewOutcome } from "@/lib/registration-bulk"
 import { canEditRegistrationSquad, canWithdrawRegistrationEntry, describeEligibility, evaluateSquadEligibility } from "@mtk/database/lib/registration-eligibility-policy"
 import { WithdrawDialog } from "@/components/registrations/withdraw-dialog"
 
@@ -46,6 +47,13 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
 
   const [withdrawTarget, setWithdrawTarget] = useState<Registration | null>(null)
   const [withdrawing, setWithdrawing] = useState(false)
+
+  // Batch 120: bulk review selection — PENDING entries only. Bulk composes
+  // the SAME audited single commands server-side; this bar merely batches
+  // the selection and reports the truthful per-item outcomes.
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false)
 
   const confirmWithdraw = async () => {
     const reg = withdrawTarget
@@ -140,19 +148,28 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
   }
 
   const handleRejectSubmit = async () => {
-    if (!rejectingId) return
-    setUpdatingId(rejectingId)
-    const targetId = rejectingId
+    const isBulk = rejectingId === null
+    const targets = isBulk ? checkedIds : [rejectingId!]
+    if (rejectingId === null && !bulkRejectOpen) return
+    if (targets.length === 0) return
+    setUpdatingId(targets[0])
+    const callIds = targets
     setRejectingId(null) // close modal
-    
+    setBulkRejectOpen(false)
+
     try {
-      const res = await rejectRegistration(targetId, rejectionReason)
-      if (res.success) {
-        setRegistrations(prev => prev.map(r => r.id === targetId ? { ...r, status: "rejected" as const } : r))
-        toast.success("Registration rejected successfully")
-        setRejectionReason("")
+      if (isBulk) {
+        const res = await bulkReviewRegistrations("reject", callIds, rejectionReason)
+        if (res.success) applyBulkResult(res.results)
       } else {
-        toast.error("Failed to reject registration")
+        const res = await rejectRegistration(callIds[0], rejectionReason)
+        if (res.success) {
+          setRegistrations(prev => prev.map(r => r.id === callIds[0] ? { ...r, status: "rejected" as const } : r))
+          toast.success("Registration rejected successfully")
+          setRejectionReason("")
+        } else {
+          toast.error("Failed to reject registration")
+        }
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to reject registration")
@@ -161,8 +178,67 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
     }
   }
 
+  // Batch 120: the honest bulk contract — one outcome per id. Successes are
+  // applied to the table with the SAME recomputed eligibility sentence the
+  // single commands produce; every failure is reported verbatim; the
+  // selection clears only after the truth is on screen.
+  const applyBulkResult = (results: BulkReviewOutcome[]) => {
+    const okResults = results.filter((result): result is Extract<BulkReviewOutcome, { ok: true }> => result.ok)
+    const failures = results.filter((result): result is Extract<BulkReviewOutcome, { ok: false }> => !result.ok)
+    if (okResults.length > 0) {
+      const statusById = new Map(okResults.map(result => [result.id, result.status] as const))
+      setRegistrations(prev => prev.map(rowEntry => {
+        const status = statusById.get(rowEntry.id)
+        if (!status) return rowEntry
+        return {
+          ...rowEntry,
+          status: status as Registration["status"],
+          eligibility: describeEligibility(evaluateSquadEligibility({
+            approvalStatus: status, paymentStatus: rowEntry.paymentStatus,
+            squadSize: rowEntry.squadPlayerIds.length, minSquadSize: -1,
+          })),
+        }
+      }))
+    }
+    toast.success(okResults.length === 1
+      ? "1 registration reviewed"
+      : `${okResults.length} registrations reviewed${failures.length > 0 ? "" : " — all succeeded"}`)
+    for (const failure of failures) toast.error(failure.error)
+    setCheckedIds([])
+    setRejectionReason("")
+  }
+
+  const toggleChecked = (id: string) => {
+    setCheckedIds(prev => prev.includes(id) ? prev.filter(existing => existing !== id) : [...prev, id])
+  }
+
+  const runBulkApprove = async () => {
+    const targets = checkedIds
+    if (targets.length === 0) return
+    setBulkBusy(true)
+    try {
+      const res = await bulkReviewRegistrations("approve", targets)
+      if (res.success) applyBulkResult(res.results)
+    } catch (err: any) {
+      toast.error(err.message || "The bulk review could not be completed")
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {checkedIds.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/20 px-4 py-2" role="region" aria-label="Bulk review">
+          <span className="text-sm text-muted-foreground">{checkedIds.length} selected</span>
+          <Button size="sm" className="bg-success hover:bg-success/90" disabled={bulkBusy} onClick={runBulkApprove}>
+            Approve selected
+          </Button>
+          <Button size="sm" variant="destructive" disabled={bulkBusy} onClick={() => setBulkRejectOpen(true)}>
+            Reject selected…
+          </Button>
+        </div>
+      )}
       <div className="rounded-xl border bg-card">
         <Table>
           <TableHeader>
@@ -184,6 +260,19 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
                 <TableRow key={reg.id} className="hover:bg-muted/10">
                   <TableCell>
                     <div>
+                      {isPending && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          role="checkbox"
+                          aria-checked={checkedIds.includes(reg.id)}
+                          aria-label={`Select ${reg.teamName}`}
+                          disabled={bulkBusy}
+                          onClick={() => toggleChecked(reg.id)}
+                        >
+                          {checkedIds.includes(reg.id) ? "Deselect" : "Select"}
+                        </Button>
+                      )}
                       <span className="font-semibold text-sm block">{reg.teamName}</span>
                       {reg.notes && (
                         <span className="text-xs text-muted-foreground block max-w-xs truncate italic">
@@ -257,7 +346,7 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
             })}
             {registrations.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground text-sm">
+                <TableCell colSpan={6 + 1} className="py-8 text-center text-muted-foreground text-sm">
                   No registration requests received.
                 </TableCell>
               </TableRow>
@@ -266,8 +355,8 @@ export function RegistrationList({ initialRegistrations }: RegistrationListProps
         </Table>
       </div>
 
-      {/* Reject Reason Dialog */}
-      <Dialog open={!!rejectingId} onOpenChange={(open) => !open && setRejectingId(null)}>
+      {/* Reject Reason Dialog (single entry OR the Batch 120 bulk selection — one reason, same shared dialog) */}
+      <Dialog open={!!rejectingId || bulkRejectOpen} onOpenChange={(open) => { if (!open) { setRejectingId(null); setBulkRejectOpen(false) } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Reject Registration</DialogTitle>
