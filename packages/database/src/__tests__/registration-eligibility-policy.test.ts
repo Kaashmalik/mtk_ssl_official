@@ -4,6 +4,7 @@ import {
   canEditRegistrationSquad,
   canRejectRegistration,
   canSetPaymentStatus,
+  canWithdrawRegistrationEntry,
   describeEligibility,
   evaluateSquadEligibility,
   sameLeague,
@@ -67,5 +68,18 @@ describe("registration eligibility policy (Batch 148, REG-04)", () => {
     expect(canEditRegistrationSquad("rejected")).toBe(false)
     expect(canEditRegistrationSquad("withdrawn")).toBe(false)
     expect(canEditRegistrationSquad("")).toBe(false)
+  })
+
+  // ENH-05-03 (Batch 109 slice 5): a withdrawal is the entrant pulling OUT of
+  // its own submission — possible while the entry still awaits review AND
+  // after approval (before play begins), but never after rejection (the review
+  // already answered) or from an already-withdrawn/terminal state.
+  it("an entry may be withdrawn only from pending or approved", () => {
+    expect(canWithdrawRegistrationEntry("pending")).toBe(true)
+    expect(canWithdrawRegistrationEntry("approved")).toBe(true)
+    expect(canWithdrawRegistrationEntry("waitlisted")).toBe(false)
+    expect(canWithdrawRegistrationEntry("rejected")).toBe(false)
+    expect(canWithdrawRegistrationEntry("withdrawn")).toBe(false)
+    expect(canWithdrawRegistrationEntry("")).toBe(false)
   })
 })

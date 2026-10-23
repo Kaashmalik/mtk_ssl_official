@@ -82,6 +82,16 @@ export function canSetPaymentStatus(current: string, next: string): boolean {
   return (allowed[current] ?? []).includes(next)
 }
 
+/**
+ * ENH-05-03 slice 5: a withdrawal is the ENTRANT pulling out of its own
+ * submission. It is possible while the entry still awaits review and after
+ * approval (before play begins) — but never after rejection (the review
+ * already answered) or from an already-terminal state.
+ */
+export function canWithdrawRegistrationEntry(status: string): boolean {
+  return status === "pending" || status === "approved"
+}
+
 /** Related resources must share a tenant; cross-tenant bindings are refused outright. */
 export function sameLeague(tournamentTenantId: string, teamTenantId: string): boolean {
   return tournamentTenantId !== "" && tournamentTenantId === teamTenantId

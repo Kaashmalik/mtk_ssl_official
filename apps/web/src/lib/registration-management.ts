@@ -124,10 +124,21 @@ export async function createLeagueRegistration(clerkId: string, tenantId: string
     if (tournament.registrationStart && tournament.registrationStart > now) throw new Error("Registration has not opened yet")
     if (tournament.registrationEnd && tournament.registrationEnd < now) throw new Error("The registration deadline has passed")
 
-    const [existing] = await tx.select({ id: leagueRegistrations.id }).from(leagueRegistrations)
+    // Withdraw/re-register interplay rule (ENH-05-03 slice 5): a WITHDRAWN entry is
+    // the team's own retraction, so a NEW registration may start while the
+    // window is open - the withdrawn row stays untouched as history. A
+    // REJECTED entry is the reviewer's verdict and is refused by name instead
+    // of the misleading "already registered".
+    const [existing] = await tx.select({ id: leagueRegistrations.id, status: leagueRegistrations.status }).from(leagueRegistrations)
       .where(and(eq(leagueRegistrations.tenantId, tenantId), eq(leagueRegistrations.teamId, team.id),
         eq(leagueRegistrations.tournamentId, tournament.id))).limit(1)
-    if (existing) throw new Error("Team is already registered for this tournament")
+    if (existing && existing.status === "withdrawn") {
+      // Fall through: start a fresh registration row.
+    } else if (existing && existing.status === "rejected") {
+      throw new Error("This team's previous registration was rejected and cannot be re-applied for this tournament")
+    } else if (existing) {
+      throw new Error("Team is already registered for this tournament")
+    }
 
     const squad = await tx.select({ id: players.id }).from(players)
       .where(and(eq(players.tenantId, tenantId), eq(players.teamId, team.id), eq(players.isActive, true),

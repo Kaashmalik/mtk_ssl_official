@@ -247,6 +247,28 @@ describe("Registration create eligibility and delegation", () => {
   })
 })
 
+describe("Withdraw / re-register interplay (ENH-05-03 slice 5)", () => {
+  beforeEach(() => { mocks.state.squad = [{ id: PLAYER }] })
+  it("lets a team re-register after its OWN withdrawal; the withdrawn row stays as history", async () => {
+    mocks.state.registrationRows = [{ id: REG, status: "withdrawn" }]
+    await expect(registerTeam({ tournamentId: TOURNAMENT, teamId: TEAM, squadPlayerIds: [PLAYER] }))
+      .resolves.toMatchObject({ success: true })
+    expect(mocks.state.registrationRows).toEqual([{ id: REG, status: "withdrawn" }]) // nothing deleted
+  })
+  it("refuses a re-application after a REJECTION with the honest verdict", async () => {
+    mocks.state.registrationRows = [{ id: REG, status: "rejected" }]
+    await expect(registerTeam({ tournamentId: TOURNAMENT, teamId: TEAM, squadPlayerIds: [PLAYER] }))
+      .rejects.toThrow("was rejected")
+    noWrites()
+  })
+  it.each(["pending", "approved", "waitlisted", "undefined-status legacy row"])("keeps refusing a live entry (%s)", async (status) => {
+    mocks.state.registrationRows = [{ id: REG, status: status === "undefined-status legacy row" ? undefined : status }]
+    await expect(registerTeam({ tournamentId: TOURNAMENT, teamId: TEAM, squadPlayerIds: [PLAYER] }))
+      .rejects.toThrow("already registered")
+    noWrites()
+  })
+})
+
 describe("Registration squad edit journey (ENH-05-03, Batch 105)", () => {
   beforeEach(() => { mocks.state.squad = [{ id: PLAYER }, { id: PLAYER2 }] })
   it("an assigned team manager edits the pending squad with an audited transition", async () => {
