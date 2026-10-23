@@ -5,7 +5,7 @@ import {
   registerTeam, approveRegistration, rejectRegistration, withdrawRegistration,
   confirmRegistrationPayment, getRegistrations, getMyRegistrations, updateRegistrationSquad,
 } from "@/app/actions/registrations"
-import { readTeamRegistrations } from "@/lib/registration-reads"
+import { readTeamRegistrations, readRegistrationSquadOptions } from "@/lib/registration-reads"
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), permission: vi.fn(), tenant: vi.fn(), fallback: vi.fn(), transaction: vi.fn(), execute: vi.fn(),
@@ -453,5 +453,29 @@ describe("Team-scoped registration reads (ENH-05-03 slice 2)", () => {
   it("propagates a read failure instead of a false empty state", async () => {
     mocks.select.mockImplementation(() => { throw new Error("DB down") })
     await expect(readTeamRegistrations(TENANT, TEAM, {})).rejects.toThrow("DB down")
+  })
+})
+
+describe("Registration squad options read (ENH-05-03 slice 4)", () => {
+  it("reads only the team's ACTIVE players as bare id/name options", async () => {
+    mocks.state.squad = [
+      { id: PLAYER, name: "Active One" },
+      { id: PLAYER2, name: "Active Two" },
+    ]
+    const options = await readRegistrationSquadOptions(TENANT, TEAM)
+    expect(options).toEqual([{ id: PLAYER, name: "Active One" }, { id: PLAYER2, name: "Active Two" }])
+    const query = mocks.queries.find(entry => entry.sql)!
+    expect(query.fields).toEqual({ id: expect.anything(), name: expect.anything() })
+    expect(query.params).toEqual(expect.arrayContaining([TENANT, TEAM]))
+    expect(query.limit).toBe(100)
+  })
+  it("refuses a malformed team id before SQL", async () => {
+    await expect(readRegistrationSquadOptions(TENANT, "bad")).rejects.toThrow()
+    expect(mocks.queries).toHaveLength(0)
+  })
+  it("propagates a read failure instead of a false empty picker", async () => {
+    mocks.state.squad = []
+    mocks.select.mockImplementation(() => { throw new Error("DB down") })
+    await expect(readRegistrationSquadOptions(TENANT, TEAM)).rejects.toThrow("DB down")
   })
 })

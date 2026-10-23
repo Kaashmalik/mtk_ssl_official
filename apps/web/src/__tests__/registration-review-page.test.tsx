@@ -23,7 +23,7 @@ vi.mock("@mtk/ui/components/ui/motion-wrapper", () => ({
 const TENANT = "00000000-0000-4000-8000-000000000001"
 const context = { tenantId: TENANT, actorId: "actor", clerkId: "clerk", role: "league_owner" }
 const row = {
-  id: "reg-1", teamName: "Falcons", tournamentName: "Summer Cup", squadPlayerIds: ["p1", "p2"],
+  id: "reg-1", teamId: "team-1", teamName: "Falcons", tournamentName: "Summer Cup", squadPlayerIds: ["p1", "p2"],
   registrationFee: "150", notes: "early", status: "pending", paymentStatus: "unpaid",
   createdAt: new Date("2026-10-15T00:00:00.000Z"),
 }
@@ -55,6 +55,7 @@ describe("Registrations review queue scopes to the exact active league", () => {
     expect(rows[0]).toMatchObject({
       id: "reg-1", teamName: "Falcons", tournamentName: "Summer Cup",
       squadCount: 2, registrationFee: "150", status: "pending", paymentStatus: "unpaid",
+      teamId: "team-1", squadPlayerIds: ["p1", "p2"],
     })
   })
 

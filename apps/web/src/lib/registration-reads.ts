@@ -117,6 +117,19 @@ export async function readActorRegistrations(tenantId: string, actorId: string, 
 }
 
 /**
+ * ENH-05-03 slice 4: the review console's squad editor needs the team's
+ * ACTIVE roster as bare id/name options. Only active players are offered
+ * because the squad-update service revalidates every submitted id against
+ * tenant+team+active — offering inactive links would be fake affordance.
+ */
+export async function readRegistrationSquadOptions(tenantId: string, teamId: string) {
+  z.string().uuid().parse(teamId)
+  return db.select({ id: players.id, name: players.name }).from(players)
+    .where(and(eq(players.tenantId, tenantId), eq(players.teamId, teamId), eq(players.isActive, true)))
+    .orderBy(asc(players.name), asc(players.id)).limit(100)
+}
+
+/**
  * ENH-05-03 slice 2: one team's own tournament entries, for the manager-facing
  * surface. Same exact-league joins and bounded page as the review list.
  */
