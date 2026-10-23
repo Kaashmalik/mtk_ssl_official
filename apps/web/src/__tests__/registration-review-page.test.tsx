@@ -58,6 +58,18 @@ describe("Registrations review queue scopes to the exact active league", () => {
     })
   })
 
+  it("attaches the shared policy's truthful eligibility sentence to every row (ENH-05-03 slice 3)", async () => {
+    mocks.list.mockResolvedValue({ data: [
+      row,
+      { ...row, id: "reg-2", status: "approved", paymentStatus: "paid" },
+    ], pagination: { page: 1, pageSize: 100, total: 2, totalPages: 1 } })
+    const tree = await RegistrationsPage()
+    const [rows] = collectRegistrations(tree) as [Array<Record<string, unknown>>]
+    // Every separate gate is named; the not-configured minimum is shown, never hidden.
+    expect(rows[0].eligibility).toBe("Not eligible yet: registration must be approved; registration fee must be paid or waived; tournament minimum squad size is not configured.")
+    expect(rows[1].eligibility).toBe("Not eligible yet: tournament minimum squad size is not configured.")
+  })
+
   it("sends a non-owner to the dashboard without reading the queue", async () => {
     mocks.access.mockResolvedValue(null)
     await expect(RegistrationsPage()).rejects.toThrow("redirect:/dashboard")

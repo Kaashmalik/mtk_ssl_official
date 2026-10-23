@@ -7,6 +7,7 @@ import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { Plus } from "lucide-react"
 import { RegistrationList } from "@/components/registrations/registration-list"
 import { resolveRegistrationReviewAccess, readRegistrations } from "@/lib/registration-reads"
+import { describeEligibility, evaluateSquadEligibility } from "@mtk/database/lib/registration-eligibility-policy"
 import { unstable_noStore as noStore } from "next/cache"
 
 export default async function RegistrationsPage() {
@@ -23,17 +24,28 @@ export default async function RegistrationsPage() {
   if (!context) redirect("/dashboard")
 
   const { data } = await readRegistrations(context.tenantId, { pageSize: 100 })
-  const resolvedRegistrations = data.map((reg) => ({
-    id: reg.id,
-    teamName: reg.teamName ?? "TBD Team",
-    tournamentName: reg.tournamentName ?? "TBD Tournament",
-    squadCount: reg.squadPlayerIds ? reg.squadPlayerIds.length : 0,
-    registrationFee: reg.registrationFee || "0",
-    notes: reg.notes,
-    status: reg.status || "pending",
-    paymentStatus: reg.paymentStatus || "unpaid",
-    createdAt: reg.createdAt,
-  }))
+  const resolvedRegistrations = data.map((reg) => {
+    const status = reg.status || "pending"
+    const paymentStatus = reg.paymentStatus || "unpaid"
+    const squadCount = reg.squadPlayerIds ? reg.squadPlayerIds.length : 0
+    return {
+      id: reg.id,
+      teamName: reg.teamName ?? "TBD Team",
+      tournamentName: reg.tournamentName ?? "TBD Tournament",
+      squadCount,
+      registrationFee: reg.registrationFee || "0",
+      notes: reg.notes,
+      status,
+      paymentStatus,
+      createdAt: reg.createdAt,
+      // ENH-05-03 slice 3: the reviewer sees the SAME truthful sentence as the
+      // team (shared policy). The tournament minimum squad size is not
+      // configurable in the schema yet, so that blocker is shown, not hidden.
+      eligibility: describeEligibility(evaluateSquadEligibility({
+        approvalStatus: status, paymentStatus, squadSize: squadCount, minSquadSize: -1,
+      })),
+    }
+  })
 
   return (
     <div className="space-y-6">
