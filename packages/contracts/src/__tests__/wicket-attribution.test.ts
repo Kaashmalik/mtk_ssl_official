@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
+  resolveWicketFielderId,
   resolveWicketVictimId,
   victimOptionsFromParticipants,
+  wicketFielderQuestion,
+  wicketFielderRequirement,
   wicketRequiresVictimAttribution,
   type WicketVictimOption,
 } from "../wicket-attribution"
@@ -102,5 +105,86 @@ describe("Batch 102: never smuggling an un-offered id", () => {
     expect(resolveWicketVictimId({ wicketType: "run_out", options, chosenId: THIRD_WHEEL })).toBeNull()
     expect(resolveWicketVictimId({ wicketType: "run_out", options, chosenId: null })).toBeNull()
     expect(resolveWicketVictimId({ wicketType: "run_out", options, chosenId: undefined })).toBeNull()
+  })
+})
+
+/**
+ * Batch 103: fielder attribution (the Batch 102 ledger deferral). The command
+ * schema, the offline queue adapter, the store types and the canonical
+ * service (persist + bowling-XI validation) have carried
+ * `wicketFielderId` since Batch 100 - but NEITHER client ever collected it,
+ * so a caught dismissal was written without its catcher. The rule below is
+ * ONE shared implementation for the web and mobile wicket flows.
+ *
+ * Cricket laws decide which dismissals name a fielder:
+ * - `caught`   → REQUIRED (the catcher; the bowler may take it - caught and
+ *                bowled - so the bowler id is a legitimate candidate).
+ * - `run_out`  → OPTIONAL (the fielder who broke the wicket; multi-fielder
+ *                relays are genuinely ambiguous, so skipping stays honest).
+ * - `stumped`  → OPTIONAL (effectually always the wicketkeeper, but the
+ *                surface does not observe a designated keeper, so the scorer
+ *                may name or skip - the record never guesses one).
+ * - `bowled`/`lbw`/`hit_wicket`/`retired`/`retired_hurt` → NONE: no fielder
+ *   effects the dismissal and a collected id would be smuggled data.
+ */
+const CATCHER = "00000000-0000-4000-8000-0000000000f1"
+const KEEPER = "00000000-0000-4000-8000-0000000000f2"
+const BOWLER = "00000000-0000-4000-8000-0000000000f3"
+
+describe("Batch 103: which dismissals ask for the fielder", () => {
+  it("caught is required, run_out/stumped optional, everything else none", () => {
+    expect(wicketFielderRequirement("caught")).toBe("required")
+    expect(wicketFielderRequirement("run_out")).toBe("optional")
+    expect(wicketFielderRequirement("stumped")).toBe("optional")
+    for (const type of ["bowled", "lbw", "hit_wicket", "retired", "retired_hurt"]) {
+      expect(wicketFielderRequirement(type)).toBe("none")
+    }
+    // Absent/junk types cannot become fielder questions (exact ids only).
+    expect(wicketFielderRequirement(null)).toBe("none")
+    expect(wicketFielderRequirement(undefined)).toBe("none")
+    expect(wicketFielderRequirement("")).toBe("none")
+    expect(wicketFielderRequirement("CAUGHT")).toBe("none")
+    expect(wicketFielderRequirement("run out")).toBe("none")
+  })
+
+  it("the web and mobile flows read the same question text per type", () => {
+    expect(wicketFielderQuestion("caught")).toContain("catch")
+    expect(wicketFielderQuestion("run_out")).toContain("run")
+    expect(wicketFielderQuestion("stumped")).toContain("keeper")
+    expect(wicketFielderQuestion("bowled")).toBeNull()
+    expect(wicketFielderQuestion("lbw")).toBeNull()
+    expect(wicketFielderQuestion("hit_wicket")).toBeNull()
+  })
+})
+
+describe("Batch 103: resolving the recorded fielder id", () => {
+  const options = [CATCHER, KEEPER, BOWLER]
+
+  it("records the chosen fielder for caught/run_out/stumped against the offered candidates", () => {
+    expect(resolveWicketFielderId({ wicketType: "caught", options, chosenId: CATCHER })).toBe(CATCHER)
+    expect(resolveWicketFielderId({ wicketType: "run_out", options, chosenId: CATCHER })).toBe(CATCHER)
+    expect(resolveWicketFielderId({ wicketType: "stumped", options, chosenId: KEEPER })).toBe(KEEPER)
+  })
+
+  it("allows the bowler as the catcher (caught and bowled)", () => {
+    expect(resolveWicketFielderId({ wicketType: "caught", options, chosenId: BOWLER })).toBe(BOWLER)
+  })
+
+  it("a skipped optional fielder records nothing - never a guess", () => {
+    expect(resolveWicketFielderId({ wicketType: "run_out", options, chosenId: null })).toBeNull()
+    expect(resolveWicketFielderId({ wicketType: "stumped", options, chosenId: undefined })).toBeNull()
+  })
+
+  it("a missing candidate set can never satisfy even a required catch (degrade, not invent)", () => {
+    expect(resolveWicketFielderId({ wicketType: "caught", options: [], chosenId: CATCHER })).toBeNull()
+    expect(resolveWicketFielderId({ wicketType: "caught", options, chosenId: null })).toBeNull()
+  })
+
+  it("refuses a fielder on fielder-less dismissals and a foreign/smuggled id", () => {
+    expect(resolveWicketFielderId({ wicketType: "bowled", options, chosenId: CATCHER })).toBeNull()
+    expect(resolveWicketFielderId({ wicketType: "lbw", options, chosenId: CATCHER })).toBeNull()
+    expect(resolveWicketFielderId({ wicketType: "hit_wicket", options, chosenId: CATCHER })).toBeNull()
+    expect(resolveWicketFielderId({ wicketType: "retired", options, chosenId: CATCHER })).toBeNull()
+    expect(resolveWicketFielderId({ wicketType: "caught", options: [CATCHER, KEEPER], chosenId: THIRD_WHEEL })).toBeNull()
   })
 })

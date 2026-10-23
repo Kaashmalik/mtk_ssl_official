@@ -76,3 +76,64 @@ export function resolveWicketVictimId(input: {
     ? input.chosenId
     : null
 }
+
+/**
+ * Batch 103: which dismissals ask for the dismissing fielder.
+ *
+ * - `caught` → REQUIRED: the catcher is part of the official record (the
+ *   bowler may be the catcher — caught and bowled — so the bowler id is a
+ *   legitimate candidate).
+ * - `run_out` / `stumped` → OPTIONAL: run-out relays can involve several
+ *   fielders, and no surface observes a designated wicketkeeper, so the
+ *   scorer may name or skip; the record never guesses one.
+ * - Everything else (`bowled`, `lbw`, `hit_wicket`, `retired`,
+ *   `retired_hurt`, junk) → NONE: no fielder effects the dismissal, an id
+ *   arriving for one is smuggled data and is refused by
+ *   `resolveWicketFielderId`.
+ *
+ * This is a UI-collection question only. The canonical service re-validates
+ * any recorded `fielderId` against the FIELDING XI (scoring-write-access)
+ * regardless of what the surface collected.
+ */
+export function wicketFielderRequirement(wicketType: string | null | undefined): "required" | "optional" | "none" {
+  if (wicketType === "caught") return "required"
+  if (wicketType === "run_out" || wicketType === "stumped") return "optional"
+  return "none"
+}
+
+/** The scorer-facing question for a fielder-attribution step (shared by the
+ *  web and mobile wicket flows so the wording cannot drift); null when the
+ *  dismissal never asks. */
+export function wicketFielderQuestion(wicketType: string | null | undefined): string | null {
+  switch (wicketType) {
+    case "caught":
+      return "Who took the catch?"
+    case "run_out":
+      return "Who effected the run out?"
+    case "stumped":
+      return "Which wicketkeeper?"
+    default:
+      return null
+  }
+}
+
+/**
+ * Resolve the `wicketFielderId` to record for a dismissal. Mirrors the victim
+ * rule: the chosen id must have been OFFERED (candidates come from the
+ * fielding side; the service re-validates team membership) — an un-offered
+ * or stale id is never written. A skipped optional question, an empty
+ * candidate set, or a fielder-less dismissal all record WITHOUT attribution.
+ * Candidates may be bare ids or `{ id }` records (e.g. squad entries).
+ */
+export function resolveWicketFielderId(input: {
+  wicketType: string | null | undefined
+  options: Array<string | { id: string }>
+  chosenId?: string | null
+}): string | null {
+  if (wicketFielderRequirement(input.wicketType) === "none") return null
+  if (input.options.length === 0) return null
+  if (!input.chosenId) return null
+  return input.options.some(option => typeof option === "string" ? option === input.chosenId : option.id === input.chosenId)
+    ? input.chosenId
+    : null
+}

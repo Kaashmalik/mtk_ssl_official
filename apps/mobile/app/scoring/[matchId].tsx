@@ -12,8 +12,11 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
 import {
+  resolveWicketFielderId,
   resolveWicketVictimId,
   victimOptionsFromParticipants,
+  wicketFielderQuestion,
+  wicketFielderRequirement,
 } from "@mtk/contracts";
 import { useMatchStore } from "@/store/match-store";
 import { useOfflineStore, BallData } from "@/store/offline-store";
@@ -34,7 +37,12 @@ type PlayersResponse = { teamA: ServerPlayer[]; teamB: ServerPlayer[] };
 interface MobileMatchState {
   queueScope: { accountId: string; tenantId: string; matchId: string };
   canScore: boolean;
-  match: { id: string; status: string; scoringRevision?: number; handoverEpoch?: number };
+  match: {
+    id: string; status: string; scoringRevision?: number; handoverEpoch?: number;
+    /** Batch 103: both sides identify the FIELDING squad for the
+     *  wicket-attribution question (the innings carries the batting team). */
+    teamAId: string; teamBId: string;
+  };
   innings: Array<{
     id: string; inningsNumber: number; teamId: string; status?: string;
     totalRuns?: number; totalWickets?: number; totalBalls?: number;
@@ -68,6 +76,10 @@ function AuthenticatedScoring() {
   // batter left (mirroring the web picker); otherwise the record is written
   // WITHOUT a victim id and the server fold default + self-heal applies.
   const [victimPick, setVictimPick] = useState<"run_out" | null>(null);
+  // Batch 103: the fielder question (caught → catcher required by rule;
+  // run_out/stumped → optional). Remembers the victim so a run-out asks
+  // BOTH questions in one flow.
+  const [fielderPick, setFielderPick] = useState<{ type: BallData["wicketType"]; victimId?: string } | null>(null);
 
   const [batsmanId, setBatsmanId] = useState("");
   const [bowlerId, setBowlerId] = useState("");
@@ -104,6 +116,18 @@ function AuthenticatedScoring() {
     // actual striker and bowler from the eligible published squads.
     return [...players.teamA, ...players.teamB];
   }, [players]);
+  // Batch 103: the FIELDING side - the dismissal credit belongs to the team
+  // that is not batting this innings (the bowler is among them, so a
+  // caught-and-bowled catcher remains a legitimate choice). No squad context
+  // → no fielder question; the record is then written without fielder
+  // attribution exactly as before Batch 103.
+  const fielders = useMemo(() => {
+    if (!players || !hydrated || !innings) return [] as ServerPlayer[];
+    const fielding = innings.teamId === hydrated.match.teamAId
+      ? players.teamB
+      : innings.teamId === hydrated.match.teamBId ? players.teamA : [];
+    return fielding;
+  }, [players, hydrated, innings?.teamId]);
 
   if (isSignedIn === false) {
     return (
@@ -147,7 +171,7 @@ function AuthenticatedScoring() {
     battingPlayers.find((player) => player.id === id)?.name ?? "Unknown batter";
 
   const localRecord = (
-    runType: { kind: "runs"; value: number } | { kind: "wicket" | "wide" | "noball" | "bye" | "legbye"; wicketType?: BallData["wicketType"]; wicketPlayerOutId?: BallData["wicketPlayerOutId"] }
+    runType: { kind: "runs"; value: number } | { kind: "wicket" | "wide" | "noball" | "bye" | "legbye"; wicketType?: BallData["wicketType"]; wicketPlayerOutId?: BallData["wicketPlayerOutId"]; wicketFielderId?: string }
   ) => {
     if (!batsmanId || !bowlerId || !innings) {
       // The server refuses incomplete deliveries; do not queue what cannot
@@ -156,6 +180,7 @@ function AuthenticatedScoring() {
     }
     if (runType.kind === "wicket" && !runType.wicketType) {
       setVictimPick(null); // fresh panel: never resurface a cancelled victim choice
+      setFielderPick(null); // Batch 103: same rule for a cancelled fielder choice
       setPendingWicket(true); // the dismissal type is part of the official record - never guessed
       return;
     }
@@ -186,6 +211,17 @@ function AuthenticatedScoring() {
             wicketType: runType.wicketType,
             options: victimOptions,
             chosenId: runType.wicketPlayerOutId,
+          }) ?? undefined
+        : undefined,
+      // Batch 103: the validated dismissing fielder (or nothing — a skipped
+      // optional question, an absent squad or a foreign id records WITHOUT
+      // attribution; the canonical service re-validates the id against the
+      // fielding XI regardless of what this device recorded).
+      wicketFielderId: runType.kind === "wicket"
+        ? resolveWicketFielderId({
+            wicketType: runType.wicketType,
+            options: fielders.map((fielder) => fielder.id),
+            chosenId: runType.wicketFielderId,
           }) ?? undefined
         : undefined,
       isWide: runType.kind === "wide",
@@ -279,7 +315,64 @@ function AuthenticatedScoring() {
 
       {pendingWicket && (
         <View style={styles.wicketPanel}>
-          {victimPick == null ? (
+          {fielderPick ? (
+            <>
+              <Text style={styles.pickLabel}>
+                {wicketFielderQuestion(fielderPick.type) ?? "Who dismissed the batter?"}
+              </Text>
+              {fielders.length === 0 ? (
+                <Text style={styles.hintLine}>
+                  No fielding squad published yet — the dismissal will be recorded without the fielder's name.
+                </Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerRow}>
+                  {fielders.map((fielder) => (
+                    <TouchableOpacity
+                      key={fielder.id}
+                      style={styles.chip}
+                      onPress={() => {
+                        setFielderPick(null);
+                        setPendingWicket(false);
+                        localRecord({
+                          kind: "wicket",
+                          wicketType: fielderPick.type,
+                          wicketPlayerOutId: fielderPick.victimId,
+                          wicketFielderId: fielder.id,
+                        });
+                      }}
+                    >
+                      <Text style={styles.chipText} numberOfLines={1}>{fielder.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              {wicketFielderRequirement(fielderPick.type) === "optional" && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setFielderPick(null);
+                    setPendingWicket(false);
+                    localRecord({
+                      kind: "wicket",
+                      wicketType: fielderPick.type,
+                      wicketPlayerOutId: fielderPick.victimId,
+                    });
+                  }}
+                >
+                  <Text style={styles.hintLine}>Record without fielder</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={() => {
+                  // Back re-opens the dismissal-type question with no held
+                  // choice: a fresh panel never resurfaces a cancelled pick.
+                  setFielderPick(null);
+                  setVictimPick(null);
+                }}
+              >
+                <Text style={styles.hintLine}>Back</Text>
+              </TouchableOpacity>
+            </>
+          ) : victimPick == null ? (
             <>
               <Text style={styles.pickLabel}>How was the batter out?</Text>
               <View style={styles.row}>
@@ -298,6 +391,14 @@ function AuthenticatedScoring() {
                         setVictimPick(kind);
                         return;
                       }
+                      // Batch 103: caught/run_out/stumped ask WHO dismissed
+                      // the batter (from the fielding squad only); a skipped
+                      // question records without attribution, never a guess.
+                      if (wicketFielderRequirement(kind) !== "none" && fielders.length > 0) {
+                        setVictimPick(null);
+                        setFielderPick({ type: kind });
+                        return;
+                      }
                       setPendingWicket(false);
                       localRecord({ kind: "wicket", wicketType: kind });
                     }}
@@ -306,7 +407,7 @@ function AuthenticatedScoring() {
                   </TouchableOpacity>
                 ))}
               </View>
-              <TouchableOpacity onPress={() => setPendingWicket(false)}>
+              <TouchableOpacity onPress={() => { setFielderPick(null); setVictimPick(null); setPendingWicket(false); }}>
                 <Text style={styles.hintLine}>Cancel</Text>
               </TouchableOpacity>
             </>
@@ -319,6 +420,12 @@ function AuthenticatedScoring() {
                   style={styles.chip}
                   onPress={() => {
                     setVictimPick(null);
+                    // Batch 103: after the victim, a caught/run_out/stumped
+                    // dismissal may still ask for the dismissing fielder.
+                    if (wicketFielderRequirement(victimPick) !== "none" && fielders.length > 0) {
+                      setFielderPick({ type: victimPick, victimId: option.id });
+                      return;
+                    }
                     setPendingWicket(false);
                     localRecord({ kind: "wicket", wicketType: victimPick, wicketPlayerOutId: option.id });
                   }}

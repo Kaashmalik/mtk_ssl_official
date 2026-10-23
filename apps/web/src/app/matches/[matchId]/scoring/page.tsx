@@ -117,6 +117,21 @@ function ScoringInterface() {
     }));
   }, [confirmedParticipants, playersData]);
 
+  // Batch 103: the fielding side for the wicket-attribution question. The
+  // innings row carries the BATTING team id; the dismissal credit belongs to
+  // the other side (the bowler is among them - caught and bowled). Absent
+  // context degrades to no fielder question; the record is then written
+  // without fielder attribution exactly as before Batch 103.
+  const fielders = useMemo(() => {
+    const battingTeamId = currentInningsData?.teamId;
+    const teamAId = matchData?.match.teamAId;
+    const teamBId = matchData?.match.teamBId;
+    if (!battingTeamId || !teamAId || !teamBId) return [];
+    const side = battingTeamId === teamAId ? playersData?.teamB
+      : battingTeamId === teamBId ? playersData?.teamA : undefined;
+    return (side ?? []).map(player => ({ id: player.id, name: player.name }));
+  }, [currentInningsData?.teamId, matchData?.match.teamAId, matchData?.match.teamBId, playersData]);
+
   const totalOvers = matchData?.match.totalOvers ?? 20;
 
   // Live updates from scoring-service WebSocket (reconnect + backoff)
@@ -750,6 +765,7 @@ function ScoringInterface() {
               batsmanId={selectedBatsman}
               bowlerId={selectedBowler}
               creaseBatters={creaseBatters}
+              fielders={fielders}
               onBallAdded={persistBallToDB}
             />
           </Card>
