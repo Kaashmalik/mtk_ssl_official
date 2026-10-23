@@ -9,9 +9,11 @@ import { unstable_noStore as noStore } from "next/cache"
 import { Calendar, Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { requirePublicTenantId } from "@/lib/public-tenant"
-import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones } from "@/lib/public-visibility"
+import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones, readPublicBattingLeaderboard, readPublicBowlingLeaderboard } from "@/lib/public-visibility"
 import { resolvePublicTournamentMetadata } from "@/lib/public-tournament-metadata"
 import { buildTournamentSportsEvent } from "@/lib/sports-event-structured-data"
+import { buildTournamentLeaders } from "@/lib/tournament-leaders"
+import { TournamentLeaders } from "@/components/tournaments/tournament-leaders"
 import { JsonLd } from "@/components/json-ld"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -54,6 +56,14 @@ export default async function PublicTournamentPage({ params }: { params: Promise
   const fanVotes = await Promise.all(fanPolls.map(poll => readMyPollVoteSafe(tenantId, poll.pollId)))
   // FAN-03: milestones derived from official scorecard rows (publication-gated).
   const milestones = await readPublishedTournamentMilestones(tenantId, id)
+  // Batch 124: "Most Runs / Most Wickets" from the SAME publication-gated,
+  // minor-consent-gated reads the leaderboards page uses, scoped to THIS
+  // competition; the builder emits null when neither list has complete rows.
+  const [battingLeaderRows, bowlingLeaderRows] = await Promise.all([
+    readPublicBattingLeaderboard(tenantId, { tournamentId: id }),
+    readPublicBowlingLeaderboard(tenantId, { tournamentId: id }),
+  ])
+  const tournamentLeaders = buildTournamentLeaders({ batting: battingLeaderRows, bowling: bowlingLeaderRows })
 
   // PUB-06: every raw query on this unauthenticated page selects EXPLICIT
   // columns - no full-row reads, so internal-only fields (createdBy,
@@ -288,6 +298,10 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       {/* FAN-03 (Batch 165): approved analytic package - the derived form
           guide. Same official facts as the points table; disclosure attached. */}
       <FormGuide rows={formGuideRows} />
+
+      {/* Batch 124: Most Runs / Most Wickets from the publication-gated
+          leaderboard reads; only present when at least one list has rows. */}
+      {tournamentLeaders ? <TournamentLeaders data={tournamentLeaders} /> : null}
 
       {standings.length > 0 && (
                 <Card>
