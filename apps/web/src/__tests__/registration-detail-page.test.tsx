@@ -69,4 +69,13 @@ describe("Registration detail page authority (ENH-05-03 slice 6)", () => {
     mocks.grant.mockReturnValue(null)
     await expect(RegistrationDetailPage({ params: Promise.resolve({ id: detail.id }) })).rejects.toThrow("redirect:/dashboard")
   })
+
+  it("the detail route carries a loading skeleton shaped like the page (Batch 114)", async () => {
+    const React = (await import("react")).default
+    const { renderToStaticMarkup } = await import("react-dom/server")
+    const { default: RegistrationDetailLoading } = await import("@/app/dashboard/registrations/[id]/loading")
+    const html = renderToStaticMarkup(React.createElement(RegistrationDetailLoading))
+    expect(html).toContain("space-y-6")
+    expect(html).toContain("animate-shimmer") // a real Skeleton affordance, not an empty shell
+  })
 })
