@@ -30,9 +30,11 @@ export default async function RegistrationsPage() {
     const squadCount = reg.squadPlayerIds ? reg.squadPlayerIds.length : 0
     return {
       id: reg.id,
+      teamId: reg.teamId,
       teamName: reg.teamName ?? "TBD Team",
       tournamentName: reg.tournamentName ?? "TBD Tournament",
       squadCount,
+      squadPlayerIds: reg.squadPlayerIds ?? [],
       registrationFee: reg.registrationFee || "0",
       notes: reg.notes,
       status,

@@ -8,6 +8,7 @@ import { resolveActiveTenantId, requirePermissionServer } from "@/lib/rbac-serve
 import type { Permission } from "@/lib/rbac"
 import {
   requireRegistrationReadContext, readRegistrations, readActorRegistrations, readRegistrationTournamentOptions,
+  readRegistrationSquadOptions,
 } from "@/lib/registration-reads"
 import {
   createLeagueRegistration, approveLeagueRegistration, rejectLeagueRegistration, withdrawLeagueRegistration,
@@ -116,6 +117,18 @@ export const updateRegistrationSquad = withAuth("registration:create", async (
     revalidatePath("/dashboard/registrations")
   }
   return { success: true, changed: updated.changed, registration: { id: updated.id, status: updated.status } }
+})
+
+/**
+ * ENH-05-03 slice 4: the review console's squad editor loads the team's
+ * ACTIVE players as id/name options. The read is tenant+team scoped and the
+ * mutation-era permission is used so the affordance never outruns the edit
+ * authority; the squad-update service revalidates every id anyway.
+ */
+export const getRegistrationSquadOptions = withAuth("registration:create", async (teamId: string) => {
+  z.string().uuid().parse(teamId)
+  const tenantId = await mutationTenant("registration:create")
+  return readRegistrationSquadOptions(tenantId, teamId)
 })
 
 export const getRegistrations = withAuth("registration:manage", async (tournamentId?: string) => {
