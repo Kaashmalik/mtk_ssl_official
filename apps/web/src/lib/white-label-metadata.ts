@@ -59,9 +59,13 @@ export function buildTenantBrandMetadata(base: Metadata, brand: BrandPresentatio
  * metadata layer above.
  */
 
+export const PLATFORM_NAME = "Shakir Super League"
+const PLATFORM_SHORT_LABEL = "SSL"
+const PLATFORM_THEME_COLOR = "#22c55e"
+
 const PLATFORM_MANIFEST = {
-  name: "Shakir Super League",
-  short_name: "SSL",
+  name: PLATFORM_NAME,
+  short_name: PLATFORM_SHORT_LABEL,
   description: "Pakistan's #1 Cricket Tournament & League Management Platform",
   start_url: "/dashboard",
   scope: "/",
@@ -78,8 +82,6 @@ const PLATFORM_MANIFEST = {
   ],
 } as const
 
-const PLATFORM_THEME_COLOR = "#22c55e"
-
 function safeThemeColor(value: string | undefined): string {
   return typeof value === "string" && /^#[\da-fA-F]{6}$/.test(value) ? value : PLATFORM_THEME_COLOR
 }
@@ -91,6 +93,20 @@ function shortAppName(appName: string): string {
   const cut = appName.slice(0, 12)
   const spaceIndex = cut.lastIndexOf(" ")
   return spaceIndex >= 4 ? cut.slice(0, spaceIndex) : cut
+}
+
+/** Batch 125: the ONE sanitized answer for every VISIBLE brand surface
+ * (hero navbar, auth screens, invoices) — the same defend-in-depth
+ * sanitization as the metadata layer, platform name as the fallback. */
+export function resolveBrandName(brand: { appName?: string } | null | undefined): string {
+  return safeAppName(brand?.appName) ?? PLATFORM_NAME
+}
+
+/** The short label for tight surfaces ("Creating your X account"), computed
+ * by the same rule as the PWA short name. */
+export function shortTenantLabel(brand: { appName?: string } | null | undefined): string {
+  const appName = safeAppName(brand?.appName)
+  return appName ? shortAppName(appName) : PLATFORM_SHORT_LABEL
 }
 
 export function buildTenantManifest(brand: BrandPresentation | null): object {

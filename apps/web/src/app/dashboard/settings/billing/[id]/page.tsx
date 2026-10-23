@@ -45,7 +45,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <CardHeader className="border-b">
           <div className="flex items-start justify-between">
             <div>
-              <CardTitle className="text-xl">Shakir Super League</CardTitle>
+              <CardTitle className="text-xl">{league.name}</CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
                 {league.name}
                 {league.slug ? ` · ${league.slug}` : ""}
