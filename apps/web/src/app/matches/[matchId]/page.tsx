@@ -22,6 +22,14 @@ import { getTranslations } from "next-intl/server"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
 import { deriveMatchRecap } from "@mtk/database/lib/match-recap"
 import { deriveInningsOverlay, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
+import { resolvePublicMatchMetadata } from "@/lib/public-match-metadata"
+
+export async function generateMetadata({ params }: { params: Promise<{ matchId: string }> }) {
+  const { matchId } = await params
+  // Bounded, fail-closed metadata: the same publication predicates as the
+  // render below decide whether this shareable page is indexable at all.
+  return resolvePublicMatchMetadata(matchId)
+}
 
 export default async function PublicMatchPage({ params }: { params: Promise<{ matchId: string }> }) {
   noStore()
