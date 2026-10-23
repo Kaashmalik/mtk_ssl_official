@@ -1,0 +1,51 @@
+import type { Metadata } from "next"
+
+/**
+ * Batch 112 (SaaS SEO foundation): the ROOT social-graph metadata, extracted
+ * from the layout into a font-free module so it is directly pinnable by the
+ * SEO contract tests (the layout itself cannot be imported under the node
+ * test environment because of next/font ESM coupling).
+ */
+export function appUrl(): string {
+  return (process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001").replace(/\/$/, "")
+}
+
+export function buildRootMetadata(): Metadata {
+  return {
+    metadataBase: new URL(appUrl()),
+    title: {
+      default: "Shakir Super League - Pakistan's #1 Cricket Platform",
+      template: "%s | Shakir Super League",
+    },
+    description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
+    keywords: ["cricket", "tournament", "league", "Pakistan", "scoring"],
+    robots: { index: true, follow: true },
+    alternates: { canonical: "/" },
+    openGraph: {
+      type: "website",
+      siteName: "Shakir Super League",
+      title: "Shakir Super League - Pakistan's #1 Cricket Platform",
+      description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
+      url: "/",
+      locale: "en_PK",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "Shakir Super League - Pakistan's #1 Cricket Platform",
+      description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
+    },
+    manifest: "/manifest.json",
+    appleWebApp: {
+      capable: true,
+      title: "SSL",
+      statusBarStyle: "black-translucent",
+    },
+    icons: {
+      icon: [
+        { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+        { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      ],
+      apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    },
+  }
+}

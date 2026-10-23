@@ -13,24 +13,9 @@ import { TenantBrandingProvider } from "@/components/tenant-branding-provider";
 import { readRequestBrand } from "@/lib/request-brand";
 import { brandVariables } from "@/lib/brand-presentation";
 
-export const metadata: Metadata = {
-  title: "Shakir Super League - Pakistan's #1 Cricket Platform",
-  description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
-  keywords: ["cricket", "tournament", "league", "Pakistan", "scoring"],
-  manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    title: "SSL",
-    statusBarStyle: "black-translucent",
-  },
-  icons: {
-    icon: [
-      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-    ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
-  },
-};
+import { buildRootMetadata } from "@/lib/site-metadata";
+
+export const metadata: Metadata = buildRootMetadata();
 
 export default async function RootLayout({
   children,
