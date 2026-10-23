@@ -1,13 +1,15 @@
 import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { unstable_noStore as noStore } from "next/cache"
+import { buildPageMetadata } from "@/lib/site-metadata"
 import { readListedHubLeagues } from "@/lib/public-hub"
 
-export const metadata = {
+export const metadata = buildPageMetadata({
   title: "Public cricket hub",
   description:
     "Discover cricket leagues that have explicitly published themselves: announced competitions and live fixtures only. Unlisted leagues stay private.",
-}
+  path: "/hub",
+})
 
 /**
  * PUB-02: the cross-league public discovery page — the ONLY page that reads

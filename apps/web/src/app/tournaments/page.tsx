@@ -6,6 +6,14 @@ import { unstable_noStore as noStore } from "next/cache"
 import { Calendar, Trophy } from "lucide-react"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournaments, type PublicTournament } from "@/lib/public-visibility"
+import { buildPageMetadata } from "@/lib/site-metadata"
+
+export const metadata = buildPageMetadata({
+  title: "Cricket tournaments",
+  description:
+    "Published cricket tournaments — draft and cancelled competitions never appear; only what a league has deliberately made public is listed.",
+  path: "/tournaments",
+})
 
 export const dynamic = "force-dynamic"
 

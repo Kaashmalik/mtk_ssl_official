@@ -49,3 +49,29 @@ export function buildRootMetadata(): Metadata {
     },
   }
 }
+
+/**
+ * Batch 113: PER-ROUTE public metadata. The root template appends the site
+ * name to the title; each public page contributes only its honest title,
+ * description and canonical path so search engines never see duplicated
+ * canonicals across the public surfaces.
+ */
+export function buildPageMetadata(options: { title: string; description: string; path: string }): Metadata {
+  return {
+    title: options.title,
+    description: options.description,
+    alternates: { canonical: options.path },
+    openGraph: {
+      type: "website",
+      siteName: "Shakir Super League",
+      title: options.title,
+      description: options.description,
+      url: options.path,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: options.title,
+      description: options.description,
+    },
+  }
+}
