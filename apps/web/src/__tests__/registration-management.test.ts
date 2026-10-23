@@ -3,7 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core"
 import { leagueRegistrations, auditLogs, payments, players, teams } from "@mtk/database"
 import {
   registerTeam, approveRegistration, rejectRegistration, withdrawRegistration,
-  confirmRegistrationPayment, getRegistrations, getMyRegistrations,
+  confirmRegistrationPayment, getRegistrations, getMyRegistrations, updateRegistrationSquad,
 } from "@/app/actions/registrations"
 
 const mocks = vi.hoisted(() => ({
@@ -39,12 +39,12 @@ const registration = { id: REG, tenantId: TENANT, tournamentId: TOURNAMENT, team
   paymentStatus: "paid", registrationFee: "500", rejectionReason: null, squadPlayerIds: [PLAYER], notes: null }
 
 const dialect = new PgDialect()
-const operations = ["REGISTRATION_CREATE", "REGISTRATION_APPROVE", "REGISTRATION_REJECT", "REGISTRATION_WITHDRAW", "REGISTRATION_PAYMENT"] as const
+const operations = ["REGISTRATION_CREATE", "REGISTRATION_APPROVE", "REGISTRATION_REJECT", "REGISTRATION_WITHDRAW", "REGISTRATION_PAYMENT", "REGISTRATION_SQUAD"] as const
 type Operation = typeof operations[number]
 const permissionFor: Record<Operation, string> = {
   REGISTRATION_CREATE: "registration:create", REGISTRATION_APPROVE: "registration:manage",
   REGISTRATION_REJECT: "registration:manage", REGISTRATION_WITHDRAW: "registration:create",
-  REGISTRATION_PAYMENT: "registration:manage",
+  REGISTRATION_PAYMENT: "registration:manage", REGISTRATION_SQUAD: "registration:create",
 }
 function run(operation: Operation) {
   switch (operation) {
@@ -53,6 +53,7 @@ function run(operation: Operation) {
     case "REGISTRATION_REJECT": return rejectRegistration(REG, "Not eligible this season")
     case "REGISTRATION_WITHDRAW": return withdrawRegistration(REG)
     case "REGISTRATION_PAYMENT": return confirmRegistrationPayment(REG, { method: "bank_transfer", transactionReference: "REF-1" })
+    case "REGISTRATION_SQUAD": return updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })
   }
 }
 
@@ -126,7 +127,11 @@ function noWrites() {
 }
 
 describe.each(operations)("Current %s review authority", (operation) => {
-  beforeEach(() => { if (operation === "REGISTRATION_PAYMENT") mocks.state.registration.paymentStatus = "unpaid" })
+  beforeEach(() => {
+    if (operation === "REGISTRATION_PAYMENT") mocks.state.registration.paymentStatus = "unpaid"
+    // The squad edit re-validates every submitted id against the team's ACTIVE roster.
+    if (operation === "REGISTRATION_SQUAD") mocks.state.squad = [{ id: PLAYER }, { id: PLAYER2 }]
+  })
   it("writes/audits in one transaction using the exact active league and current account", async () => {
     await expect(run(operation)).resolves.toMatchObject({ success: true })
     expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "read committed" })
@@ -238,6 +243,78 @@ describe("Registration create eligibility and delegation", () => {
   it("rejects duplicate squad members before SQL", async () => {
     await expect(registerTeam({ tournamentId: TOURNAMENT, teamId: TEAM, squadPlayerIds: [PLAYER, PLAYER] })).rejects.toThrow()
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe("Registration squad edit journey (ENH-05-03, Batch 105)", () => {
+  beforeEach(() => { mocks.state.squad = [{ id: PLAYER }, { id: PLAYER2 }] })
+  it("an assigned team manager edits the pending squad with an audited transition", async () => {
+    mocks.state.member = { ...member, role: "team_manager" }
+    mocks.state.registration.squadPlayerIds = [PLAYER]
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })).resolves.toMatchObject({
+      success: true, registration: { id: REG },
+    })
+    expect(mocks.permission).toHaveBeenCalledWith("registration:create", TENANT)
+    // Documented order holds with the team locked before the registration row.
+    const locks = mocks.execute.mock.calls.map(([q]) => dialect.sqlToQuery(q).sql)
+    const teamLock = locks.findIndex(sql => sql.includes('FROM "teams"'))
+    const registrationLock = locks.findIndex(sql => sql.includes('FROM "league_registrations"'))
+    expect(teamLock).toBeGreaterThan(-1)
+    expect(teamLock).toBeLessThan(registrationLock)
+    expect(mocks.set.mock.calls.at(-1)![0]).toMatchObject({ squadPlayerIds: [PLAYER, PLAYER2] })
+    const auditRow = mocks.values.mock.calls.at(-1)![0]
+    expect(auditRow).toMatchObject({ tenantId: TENANT, actorId: ACTOR, actorRole: "team_manager", method: "REGISTRATION_SQUAD" })
+    // The audit records the SIZES of the transition, not a replicated squad list.
+    expect(auditRow.payload.before.squadPlayerIds).toBeUndefined()
+    expect(auditRow.payload.before).toMatchObject({ squadSize: 1 })
+    expect(auditRow.payload.after).toMatchObject({ squadSize: 2 })
+    expect(auditRow.payload.changedFields).toEqual(["squadPlayerIds"])
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/registrations")
+  })
+  it("an identical squad is an honest replay with no write and no audit", async () => {
+    mocks.state.registration.squadPlayerIds = [PLAYER, PLAYER2]
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })).resolves.toMatchObject({ success: true, changed: false })
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+  })
+  it.each(["approved", "rejected", "withdrawn"])("refuses to edit the squad after the entry is %s", async status => {
+    mocks.state.registration.status = status
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })).rejects.toThrow("no longer be edited")
+    noWrites()
+  })
+  it("refuses an unassigned team manager — authority comes from the team pointers, never the role alone", async () => {
+    mocks.state.member = { ...member, role: "team_manager" }
+    mocks.state.team = { ...team, managerId: OTHER }
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] }))
+      .rejects.toThrow("Only the league owner or this team's manager/captain")
+    noWrites()
+  })
+  it("refuses a foreign or inactive player as a squad member", async () => {
+    mocks.state.squad = [{ id: PLAYER }]
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })).rejects.toThrow("active player on this team")
+    noWrites()
+    mocks.state.squad = []
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER] })).rejects.toThrow("active player on this team")
+    noWrites()
+  })
+  it("enforces the team squad limit on the edited squad", async () => {
+    mocks.state.team = { ...team, maxSquadSize: 1 }
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })).rejects.toThrow("no more than 1 players")
+    noWrites()
+  })
+  it("rejects duplicate squad members before SQL", async () => {
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER] })).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+  it("rejects a malformed registration id before SQL", async () => {
+    await expect(updateRegistrationSquad("bad", { squadPlayerIds: [PLAYER] })).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+  it("propagates a missing registration instead of inventing one", async () => {
+    mocks.registration.mockResolvedValue(null)
+    await expect(updateRegistrationSquad(REG, { squadPlayerIds: [PLAYER, PLAYER2] })).rejects.toThrow("Registration not found")
+    noWrites()
   })
 })
 

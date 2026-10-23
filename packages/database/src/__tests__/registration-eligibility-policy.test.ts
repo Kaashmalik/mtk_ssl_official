@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   canApproveRegistration,
+  canEditRegistrationSquad,
   canRejectRegistration,
   canSetPaymentStatus,
   describeEligibility,
@@ -54,5 +55,17 @@ describe("registration eligibility policy (Batch 148, REG-04)", () => {
     const r = evaluateSquadEligibility({ approvalStatus: "pending", paymentStatus: "unpaid", squadSize: 2, minSquadSize: 5 })
     expect(describeEligibility(r)).toMatch(/registration must be approved/)
     expect(describeEligibility({ eligible: true, blockers: [] })).toBe("Squad is eligible for this tournament.")
+  })
+
+  // ENH-05-03 (Batch 105): the squad does not freeze the moment the entry is
+  // submitted — but it also cannot be edited behind a review that already
+  // happened. Exactly the same transition set as approval/rejection.
+  it("a squad may be edited only while the entry awaits and has not had review", () => {
+    expect(canEditRegistrationSquad("pending")).toBe(true)
+    expect(canEditRegistrationSquad("waitlisted")).toBe(true)
+    expect(canEditRegistrationSquad("approved")).toBe(false)
+    expect(canEditRegistrationSquad("rejected")).toBe(false)
+    expect(canEditRegistrationSquad("withdrawn")).toBe(false)
+    expect(canEditRegistrationSquad("")).toBe(false)
   })
 })
