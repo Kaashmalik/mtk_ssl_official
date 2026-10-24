@@ -16,16 +16,31 @@ import { Skeleton } from "@mtk/ui/components/ui/skeleton";
 
 const ChartFallback = () => <Skeleton className="h-72 w-full rounded-xl" />;
 
+/**
+ * Batch 143 (resilience): a failed CHUNK fetch (weak connection — a
+ * scorer's normal environment) used to throw at render and, with no
+ * segment boundary at all, blank the entire scorer. Charts are decoration;
+ * scoring is the product. Each loader now degrades to a stated fallback:
+ * the failed chart says it could not load and scoring continues.
+ */
+function ChartLoadFailure() {
+  return (
+    <div role="status" className="h-72 w-full rounded-xl border border-dashed flex items-center justify-center text-sm text-muted-foreground p-4 text-center">
+      This chart could not load on this connection. Scoring continues — the chart returns when the connection recovers.
+    </div>
+  );
+}
+
 const ManhattanChart = dynamic(
-  () => import("@/components/scoring/manhattan-chart").then((m) => m.ManhattanChart),
+  () => import("@/components/scoring/manhattan-chart").then((m) => m.ManhattanChart).catch(() => ChartLoadFailure),
   { ssr: false, loading: ChartFallback }
 );
 const WagonWheel = dynamic(
-  () => import("@/components/scoring/wagon-wheel").then((m) => m.WagonWheel),
+  () => import("@/components/scoring/wagon-wheel").then((m) => m.WagonWheel).catch(() => ChartLoadFailure),
   { ssr: false, loading: ChartFallback }
 );
 const WormChart = dynamic(
-  () => import("@/components/scoring/worm-chart").then((m) => m.WormChart),
+  () => import("@/components/scoring/worm-chart").then((m) => m.WormChart).catch(() => ChartLoadFailure),
   { ssr: false, loading: ChartFallback }
 );
 import { Button } from "@mtk/ui";

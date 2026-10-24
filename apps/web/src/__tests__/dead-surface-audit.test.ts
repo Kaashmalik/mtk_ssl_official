@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -130,5 +130,19 @@ describe("dead-surface audit tier 2: lib exports with no consumers (Batch 131)",
     ] as const) {
       expect(source(file)).not.toContain(dead)
     }
+  })
+
+  it("packages/ui: the unexported cricket PointsTable twin is GONE - it fabricated NRR (Batch 141)", () => {
+    // A second, never-exported PointsTable lived in packages/ui/cricket:
+    // its NRR cell printed `entry.nrr.toFixed(3)` (a team with no innings
+    // evidence renders a factual-looking 0.000) and it decorated the
+    // OWNER-GATED qualification-zone markers as ready-made dead code -
+    // a landmine for the next feature that reaches for a points table.
+    // The canonical table is apps/web components/tournaments/points-table.tsx
+    // (Batch 132), whose NRR honesty is pinned in the standings suites.
+    expect(existsSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../packages/ui/src/components/cricket/points-table.tsx"))).toBe(false)
+    // The honest canonical table stays untouched.
+    const canonical = readFileSync(join(WEB_SRC, "components/tournaments/points-table.tsx"), "utf8")
+    expect(canonical).toContain("hasNetRunRate ? formatNetRunRate(s.netRunRate) : \"—\"")
   })
 })
