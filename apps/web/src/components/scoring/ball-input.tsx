@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useRef, useState } from "react";
 import { wicketFielderRequirement } from "@mtk/contracts";
 import { Button } from "@mtk/ui";
@@ -42,9 +43,9 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, fielder
   const [showWicketSelector, setShowWicketSelector] = useState(false);
   const [pendingWicket, setPendingWicket] = useState<BallInput | null>(null);
   const addBall = useScoringStore((state) => state.addBall);
-  const currentInnings = useScoringStore((state) => 
-    state.currentInnings === 1 ? state.innings1 : 
-    state.currentInnings === 2 ? state.innings2 : 
+  const currentInnings = useScoringStore((state) =>
+    state.currentInnings === 1 ? state.innings1 :
+    state.currentInnings === 2 ? state.innings2 :
     state.superOver
   );
 
@@ -116,6 +117,9 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, fielder
             onClick={() => handleBallClick(option.value)}
             disabled={disabled || saving || !batsmanId || !bowlerId}
             aria-label={`Record ${option.label}`}
+            // Batch 139: disabled-but-busy is announced, not just felt —
+            // assistive tech hears the pending state the pads are in.
+            aria-busy={saving || undefined}
             className={`${option.color} text-white text-xl sm:text-xl font-bold min-h-14 sm:min-h-0 py-5 sm:py-6 touch-manipulation active:scale-95 transition-all rounded-xl`}
             size="lg"
           >
@@ -129,6 +133,9 @@ export function BallInputComponent({ batsmanId, bowlerId, creaseBatters, fielder
           onSelect={handleWicketSelect}
           creaseBatters={creaseBatters}
           fielders={fielders}
+          // Batch 139: the modal inherits the live save state — every
+          // control in it goes stable while the dismissal write runs.
+          submitting={saving}
           onCancel={() => {
             setShowWicketSelector(false);
             setPendingWicket(null);
