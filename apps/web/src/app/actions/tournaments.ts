@@ -113,10 +113,17 @@ export async function createTournament(input: CreateTournamentInput) {
   // Clerk's string ID is not the UUID referenced by tournaments.created_by; the
   // writer resolves the active account under its lock. The recovery key rides
   // along so a retried submit (same durable draft) replays, never duplicates.
-  const tournament = await createTournamentRecord(userId, tenantId, {
-    ...persistenceValues(validated),
-    slug,
-  }, validated.requestKey ?? null)
+  // Batch 147 (reviewer Major): the create path now merges the organizer's
+  // qualificationRule the same way the update writer does — the schema
+  // validates it, so accepting it and silently dropping it was a lie.
+  const values = { ...persistenceValues(validated), slug }
+  if (validated.qualificationRule !== undefined) {
+    const baseRules = values.rules ?? {}
+    // The persistence type models only the wizard namespace; the policy's
+    // merge guarantees the qualification namespace rides beside it.
+    ;(values as { rules?: unknown }).rules = writeQualificationRule(baseRules, validated.qualificationRule)
+  }
+  const tournament = await createTournamentRecord(userId, tenantId, values, validated.requestKey ?? null)
 
   revalidatePath("/dashboard/tournaments")
   revalidatePath("/dashboard")

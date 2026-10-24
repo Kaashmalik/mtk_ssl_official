@@ -1,5 +1,6 @@
 import React from "react"
 import { appUrl } from "@/lib/site-metadata"
+import { safeJsonLd } from "@/components/json-ld"
 
 /**
  * Batch 113: JSON-LD structured data for the public home page —
@@ -28,7 +29,8 @@ export function StructuredData({ organizationName }: { organizationName: string 
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify([organization, website]) }}
+      // Batch 147: same `</script>`-breakout hardening as JsonLd.
+      dangerouslySetInnerHTML={{ __html: safeJsonLd([organization, website]) }}
     />
   )
 }
