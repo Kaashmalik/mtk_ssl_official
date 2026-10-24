@@ -6,25 +6,35 @@ const mocks = vi.hoisted(() => ({ leagues: vi.fn() }))
 vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/public-hub", () => ({ readListedHubLeagues: mocks.leagues }))
 
-/** Collects rendered text from the element tree the page returns (whitespace-normalized). */
+/** Collects rendered text from the element tree the page returns (whitespace-normalized).
+ * Batch 134: league cards are now the extracted HubLeagueCard component — the walk
+ * EXECUTES function-typed elements so its assertions still reach the card contents
+ * (same intent, new render path). */
 function pageText(node: unknown): string {
   const out: string[] = []
-  const walk = (inner: unknown) => {
+  const walk = (inner: unknown, depth = 0): void => {
     if (typeof inner === "string" || typeof inner === "number") { out.push(String(inner)); return }
     if (!React.isValidElement(inner)) return
+    if (depth < 8 && typeof inner.type === "function") {
+      walk((inner.type as (p: unknown) => unknown)(inner.props), depth + 1)
+      return
+    }
     const props = inner.props as { children?: React.ReactNode }
-    React.Children.forEach(props.children, (child) => walk(child))
+    React.Children.forEach(props.children, (child) => walk(child, depth))
   }
   walk(node)
   return out.join(" ").replace(/\s+/g, " ")
 }
 
-function collectElements(node: unknown, type: string): React.ReactElement<Record<string, unknown>>[] {
+function collectElements(node: unknown, type: string, depth = 0): React.ReactElement<Record<string, unknown>>[] {
   if (!React.isValidElement(node)) return []
+  if (depth < 8 && typeof node.type === "function") {
+    return collectElements((node.type as (p: unknown) => unknown)(node.props), type, depth + 1)
+  }
   const props = node.props as { children?: React.ReactNode }
   return [
     ...(node.type === type ? [node as React.ReactElement<Record<string, unknown>>] : []),
-    ...React.Children.toArray(props.children).flatMap(child => collectElements(child, type)),
+    ...React.Children.toArray(props.children).flatMap(child => collectElements(child, type, depth)),
   ]
 }
 

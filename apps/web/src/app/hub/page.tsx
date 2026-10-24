@@ -1,5 +1,5 @@
 import React from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
+import { HubLeagueCard } from "@/components/hub/hub-league-card"
 import { unstable_noStore as noStore } from "next/cache"
 import { buildPageMetadata } from "@/lib/site-metadata"
 import { readListedHubLeagues } from "@/lib/public-hub"
@@ -64,28 +64,7 @@ export default async function HubPage() {
         <p className="text-sm text-muted-foreground">No league has published itself yet.</p>
       )}
       <div className="space-y-4">
-        {read?.leagues.map((league) => (
-          <Card key={league.tenantId}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">
-                {league.url ? (
-                  <a href={league.url} className="underline underline-offset-4" rel="noopener noreferrer">
-                    {league.name}
-                  </a>
-                ) : (
-                  league.name
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                {league.publishedCompetitions} published {league.publishedCompetitions === 1 ? "competition" : "competitions"}
-                {" · "}
-                {league.liveMatches} live {league.liveMatches === 1 ? "fixture" : "fixtures"}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
+        {read?.leagues.map((league) => <HubLeagueCard key={league.tenantId} league={league} />)}
       </div>
     </div>
     </>
