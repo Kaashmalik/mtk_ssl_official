@@ -32,6 +32,7 @@ import { MilestoneCards } from "@/components/tournaments/milestone-cards"
 import { computeStandings, computeGroupStandings, type StandingsMatchInput } from "@/lib/standings"
 import { computeFormGuide, type FormGuideMatchInput } from "@/lib/form-guide"
 import { GroupStandings } from "@/components/tournaments/group-standings"
+import { PointsTable } from "@/components/tournaments/points-table"
 import { FormGuide } from "@/components/tournaments/form-guide"
 
 const STATUS_LABELS: Record<string, string> = {
@@ -310,41 +311,7 @@ export default async function PublicTournamentPage({ params }: { params: Promise
           leaderboard reads; only present when at least one list has rows. */}
       {tournamentLeaders ? <TournamentLeaders data={tournamentLeaders} /> : null}
 
-      {standings.length > 0 && (
-                <Card>
-                  <CardHeader><CardTitle>Points Table</CardTitle></CardHeader>
-                  <CardContent className="px-0 sm:px-6">
-                    {/* Narrow screens: let the table scroll rather than push the
-                        page wide. The Team cell is width-constrained + truncated
-                        so a long club name cannot squeeze out the P/W/L/Pts
-                        columns — the numeric columns are what a reader scans. */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm min-w-[22rem]">
-                        <thead>
-                          <tr className="border-b text-muted-foreground text-xs">
-                            <th className="py-2 pl-6 text-left font-medium">Team</th>
-                            <th className="py-2 px-2 text-center font-medium">P</th>
-                            <th className="py-2 px-2 text-center font-medium">W</th>
-                            <th className="py-2 px-2 text-center font-medium">L</th>
-                            <th className="py-2 pr-6 text-center font-medium">Pts</th>
-                          </tr>
-                        </thead>
-              <tbody>
-                          {standings.map((s) => (
-                            <tr key={s.name} className="border-b last:border-0">
-                              <td className="py-2 pl-6 font-medium max-w-[10rem] truncate" title={s.name}>{s.name}</td>
-                              <td className="py-2 px-2 text-center tabular-nums">{s.played}</td>
-                              <td className="py-2 px-2 text-center tabular-nums">{s.won}</td>
-                              <td className="py-2 px-2 text-center tabular-nums">{s.lost}</td>
-                              <td className="py-2 pr-6 text-center font-semibold tabular-nums">{s.points}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </CardContent>
-        </Card>
-      )}
+      {standings.length > 0 && <PointsTable rows={standings} />}
 
       {awards.length > 0 && (
         <Card>
