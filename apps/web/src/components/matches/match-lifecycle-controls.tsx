@@ -8,7 +8,7 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Label } from "@mtk/ui/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@mtk/ui/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
-import { Loader2, Play, Flag, Trophy } from "lucide-react"
+import { Play, Flag, Trophy } from "lucide-react"
 import { setTossResult, startMatch, endMatch } from "@/app/actions/matches"
 import { unwrapScoringFenceResult } from "@/lib/scoring-fence"
 
@@ -89,8 +89,12 @@ export function MatchLifecycleControls({
                 </SelectContent>
               </Select>
             </div>
+            {/* Batch 140: the shared isLoading idiom (Batch 139) — all three
+                lifecycle writes speak ONE pending contract (spinner,
+                disabled, aria-busy); Set Toss's icon no longer swaps into a
+                spinner and Start/End Match are no longer silent disables. */}
             <Button
-              disabled={isPending}
+              isLoading={isPending}
               onClick={() =>
                 run(
                   () => setTossResult(matchId, tossWinnerId, tossDecision),
@@ -98,7 +102,7 @@ export function MatchLifecycleControls({
                 )
               }
             >
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4 mr-2" />}
+              <Flag className="h-4 w-4 mr-2" />
               Set Toss
             </Button>
           </div>
@@ -108,7 +112,7 @@ export function MatchLifecycleControls({
           <div className="flex flex-wrap gap-2">
             <Button
               variant="gradient-shine"
-              disabled={isPending}
+              isLoading={isPending}
               onClick={() => run(() => startMatch(matchId), "Match started")}
             >
               <Play className="h-4 w-4 mr-2" />
@@ -151,7 +155,7 @@ export function MatchLifecycleControls({
               </div>
             )}
             <Button
-              disabled={isPending}
+              isLoading={isPending}
               onClick={() =>
                 run(
                   () =>
