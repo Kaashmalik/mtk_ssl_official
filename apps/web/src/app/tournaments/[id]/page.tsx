@@ -1,13 +1,14 @@
 import React from "react"
-import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { db, teams, matches, matchInnings, leagueRegistrations } from "@mtk/database"
 import { eq, asc, and, inArray } from "drizzle-orm"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
-import { Calendar, Trophy } from "lucide-react"
+import { Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
+import { buildFixtureGroups } from "@/lib/fixture-groups"
+import { FixtureGroups } from "@/components/tournaments/fixture-groups"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones, readPublicBattingLeaderboard, readPublicBowlingLeaderboard } from "@/lib/public-visibility"
 import { resolvePublicTournamentMetadata } from "@/lib/public-tournament-metadata"
@@ -149,6 +150,12 @@ export default async function PublicTournamentPage({ params }: { params: Promise
         : "TBD",
     }
   }))
+
+  // Batch 129: the fixtures card reads in CricHeroes order (live →
+  // upcoming → results) from the SAME rows the flat list rendered — a
+  // read-only regrouping, never a relabel (each row keeps its own status
+  // badge). Null keeps the page's honest empty line.
+  const fixtureGroups = buildFixtureGroups(tournamentMatches)
 
   // Shared rule-versioned standings (v1: 2/1/0, cricket NRR, points -> NRR ->
   // wins -> name). The public table shows the compact P/W/L/Pts columns.
@@ -398,26 +405,11 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       )}
 
       <Card>
-        <CardHeader><CardTitle>Fixtures & Results</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Fixtures &amp; Results</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {tournamentMatches.length === 0 && <p className="text-sm text-muted-foreground">No matches scheduled yet.</p>}
-          {tournamentMatches.map((m) => (
-            <Link key={m.id} href={`/matches/${m.id}`} className="block rounded-lg border p-3 hover:bg-muted/40">
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{m.dateText}</span>
-                <Badge variant="outline" className="text-[10px]">{m.status}</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{m.teamAName}</span>
-                <span className="tabular-nums font-semibold">{m.teamAScore || "-"}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{m.teamBName}</span>
-                <span className="tabular-nums font-semibold">{m.teamBScore || "-"}</span>
-              </div>
-              {m.result && <p className="text-xs text-muted-foreground mt-1">{m.result}</p>}
-            </Link>
-          ))}
+          {fixtureGroups
+            ? <FixtureGroups groups={fixtureGroups} />
+            : <p className="text-sm text-muted-foreground">No matches scheduled yet.</p>}
         </CardContent>
       </Card>
     </div>
