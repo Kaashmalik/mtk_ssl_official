@@ -125,7 +125,7 @@ export function HomeContent({ brandName }: { brandName: string }) {
             <div className="flex items-center gap-8 pt-8 text-sm font-medium text-muted-foreground">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" />
-                <span>500+ Teams</span>
+                <span>Tournaments &amp; Leagues</span>
               </div>
               <div className="flex items-center gap-2">
                 <Zap className="h-5 w-5 text-yellow-500" />
