@@ -1,9 +1,11 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@mtk/ui/lib/utils"
 import { motion, AnimatePresence } from "framer-motion"
+import { useTenantBrandName } from "@/components/tenant-brand-name"
 import { useState, useEffect, useMemo } from "react"
 import {
   LayoutDashboard, Users, Trophy, Sword, Settings,
@@ -94,6 +96,7 @@ function buildNavGroups(role: UserRole): NavGroup[] {
 export function Sidebar({ userRole }: { userRole?: UserRole }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const { name: brandName } = useTenantBrandName()
 
   // Build RBAC-filtered navigation
   const navGroups = useMemo(() => {
@@ -131,7 +134,7 @@ export function Sidebar({ userRole }: { userRole?: UserRole }) {
                 exit={{ opacity: 0, width: 0 }}
                 className="whitespace-nowrap text-sm"
               >
-                Shakir Super League
+                {brandName}
               </motion.span>
             )}
           </AnimatePresence>

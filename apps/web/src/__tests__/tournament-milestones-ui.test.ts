@@ -28,9 +28,10 @@ vi.mock("@mtk/database", async (importOriginal) => ({
 }))
 
 import { readPublishedTournamentMilestones } from "@/lib/public-visibility"
+import { buildTournamentShareText } from "@/lib/share-texts"
 import { MilestoneCards, MILESTONE_LABELS, milestoneLine } from "@/components/tournaments/milestone-cards"
 import {
-  buildTournamentShareText, buildShareUrl, tournamentSharePath,
+  buildShareUrl, tournamentSharePath,
   whatsappShareUrl, twitterShareUrl, facebookShareUrl, TOURNAMENT_SHARE_LABELS,
 } from "@/components/shared/tournament-share-card"
 
@@ -43,9 +44,10 @@ describe("Tournament share builders (public route only)", () => {
   it("shares the public /tournaments path with an honest champion mention", () => {
     expect(tournamentSharePath("t1")).toBe("/tournaments/t1")
     expect(buildShareUrl("t1", "https://ssl.example")).toBe("https://ssl.example/tournaments/t1")
-    expect(buildTournamentShareText("Autumn Cup", "Team A")).toBe("🏏 SSL: Autumn Cup - Champions: Team A")
-    expect(buildTournamentShareText("Autumn Cup", null)).toBe("🏏 SSL Tournament: Autumn Cup")
-    expect(buildTournamentShareText("Autumn Cup")).toBe("🏏 SSL Tournament: Autumn Cup")
+    // Batch 128: the short label is the server-resolved tenant brand.
+    expect(buildTournamentShareText("SSL", "Autumn Cup", "Team A")).toBe("🏏 SSL: Autumn Cup - Champions: Team A")
+    expect(buildTournamentShareText("SSL", "Autumn Cup", null)).toBe("🏏 SSL Tournament: Autumn Cup")
+    expect(buildTournamentShareText("SSL", "Autumn Cup")).toBe("🏏 SSL Tournament: Autumn Cup")
   })
 
   it("encodes share targets for each network", () => {

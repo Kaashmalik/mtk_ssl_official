@@ -194,11 +194,14 @@ describe("SEO routes and metadata (Batches 112-117)", () => {
     const React = (await import("react")).default
     const { renderToStaticMarkup } = await import("react-dom/server")
     const { StructuredData } = await load("../components/structured-data.tsx")
-    const html = renderToStaticMarkup(React.createElement(StructuredData))
+    const html = renderToStaticMarkup(React.createElement(StructuredData, { organizationName: "Shakir Super League" }))
     expect(html).toContain('type="application/ld+json"')
     expect(html).toContain('"@type":"Organization"')
     expect(html).toContain('"@type":"WebSite"')
     expect(html).toContain("https://ssl.example.com")
+    // Batch 128: the caller passes the RESOLVED brand name (the home page
+    // reads it per host); the platform name is what it passes on
+    // platform-branded hosts.
     expect(html).toContain("Shakir Super League")
   })
 })

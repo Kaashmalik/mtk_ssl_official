@@ -1,8 +1,10 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { UserButton } from "@clerk/nextjs"
+import { useTenantBrandName } from "@/components/tenant-brand-name"
 import { Search, Menu, Radio } from "lucide-react"
 import { Button } from "@mtk/ui/components/ui/button"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
@@ -37,6 +39,7 @@ const ICON_MAP: Record<string, typeof LayoutDashboard> = {
 
 export function Header({ userRole }: { userRole?: UserRole }) {
   const pathname = usePathname()
+  const { name: brandName } = useTenantBrandName()
   const router = useRouter()
   const clerkReady = useClerkReady()
   const [commandOpen, setCommandOpen] = useState(false)
@@ -108,7 +111,7 @@ export function Header({ userRole }: { userRole?: UserRole }) {
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <Trophy className="h-6 w-6 text-primary" />
-                <span>Shakir Super League</span>
+                <span>{brandName}</span>
               </Link>
               {resolvedNavigation.map((item) => {
                 const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
