@@ -3,8 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { Trophy, Video } from "lucide-react"
-import { db, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls } from "@mtk/database"
+import { db, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls, matches, teams } from "@mtk/database"
 import { eq, and, asc, inArray } from "drizzle-orm"
+import { computeFormGuide, type FormGuideRow } from "@/lib/form-guide"
+import { TeamFormStrip } from "@/components/matches/team-form-strip"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { ShareButton } from "@/components/share/share-button"
@@ -46,6 +48,30 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
   const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
   if (!teamA || !teamB) notFound()
+
+  // Batch 135: each side's recent form, from the APPROVED form-guide engine
+  // (computeFormGuide) over the SAME tournament's official published
+  // results — letters only from resulted/voided matches, disclosure always
+  // attached, an unplayed team says so itself. No form is ever invented.
+  const formRows: Record<string, FormGuideRow> = {}
+  if (match.tournamentId) {
+    const siblings = await db.select({
+      id: matches.id, status: matches.status, scheduledDate: matches.scheduledDate,
+      teamAId: matches.teamAId, teamBId: matches.teamBId, winnerId: matches.winnerId, result: matches.result,
+    }).from(matches).where(and(eq(matches.tournamentId, match.tournamentId), eq(matches.tenantId, tenantId)))
+    const nameById = new Map<string, string>([[teamA.id, teamA.name], [teamB.id, teamB.name]])
+    const otherIds = [...new Set(siblings.flatMap((m) => [m.teamAId, m.teamBId]))].filter((id) => !nameById.has(id))
+    if (otherIds.length) {
+      const others = await db.select({ id: teams.id, name: teams.name }).from(teams).where(and(inArray(teams.id, otherIds), eq(teams.tenantId, tenantId)))
+      for (const t of others) nameById.set(t.id, t.name)
+    }
+    for (const row of computeFormGuide(siblings.map((m) => ({
+      id: m.id, status: m.status, scheduledDate: m.scheduledDate,
+      teamAId: m.teamAId, teamBId: m.teamBId, winnerId: m.winnerId, resultText: m.result,
+    })), nameById)) {
+      formRows[row.teamId] = row
+    }
+  }
   // ENH-08-03: Live/Replay badges come from the truthful provider catalogue,
   // not from a raw stream-status column. When the verified broadcast plane is
   // not enabled this still allows a legacy live embed, but never invents a
@@ -358,6 +384,25 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           </div>
         </CardContent>
       </Card>
+
+      {/* Batch 135: recent form for both sides, derived only from official
+          published results of this tournament; the strip carries the
+          form-guide disclosure and says nothing when there's nothing. */}
+      {match.tournamentId && (
+        <Card>
+          <CardHeader><CardTitle className="text-lg">Recent form</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-sm font-medium mb-1">{teamA.name}</p>
+              <TeamFormStrip row={formRows[teamA.id] ?? null} />
+            </div>
+            <div className="pt-2 border-t">
+              <p className="text-sm font-medium mb-1">{teamB.name}</p>
+              <TeamFormStrip row={formRows[teamB.id] ?? null} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {recap && (
         <Card data-testid="match-recap">
