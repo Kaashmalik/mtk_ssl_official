@@ -6,6 +6,7 @@ import { Trophy, Video } from "lucide-react"
 import { db, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls, matches, teams } from "@mtk/database"
 import { eq, and, asc, inArray } from "drizzle-orm"
 import { computeFormGuide, type FormGuideRow } from "@/lib/form-guide"
+import { buildHeadToHead } from "@/lib/head-to-head"
 import { TeamFormStrip } from "@/components/matches/team-form-strip"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
@@ -54,6 +55,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
   // results — letters only from resulted/voided matches, disclosure always
   // attached, an unplayed team says so itself. No form is ever invented.
   const formRows: Record<string, FormGuideRow> = {}
+  let h2h: ReturnType<typeof buildHeadToHead> = null
   if (match.tournamentId) {
     const siblings = await db.select({
       id: matches.id, status: matches.status, scheduledDate: matches.scheduledDate,
@@ -71,6 +73,8 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
     })), nameById)) {
       formRows[row.teamId] = row
     }
+    // Batch 136: only decided meetings are wins; no history, no claim.
+    h2h = buildHeadToHead(siblings, teamA.id, teamB.id)
   }
   // ENH-08-03: Live/Replay badges come from the truthful provider catalogue,
   // not from a raw stream-status column. When the verified broadcast plane is
@@ -390,7 +394,18 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           form-guide disclosure and says nothing when there's nothing. */}
       {match.tournamentId && (
         <Card>
-          <CardHeader><CardTitle className="text-lg">Recent form</CardTitle></CardHeader>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Recent form</CardTitle>
+            {/* Batch 136: the all-time record between these sides — every
+                win is a decided fixture, and the line exists only if
+                there IS a record (null history renders nothing). */}
+            {h2h && (
+              <p className="text-xs text-muted-foreground mt-1" data-testid="head-to-head">
+                Head-to-head: {teamA.name} {h2h.awins} — {h2h.bwins} {teamB.name}
+                {" ("}{h2h.meetings} {h2h.meetings === 1 ? "meeting" : "meetings"} played{")"}
+              </p>
+            )}
+          </CardHeader>
           <CardContent className="space-y-3">
             <div>
               <p className="text-sm font-medium mb-1">{teamA.name}</p>
