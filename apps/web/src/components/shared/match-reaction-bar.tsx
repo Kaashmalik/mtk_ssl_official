@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { useState, useTransition } from "react"
 import { Button } from "@mtk/ui/components/ui/button"
 import { toggleMatchReaction } from "@/app/actions/fan-reactions"
@@ -62,6 +63,16 @@ export function MatchReactionBar({
       role="group"
       aria-label="Match reactions - engagement only, they never affect results"
     >
+      {/* Batch 131: a fresh match (every count genuinely zero) invites the
+       * first fan — and says WHY reacting is safe. The moment any real
+       * reaction exists the prompt disappears: it would then be false.
+       * The zero check is driven by the shared policy's type list, so a
+       * new reaction type can't silently break it. */}
+      {FAN_REACTION_TYPES.every((type) => counts[type] === 0) && (
+        <p className="w-full text-xs text-muted-foreground">
+          Be the first to react — reactions are for fans only and never affect results.
+        </p>
+      )}
       {FAN_REACTION_TYPES.map(type => {
         const active = mine.includes(type)
         return (
