@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { calculateDeliveryDelta, scorerRunsToDelivery } from "@mtk/database/lib/scoring-delivery";
 import type { LiveMatchState } from "@mtk/database/lib/live-scoring-state";
+import { sanitizePersistedScoring } from "@/lib/scoring-storage-integrity";
 
 export type BallInput = 0 | 1 | 2 | 3 | 4 | 6 | "W" | "WD" | "NB" | "LB" | "B";
 export type WicketType = "bowled" | "caught" | "lbw" | "run_out" | "stumped" | "hit_wicket";
@@ -358,6 +359,12 @@ export const useScoringStore = create<ScoringState>()(
     }),
     {
       name: "scoring-storage",
+      // Batch 142: versioned persistence with a fail-closed integrity
+      // boundary. Corrupt JSON now announces itself; drifted-but-valid
+      // JSON is sanitized per field instead of hydrating a shape that
+      // crashes on the next delivery; valid unversioned payloads (the
+      // pre-versioning format) migrate IN unchanged.
+      version: 1,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         queueScopeKey: state.queueScopeKey,
@@ -372,6 +379,12 @@ export const useScoringStore = create<ScoringState>()(
         innings2History: state.innings2History,
         superOverHistory: state.superOverHistory,
       }),
+      migrate: (persisted) => sanitizePersistedScoring(persisted),
+      onRehydrateStorage: () => (_state, error) => {
+        // A silent reset of the scorer's local view is the one failure the
+        // scorer must SEE: the loss is announced, never whispered away.
+        if (error) console.warn(`[scoring-storage] unreadable persisted scoring state ignored — fresh state loaded:`, error)
+      },
     }
   )
 );
