@@ -12,9 +12,27 @@ import { formatNetRunRate, type StandingsRow } from "@/lib/standings"
  * until then (never a fabricated 0.00). Long club names stay width-
  * constrained and truncated (title attribute intact) so the numeric
  * columns a reader scans never squeeze out.
+ *
+ * Batch 146: OPTIONAL qualification markers. The rule is the league
+ * ORGANIZER's (never a platform policy): `qualifyingTeamIds` is absent or
+ * empty → NOTHING renders, not a marker and not a legend. When present,
+ * each qualifying row gets an aria-labelled marker and the legend below
+ * restates the organizer's rule verbatim, attributed to the organizer.
  */
 
-export function PointsTable({ rows, hasGroups = false }: { rows: StandingsRow[]; hasGroups?: boolean }) {
+export function PointsTable({
+  rows,
+  hasGroups = false,
+  qualifyingTeamIds = [],
+  qualificationRuleSummary = null,
+}: {
+  rows: StandingsRow[]
+  hasGroups?: boolean
+  /** Engine-ordered qualifying ids; absence means the organizer set no rule. */
+  qualifyingTeamIds?: string[] | null
+  /** Verbatim restatement of the organizer's rule, e.g. "Top 2 advance — set by the league organizer". */
+  qualificationRuleSummary?: string | null
+}) {
   return (
     <Card>
       <CardHeader><CardTitle>Points Table</CardTitle></CardHeader>
@@ -39,7 +57,18 @@ export function PointsTable({ rows, hasGroups = false }: { rows: StandingsRow[];
               {rows.map((s, position) => (
                 <tr key={s.teamId} className="border-b last:border-0">
                   <td className="py-2 pl-6 text-center tabular-nums text-muted-foreground" aria-label={`Position ${position + 1}`}>{position + 1}</td>
-                  <th scope="row" className="py-2 pl-2 text-left font-medium max-w-[10rem] truncate" title={s.name}>{s.name}</th>
+                  <th scope="row" className="py-2 pl-2 text-left font-medium max-w-[10rem] truncate" title={s.name}>
+                    {s.name}
+                    {qualifyingTeamIds?.includes(s.teamId) && (
+                      <span
+                        className="ml-1.5 text-[10px] font-bold text-primary align-middle"
+                        aria-label="Qualification position"
+                        title="Qualification position"
+                      >
+                        Q
+                      </span>
+                    )}
+                  </th>
                   <td className="py-2 px-2 text-center tabular-nums">{s.played}</td>
                   <td className="py-2 px-2 text-center tabular-nums">{s.won}</td>
                   <td className="py-2 px-2 text-center tabular-nums">{s.lost}</td>
@@ -50,6 +79,14 @@ export function PointsTable({ rows, hasGroups = false }: { rows: StandingsRow[];
             </tbody>
           </table>
         </div>
+        {/* Batch 146: the organizer's rule restated VERBATIM, attributed to
+            them — never to the platform. Renders only when an organizer set
+            a rule; absence stays visually silent. */}
+        {qualificationRuleSummary && (
+          <p className="text-xs text-muted-foreground mt-2 px-6" aria-label="Qualification rule">
+            {qualificationRuleSummary}
+          </p>
+        )}
         {/* Batch 138: the reciprocal covering note — the group tables explain
             the tournament-wide table; this explains the groups. It renders
             ONLY where the page actually shows both (prop-driven; the

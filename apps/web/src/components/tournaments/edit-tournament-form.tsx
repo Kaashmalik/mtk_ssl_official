@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
 import { ArrowLeft, Save, Loader2, Trophy } from "lucide-react"
 import { updateTournament } from "@/app/actions/tournaments"
+import { readQualificationRule, type QualificationRule } from "@mtk/database/lib/qualification-policy"
 import { useDurableFormDraft } from "@/lib/use-durable-form-draft"
 import { DraftRestoreBanner } from "@/components/forms/draft-restore-banner"
 import type { Tournament } from "@mtk/database"
@@ -29,6 +30,9 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
   // UX-03: per-RECORD draft (keyed by tournament id) over values seeded from
   // server truth; every field here is a PersistableValue string, and the
   // restore is banner-visible - server truth always wins on submit.
+  // Batch 146: the organizer's qualification rule, read strictly from the
+  // tournament's rules jsonb (null → "none" in the form).
+  const existingRule = readQualificationRule(tournament.rules)
   const recordDraft = {
     name: tournament.name ?? "",
     description: tournament.description ?? "",
@@ -38,6 +42,14 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
     registrationDeadline: tournament.registrationDeadline ?? "",
     maxTeams: tournament.maxTeams?.toString() ?? "8",
     status: (tournament.status ?? "draft") as string,
+    // Batch 146: the organizer's qualification rule (their policy, their
+    // words). "none" is the default and an explicit choice on submit.
+    qualificationKind: existingRule?.kind ?? "none",
+    ...(existingRule?.kind === "top_n"
+      ? { qualificationSpots: existingRule.spots.toString() }
+      : existingRule?.kind === "top_per_group"
+        ? { qualificationSpots: existingRule.perGroup.toString() }
+        : { qualificationSpots: "2" }),
   }
   const [formData, setFormData] = useState(recordDraft)
 
@@ -55,6 +67,18 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
     const next = { ...formData, [key]: value }
     setFormData(next)
     saveDraft(next)
+  }
+
+  /** Batch 146: null = "none" (an explicit organizer choice, clearing any saved rule). */
+  const buildQualificationRule = (): QualificationRule | null => {
+    if (formData.qualificationKind === "none") return null
+    const size = Number(formData.qualificationSpots)
+    if (!Number.isInteger(size) || size < 1 || size > 128) {
+      throw new Error("Qualification spots must be a whole number between 1 and 128")
+    }
+    return formData.qualificationKind === "top_n"
+      ? { kind: "top_n", spots: size }
+      : { kind: "top_per_group", perGroup: size }
   }
 
   const handleDiscardDraft = () => {
@@ -78,6 +102,11 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
           registrationDeadline: formData.registrationDeadline || null,
           maxTeams: formData.maxTeams ? Number(formData.maxTeams) : null,
           status: formData.status as "draft" | "registration" | "live" | "completed" | "cancelled",
+          // Batch 146: the organizer's standings qualification rule — their
+          // policy choice, or an explicit "none". Bounded by the action's
+          // strict schema; a malformed value refuses loudly, never silently
+          // loses a previously saved rule.
+          qualificationRule: buildQualificationRule(),
         })
         toast.success("Tournament updated successfully!")
         clearDraft()
@@ -182,6 +211,44 @@ export function EditTournamentForm({ tournament }: EditTournamentFormProps) {
                   max={128}
                   className="mt-1.5"
                 />
+              </div>
+              {/* Batch 146: the league organizer's qualification rule. There is
+                  NO platform policy — "None" is the default and markers only
+                  ever reflect this choice. */}
+              <div className="sm:col-span-2 grid gap-4 sm:grid-cols-2 rounded-lg border p-4">
+                <div>
+                  <Label htmlFor="qualificationKind">Standings Qualification Rule</Label>
+                  <Select
+                    value={formData.qualificationKind}
+                    onValueChange={(v) => updateField("qualificationKind", v)}
+                  >
+                    <SelectTrigger id="qualificationKind" className="mt-1.5"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None — no qualification markers</SelectItem>
+                      <SelectItem value="top_n">Top N advance</SelectItem>
+                      <SelectItem value="top_per_group">Top N per group advance</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Your rule is shown on the public standings exactly as set here.
+                  </p>
+                </div>
+                {formData.qualificationKind !== "none" && (
+                  <div>
+                    <Label htmlFor="qualificationSpots">
+                      {formData.qualificationKind === "top_n" ? "Teams advancing" : "Advancing per group"}
+                    </Label>
+                    <Input
+                      id="qualificationSpots"
+                      type="number"
+                      value={formData.qualificationSpots}
+                      onChange={(e) => updateField("qualificationSpots", e.target.value)}
+                      min={1}
+                      max={128}
+                      className="mt-1.5"
+                    />
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

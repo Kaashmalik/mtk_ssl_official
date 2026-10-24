@@ -31,6 +31,7 @@ import { TournamentPollCard } from "@/components/shared/tournament-poll-card"
 import { TournamentShareCard } from "@/components/shared/tournament-share-card"
 import { MilestoneCards } from "@/components/tournaments/milestone-cards"
 import { computeStandings, computeGroupStandings, type StandingsMatchInput } from "@/lib/standings"
+import { formatQualificationRule, computeQualifyingTeamIds } from "@mtk/database/lib/qualification-policy"
 import { computeFormGuide, type FormGuideMatchInput } from "@/lib/form-guide"
 import { GroupStandings } from "@/components/tournaments/group-standings"
 import { PointsTable } from "@/components/tournaments/points-table"
@@ -170,6 +171,22 @@ export default async function PublicTournamentPage({ params }: { params: Promise
 
   const groupStandings = computeGroupStandings({ teams: registeredTeams, matches: standingsInputs })
 
+  // Batch 146: the league ORGANIZER's qualification rule — sanitized by the
+  // publication-gated reader (a malformed rules blob never invents a policy,
+  // and the raw jsonb never leaves the server). Null means NO markers and
+  // NO legend render: absence is the honest default, and no platform policy
+  // exists to fall back to. Markers are a slice of the standings engine's
+  // existing order — presentation only.
+  const qualificationRule = tournament.qualificationRule
+  const qualificationRuleSummary = qualificationRule
+    ? `${formatQualificationRule(qualificationRule)} — set by the league organizer`
+    : null
+  const qualifyingTeamIds = computeQualifyingTeamIds({
+    rule: qualificationRule,
+    rows: standings,
+    groups: groupStandings,
+  })
+
   // Batch 122: SportsEvent structured data from the ALREADY-gated read —
   // a hidden competition emits no script at all.
   const sportsEvent = buildTournamentSportsEvent(tournament)
@@ -304,7 +321,11 @@ export default async function PublicTournamentPage({ params }: { params: Promise
         </div>
       )}
 
-      <GroupStandings groups={groupStandings} />
+      <GroupStandings
+        groups={groupStandings}
+        qualifyingTeamIds={qualifyingTeamIds}
+        qualificationRuleSummary={qualificationRuleSummary}
+      />
 
       {/* FAN-03 (Batch 165): approved analytic package - the derived form
           guide. Same official facts as the points table; disclosure attached. */}
@@ -314,7 +335,14 @@ export default async function PublicTournamentPage({ params }: { params: Promise
           leaderboard reads; only present when at least one list has rows. */}
       {tournamentLeaders ? <TournamentLeaders data={tournamentLeaders} /> : null}
 
-      {standings.length > 0 && <PointsTable rows={standings} hasGroups={groupStandings.length > 0} />}
+      {standings.length > 0 && (
+        <PointsTable
+          rows={standings}
+          hasGroups={groupStandings.length > 0}
+          qualifyingTeamIds={qualifyingTeamIds}
+          qualificationRuleSummary={qualificationRuleSummary}
+        />
+      )}
 
       {awards.length > 0 && (
         <Card>
