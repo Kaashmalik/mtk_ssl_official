@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@mtk/ui/components/ui/tabs"
 import { Trophy, Video } from "lucide-react"
-import { db, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls, matches, teams } from "@mtk/database"
-import { eq, and, asc, inArray } from "drizzle-orm"
+import { db, matchInnings, players, venues, battingScorecards, bowlingScorecards, matchBalls, matches, teams, matchPlayingXis } from "@mtk/database"
+import { eq, and, asc, inArray, isNull } from "drizzle-orm"
 import { computeFormGuide, type FormGuideRow } from "@/lib/form-guide"
 import { buildHeadToHead } from "@/lib/head-to-head"
+import { buildMatchLineups } from "@/lib/match-lineups"
 import { TeamFormStrip } from "@/components/matches/team-form-strip"
+import { MatchLineupsCard } from "@/components/matches/match-lineups"
 import { notFound } from "next/navigation"
 import { unstable_noStore as noStore } from "next/cache"
 import { ShareButton } from "@/components/share/share-button"
@@ -23,6 +25,7 @@ import { MatchReactionBar } from "@/components/shared/match-reaction-bar"
 import { ReactionFeedReport } from "@/components/shared/reaction-feed-report"
 import { getTranslations } from "next-intl/server"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
+import { xiIsApproved } from "@mtk/database/lib/playing-xi-policy"
 import { deriveMatchRecap } from "@mtk/database/lib/match-recap"
 import { deriveInningsOverlay, type OverlayBallKind } from "@mtk/database/lib/match-overlays"
 import { resolvePublicMatchMetadata } from "@/lib/public-match-metadata"
@@ -49,6 +52,23 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
 
   const { teamA, teamB } = await readPublishedMatchTeams(tenantId, match)
   if (!teamA || !teamB) notFound()
+
+  // Batch 137: the ANNOUNCED playing XIs. Rows are immutable declarations
+  // (a re-declaration supersedes), so only ACTIVE rows (supersededAt IS
+  // NULL) for THESE two sides ever leave the table on this unauthenticated
+  // page — explicit columns only, publication already proven above.
+  const xiRows = await db.select({
+    teamId: matchPlayingXis.teamId,
+    playerId: matchPlayingXis.playerId,
+    battingOrder: matchPlayingXis.battingOrder,
+    wicketkeeper: matchPlayingXis.wicketkeeper,
+  }).from(matchPlayingXis)
+    .where(and(
+      eq(matchPlayingXis.matchId, matchId),
+      eq(matchPlayingXis.tenantId, tenantId),
+      isNull(matchPlayingXis.supersededAt),
+      inArray(matchPlayingXis.teamId, [teamA.id, teamB.id]),
+    ))
 
   // Batch 135: each side's recent form, from the APPROVED form-guide engine
   // (computeFormGuide) over the SAME tournament's official published
@@ -169,6 +189,7 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
     .where(and(eq(matchBalls.matchId, matchId), eq(matchBalls.tenantId, tenantId)))
 
   const playerIds = Array.from(new Set([
+    ...xiRows.map((r) => r.playerId),
     ...battingAll.map(b => b.playerId),
     ...battingAll.map(b => b.bowlerId).filter((x): x is string => !!x),
     ...battingAll.map(b => b.fielderId).filter((x): x is string => !!x),
@@ -185,6 +206,20 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
         .where(and(inArray(players.id, playerIds), eq(players.tenantId, tenantId)))
     : []
   const nameById = applyMinorNameGate(playerRows)
+
+  // Batch 137: the lineups fold over the active XI rows and the SAME
+  // minor-gated names the scorecards use. A side renders only as a
+  // complete 1..11 declaration; partial/corrupt declarations render as
+  // "not announced", and a match with no declared XI renders no card at
+  // all. The approval verdict comes from the shared xiIsApproved policy —
+  // declared-but-unconfirmed says so on the card.
+  let awaitingApproval = false
+  if (xiRows.length) {
+    const [xiState] = await db.select({ xiRequired: matches.xiRequired, xiApprovedAt: matches.xiApprovedAt })
+      .from(matches).where(and(eq(matches.id, matchId), eq(matches.tenantId, tenantId))).limit(1)
+    if (xiState) awaitingApproval = xiState.xiRequired === true && !xiIsApproved(xiState)
+  }
+  const lineups = buildMatchLineups(xiRows, teamA.id, teamB.id, nameById, awaitingApproval)
 
   // Shared ball-row grouping (SCORE-13, Batch 137): the FoW attribution and
   // the Match Center overlays fold over the SAME recorded rows - no second
@@ -388,6 +423,11 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           </div>
         </CardContent>
       </Card>
+
+      {/* Batch 137: the announced playing XIs — mounted only when at least
+          one side has a complete declared XI; the card itself says when a
+          side has not announced and when the declaration awaits approval. */}
+      {lineups && <MatchLineupsCard lineups={lineups} teamAName={teamA.name} teamBName={teamB.name} />}
 
       {/* Batch 135: recent form for both sides, derived only from official
           published results of this tournament; the strip carries the
