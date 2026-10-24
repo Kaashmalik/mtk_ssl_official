@@ -6,7 +6,7 @@ import {
   readMemberTeam,
   readMemberTeams,
 } from "@/lib/mobile-bff"
-import { MOBILE_BFF_ROUTES, MOBILE_BFF_VERSION } from "@mtk/contracts"
+import { MOBILE_BFF_ROUTES, MOBILE_BFF_VERSION, isUuid } from "@mtk/contracts"
 
 export const dynamic = "force-dynamic"
 
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const teamId = url.searchParams.get("teamId")
   if (teamId !== null) {
-    if (!/^[0-9a-fA-F-]{36}$/.test(teamId)) {
+    if (!isUuid(teamId)) {
       return NextResponse.json({ error: "invalid_query", detail: "teamId must be a uuid" }, { status: 400 })
     }
     const team = await readMemberTeam({ tenantId, teamId })

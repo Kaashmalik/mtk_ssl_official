@@ -332,7 +332,10 @@ export default async function PublicTournamentPage({ params }: { params: Promise
                 </div>
                 <p className="text-sm mt-1">{awardWinnerName(award)}</p>
                 {award.citation && <p className="text-xs text-muted-foreground mt-1">{award.citation}</p>}
-                <p className="text-xs text-muted-foreground mt-1">Declared {award.declaredAt.toISOString().slice(0, 10)}</p>
+                {/* Batch 144: schema-drift guard — declaredAt is typed non-null,
+                    but a drifted row must degrade to an honest absence, never
+                    throw a 500 over a public award. */}
+                <p className="text-xs text-muted-foreground mt-1">{award.declaredAt ? `Declared ${award.declaredAt.toISOString().slice(0, 10)}` : "Declared"}</p>
                 {/* PUB-04 disputes: rendered ONLY for registered members of the
                     league (readAwardDisputeAffordanceSafe returns null for
                     guests and non-members — anonymous output is unchanged). */}

@@ -6,17 +6,18 @@
  * URL — possibly already shared externally — get a permanent 308 redirect
  * to the canonical image, so no old share breaks and exactly ONE OG
  * implementation remains. Only strict uuids are redirected; anything else
- * is a plain 404, never echoed into a Location header.
+ * is a plain 404, never echoed into a Location header. (Batch 144: the
+ * strict shape is the shared contract gate now, not a local copy.)
  */
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+import { isUuid } from "@mtk/contracts"
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  if (!UUID_RE.test(id)) {
+  if (!isUuid(id)) {
     return new Response("Not found", { status: 404 })
   }
   const canonical = new URL(`/matches/${id}/opengraph-image`, request.url)

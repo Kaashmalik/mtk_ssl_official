@@ -45,7 +45,7 @@ export type MemberMatchListQuery = {
   teamId: string | null
 }
 
-const UUID_RE = /^[0-9a-fA-F-]{36}$/
+import { isUuid } from "@mtk/contracts"
 
 export function parseMemberMatchListQuery(params: {
   cursor?: string | null
@@ -57,7 +57,9 @@ export function parseMemberMatchListQuery(params: {
   if (!Number.isSafeInteger(rawLimit) || rawLimit < 1 || rawLimit > MOBILE_BFF_MAX_PAGE_SIZE) {
     return { ok: false, error: `limit must be an integer between 1 and ${MOBILE_BFF_MAX_PAGE_SIZE}` }
   }
-  if (params.teamId !== undefined && params.teamId !== null && !UUID_RE.test(params.teamId)) {
+  // Batch 144: the loose 36-char class accepted thirty-six dashes; the
+  // canonical contract shape is the only id this BFF forwards.
+  if (params.teamId !== undefined && params.teamId !== null && !isUuid(params.teamId)) {
     return { ok: false, error: "teamId must be a uuid" }
   }
   let status: MatchStatus | null = null
