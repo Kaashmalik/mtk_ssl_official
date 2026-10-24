@@ -10,6 +10,8 @@ import {
 } from "@mtk/ui"
 import { Share2, Link, MessageCircle, Twitter, Facebook, Check } from "lucide-react"
 import { toast } from "sonner"
+import { useTenantBrandName } from "@/components/tenant-brand-name"
+import { buildMatchShareText } from "@/lib/share-texts"
 
 interface ShareButtonProps {
   matchId: string
@@ -20,15 +22,16 @@ interface ShareButtonProps {
 
 export function ShareButton({ matchId, teamAName, teamBName, resultText }: ShareButtonProps) {
   const [copied, setCopied] = useState(false)
+  const { name, short } = useTenantBrandName()
 
-  const shareText = `🏏 SSL Match Update: ${teamAName} vs ${teamBName} - ${resultText}`
+  const shareText = buildMatchShareText(short, teamAName, teamBName, resultText)
   const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/dashboard/matches/${matchId}` : ""
 
   const handleNativeShare = async () => {
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
-          title: "Shakir Super League Scorecard",
+          title: `${name} Scorecard`,
           text: shareText,
           url: publicUrl,
         })

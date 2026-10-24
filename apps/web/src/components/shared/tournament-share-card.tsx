@@ -6,6 +6,8 @@ import {
 } from "@mtk/ui"
 import { Share2, Link, MessageCircle, Twitter, Facebook, Check } from "lucide-react"
 import { toast } from "sonner"
+import { useTenantBrandName } from "@/components/tenant-brand-name"
+import { buildTournamentShareText } from "@/lib/share-texts"
 
 /**
  * FAN-03 public tournament share card. Shares the PUBLIC route only
@@ -21,17 +23,10 @@ export const TOURNAMENT_SHARE_LABELS = {
   whatsapp: "Share to WhatsApp",
   twitter: "Share to Twitter/X",
   facebook: "Share to Facebook",
-  title: "Shakir Super League",
 } as const
 
 export function tournamentSharePath(tournamentId: string): string {
   return `/tournaments/${tournamentId}`
-}
-
-export function buildTournamentShareText(name: string, championName?: string | null): string {
-  return championName
-    ? `🏏 SSL: ${name} - Champions: ${championName}`
-    : `🏏 SSL Tournament: ${name}`
 }
 
 export function buildShareUrl(tournamentId: string, origin: string): string {
@@ -60,7 +55,8 @@ export function TournamentShareCard({
   championName?: string | null
 }) {
   const [copied, setCopied] = useState(false)
-  const shareText = buildTournamentShareText(tournamentName, championName)
+  const { short } = useTenantBrandName()
+  const shareText = buildTournamentShareText(short, tournamentName, championName)
   const url = typeof window !== "undefined" ? buildShareUrl(tournamentId, window.location.origin) : ""
 
   async function copyClicked() {

@@ -11,6 +11,8 @@ import { Toaster } from "@mtk/ui/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
 import { TenantBrandingProvider } from "@/components/tenant-branding-provider";
 import { SkipLink } from "@/components/skip-link";
+import { TenantBrandNameProvider } from "@/components/tenant-brand-name";
+import { resolveBrandName, shortTenantLabel } from "@/lib/white-label-metadata";
 import { readRequestBrand } from "@/lib/request-brand";
 import { brandVariables } from "@/lib/brand-presentation";
 
@@ -43,9 +45,11 @@ export default async function RootLayout({
         <Providers>
           <SkipLink />
           <TenantBrandingProvider branding={branding} />
+          <TenantBrandNameProvider value={{ name: resolveBrandName(branding), short: shortTenantLabel(branding) }}>
           <div id="main-content">
           {children}
           </div>
+          </TenantBrandNameProvider>
           <Toaster />
         </Providers>
         </NextIntlClientProvider>

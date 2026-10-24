@@ -11,7 +11,8 @@ export default async function HomePage() {
   const brand = await readRequestBrand();
   return (
     <>
-      <StructuredData />
+      {/* Batch 128: the home JSON-LD names the resolving tenant as well. */}
+      <StructuredData organizationName={resolveBrandName(brand)} />
       <HomeContent brandName={resolveBrandName(brand)} />
     </>
   );
