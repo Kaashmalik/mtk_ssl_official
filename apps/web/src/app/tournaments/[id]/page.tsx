@@ -9,6 +9,7 @@ import { Trophy } from "lucide-react"
 import { KnockoutBracket } from "@/components/tournaments/knockout-bracket"
 import { buildFixtureGroups } from "@/lib/fixture-groups"
 import { FixtureGroups } from "@/components/tournaments/fixture-groups"
+import { friendlyFixtureDate } from "@/lib/friendly-date"
 import { requirePublicTenantId } from "@/lib/public-tenant"
 import { readPublishedTournament, readPublishedTournamentAwards, readPublishedTournamentPrizes, readPublishedTournamentChampion, readPublishedTournamentMilestones, readPublicBattingLeaderboard, readPublicBowlingLeaderboard } from "@/lib/public-visibility"
 import { resolvePublicTournamentMetadata } from "@/lib/public-tournament-metadata"
@@ -147,7 +148,9 @@ export default async function PublicTournamentPage({ params }: { params: Promise
       teamAScore: teamAInn ? `${teamAInn.totalRuns}/${teamAInn.totalWickets}` : "",
       teamBScore: teamBInn ? `${teamBInn.totalRuns}/${teamBInn.totalWickets}` : "",
       dateText: m.scheduledDate
-        ? new Date(m.scheduledDate).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+        // Batch 133: CricHeroes-style humanization ("Today, 2:30 PM"),
+        // always derived from the actual timestamp; unknown stays "TBD".
+        ? friendlyFixtureDate(new Date(m.scheduledDate), new Date())
         : "TBD",
     }
   }))
