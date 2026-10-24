@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2 } from "lucide-react"
 
 import { cn } from "../../lib/utils"
 
@@ -43,17 +44,37 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
   VariantProps<typeof buttonVariants> {
   asChild?: boolean
+  /**
+   * Batch 139: first-class pending state. When true the button renders an
+   * assistive-hidden spinner before its children, disables itself, and
+   * announces aria-busy — one pending idiom instead of every surface
+   * hand-rolling its own spinner. Default false: existing callers render
+   * exactly as before. asChild delegates attributes to the child, so the
+   * pending treatment is not injected there.
+   */
+  isLoading?: boolean
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, isLoading = false, disabled, children, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...props}
-      />
+        {...(!asChild && {
+          disabled: disabled || isLoading || undefined,
+          "aria-busy": isLoading || undefined,
+        })}
+      >
+        {asChild ? children : (
+          <>
+            {isLoading && <Loader2 className="animate-spin" aria-hidden="true" />}
+            {children}
+          </>
+        )}
+      </Comp>
     )
   }
 )

@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
 import {
   resolveWicketFielderId,
@@ -9,7 +10,7 @@ import {
 } from "@mtk/contracts";
 import { Button } from "@mtk/ui";
 import { WicketType } from "@/stores/scoring-store";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 const WICKET_TYPES: { value: WicketType; label: string; description: string }[] = [
   { value: "bowled", label: "Bowled", description: "Bowler hits the stumps" },
@@ -33,6 +34,15 @@ interface WicketSelectorProps {
    *  catcher and run_out/stumped offer the dismissing fielder. Absent → the
    *  record is written without fielder attribution, as before Batch 103. */
   fielders?: Array<{ id: string; name: string }>;
+  /**
+   * Batch 139: the parent's save state. While the dismissal write is in
+   * flight every control in this modal disables — a second tap, a
+   * different wicket type, or closing the dialog mid-write are all
+   * clicks into a submission already running (the parent's ref guard
+   * ate duplicates quietly; the UI must not offer what it cannot honor).
+   * The dialog announces busy and shows a spinner so the wait is named.
+   */
+  submitting?: boolean;
 }
 
 /** Batch 102: the "which dismissal asks for the victim" rule now lives in
@@ -40,7 +50,7 @@ interface WicketSelectorProps {
  *  cannot drift from this one; the local copy is gone. Batch 103: the
  *  fielder question and the required/optional rule come from the SAME
  *  contracts module, so both surfaces ask IDENTICAL questions. */
-export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: WicketSelectorProps) {
+export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders, submitting = false }: WicketSelectorProps) {
   const [pendingType, setPendingType] = useState<WicketType | null>(null);
   // Batch 103: victim choice captured WHILE the fielder question follows
   // (a run-out can ask both: which batter left, then who broke the wicket).
@@ -96,10 +106,11 @@ export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 sm:p-6">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 sm:p-6" aria-busy={submitting || undefined}>
       <div className="bg-background rounded-lg shadow-xl max-w-md w-full p-4 sm:p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg sm:text-xl font-bold">
+          <h3 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+            {submitting && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />}
             {fielderStep
               ? wicketFielderQuestion(pendingType) ?? "Who dismissed the batter?"
               : pendingType
@@ -110,6 +121,7 @@ export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: 
             variant="ghost"
             size="icon"
             aria-label={pendingType ? "Back to wicket types" : "Cancel wicket selection"}
+            disabled={submitting}
             onClick={() => {
               if (pendingType) {
                 stepBack();
@@ -130,6 +142,7 @@ export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: 
                 <Button
                   key={fielder.id}
                   onClick={() => chooseFielder(fielder.id)}
+                  disabled={submitting}
                   className="flex flex-col items-start p-3 sm:p-4 h-auto touch-manipulation active:scale-95"
                   variant="outline"
                 >
@@ -140,6 +153,7 @@ export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: 
             {wicketFielderRequirement(pendingType) === "optional" && (
               <Button
                 onClick={() => chooseFielder(undefined)}
+                disabled={submitting}
                 className="w-full touch-manipulation active:scale-95"
                 variant="ghost"
               >
@@ -153,6 +167,7 @@ export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: 
               <Button
                 key={batter.id}
                 onClick={() => void chooseVictim(batter.id)}
+                disabled={submitting}
                 className="flex flex-col items-start p-3 sm:p-4 h-auto touch-manipulation active:scale-95"
                 variant="outline"
               >
@@ -169,6 +184,7 @@ export function WicketSelector({ onSelect, onCancel, creaseBatters, fielders }: 
               <Button
                 key={type.value}
                 onClick={() => choose(type.value)}
+                disabled={submitting}
                 className="flex flex-col items-start p-3 sm:p-4 h-auto touch-manipulation active:scale-95"
                 variant="outline"
               >
