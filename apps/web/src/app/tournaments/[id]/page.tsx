@@ -314,7 +314,7 @@ export default async function PublicTournamentPage({ params }: { params: Promise
           leaderboard reads; only present when at least one list has rows. */}
       {tournamentLeaders ? <TournamentLeaders data={tournamentLeaders} /> : null}
 
-      {standings.length > 0 && <PointsTable rows={standings} />}
+      {standings.length > 0 && <PointsTable rows={standings} hasGroups={groupStandings.length > 0} />}
 
       {awards.length > 0 && (
         <Card>

@@ -14,7 +14,7 @@ import { formatNetRunRate, type StandingsRow } from "@/lib/standings"
  * columns a reader scans never squeeze out.
  */
 
-export function PointsTable({ rows }: { rows: StandingsRow[] }) {
+export function PointsTable({ rows, hasGroups = false }: { rows: StandingsRow[]; hasGroups?: boolean }) {
   return (
     <Card>
       <CardHeader><CardTitle>Points Table</CardTitle></CardHeader>
@@ -23,19 +23,23 @@ export function PointsTable({ rows }: { rows: StandingsRow[] }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[24rem]">
             <thead>
+              {/* Batch 138 (standings sweep): column semantics the group tables
+                  already had, plus the engine's order rendered as positions. */}
               <tr className="border-b text-muted-foreground text-xs">
-                <th className="py-2 pl-6 text-left font-medium">Team</th>
-                <th className="py-2 px-2 text-center font-medium">P</th>
-                <th className="py-2 px-2 text-center font-medium">W</th>
-                <th className="py-2 px-2 text-center font-medium">L</th>
-                <th className="py-2 px-2 text-center font-medium">Pts</th>
-                <th className="py-2 pr-6 text-center font-medium">NRR</th>
+                <th scope="col" className="py-2 pl-6 text-center font-medium" aria-label="Position">#</th>
+                <th scope="col" className="py-2 pl-2 text-left font-medium">Team</th>
+                <th scope="col" title="Played" className="py-2 px-2 text-center font-medium">P</th>
+                <th scope="col" title="Won" className="py-2 px-2 text-center font-medium">W</th>
+                <th scope="col" title="Lost" className="py-2 px-2 text-center font-medium">L</th>
+                <th scope="col" title="Points" className="py-2 px-2 text-center font-medium">Pts</th>
+                <th scope="col" title="Net run rate" className="py-2 pr-6 text-center font-medium">NRR</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((s) => (
+              {rows.map((s, position) => (
                 <tr key={s.teamId} className="border-b last:border-0">
-                  <td className="py-2 pl-6 font-medium max-w-[10rem] truncate" title={s.name}>{s.name}</td>
+                  <td className="py-2 pl-6 text-center tabular-nums text-muted-foreground" aria-label={`Position ${position + 1}`}>{position + 1}</td>
+                  <th scope="row" className="py-2 pl-2 text-left font-medium max-w-[10rem] truncate" title={s.name}>{s.name}</th>
                   <td className="py-2 px-2 text-center tabular-nums">{s.played}</td>
                   <td className="py-2 px-2 text-center tabular-nums">{s.won}</td>
                   <td className="py-2 px-2 text-center tabular-nums">{s.lost}</td>
@@ -46,6 +50,15 @@ export function PointsTable({ rows }: { rows: StandingsRow[] }) {
             </tbody>
           </table>
         </div>
+        {/* Batch 138: the reciprocal covering note — the group tables explain
+            the tournament-wide table; this explains the groups. It renders
+            ONLY where the page actually shows both (prop-driven; the
+            dashboard twin mounts group standings without this table). */}
+        {hasGroups && (
+          <p className="text-xs text-muted-foreground mt-2 px-6">
+            Group-labelled fixtures also count toward their group&apos;s table above; this table covers every fixture in the competition.
+          </p>
+        )}
       </CardContent>
     </Card>
   )
