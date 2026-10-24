@@ -103,11 +103,15 @@ describe("PUB-06: tournament allowlist", () => {
     const row = await readPublishedTournament(TENANT, TOURNAMENT)
     expect(row).not.toBeNull()
     expect(Object.keys(row as object).sort()).toEqual([
+      // Batch 146: qualificationRule joins the disclosed set — the
+      // ORGANIZER's sanitized, publicly-meant rule. The raw rules jsonb
+      // (wizard seed order, organizer-internal state) is still dropped.
       "championTeamId", "description", "endDate", "format", "id", "name",
-      "startDate", "status",
+      "qualificationRule", "startDate", "status",
     ])
     expect(JSON.stringify(row)).not.toContain("createdBy")
     expect(JSON.stringify(row)).not.toContain("competitionLocked")
+    expect(JSON.stringify(row)).not.toContain("seedOrder")
   })
 
   it("index reader: every listed row carries exactly the disclosed fields - planted secrets are dropped by the projection", async () => {
@@ -125,8 +129,9 @@ describe("PUB-06: tournament allowlist", () => {
     const rows = await readPublishedTournaments(TENANT)
     expect(rows).toHaveLength(1)
     expect(Object.keys(rows[0]).sort()).toEqual([
+      // Batch 146: qualificationRule joins the disclosed set (see above).
       "championTeamId", "description", "endDate", "format", "id", "name",
-      "startDate", "status",
+      "qualificationRule", "startDate", "status",
     ])
     expect(JSON.stringify(rows)).not.toContain("createdBy")
     expect(JSON.stringify(rows)).not.toContain("competitionLocked")

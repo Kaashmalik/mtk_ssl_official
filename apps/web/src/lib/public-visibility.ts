@@ -9,6 +9,7 @@ import {
 } from "@mtk/database/lib/milestone-policy"
 import { isPrizePubliclyVisible, PUBLIC_PRIZE_LIMIT } from "@mtk/database/lib/prize-policy"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
+import { readQualificationRule, type QualificationRule } from "@mtk/database/lib/qualification-policy"
 import { isUuid } from "@mtk/contracts"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
@@ -51,6 +52,12 @@ export type PublicTournament = {
   startDate: typeof tournaments.$inferSelect.startDate
   endDate: typeof tournaments.$inferSelect.endDate
   championTeamId: string | null
+  /**
+   * Batch 146: ONLY the organizer's strictly-parsed qualification rule —
+   * never the raw rules jsonb, which carries organizer-internal wizard
+   * state (e.g. the seed order) that must not reach a public payload.
+   */
+  qualificationRule: QualificationRule | null
 }
 
 export type PublicMatch = {
@@ -102,12 +109,17 @@ export async function readPublishedTournament(tenantId: string, id: string): Pro
       startDate: tournaments.startDate,
       endDate: tournaments.endDate,
       championTeamId: tournaments.championTeamId,
+      rules: tournaments.rules,
     })
     .from(tournaments)
     .where(and(eq(tournaments.id, id), eq(tournaments.tenantId, tenantId)))
     .limit(1)
   if (!row || !isTournamentPublished(row.status)) return null
-  return row
+  // Batch 146: sanitize at the reader — the strict qualification-rule parse
+  // nulls anything malformed, and the raw rules blob (wizard seed order and
+  // all) stops here.
+  const { rules, ...publicRow } = row
+  return { ...publicRow, qualificationRule: readQualificationRule(rules) }
 }
 
 /**
@@ -118,7 +130,7 @@ export async function readPublishedTournament(tenantId: string, id: string): Pro
  * deterministically; a draft or cancelled competition never reaches the list.
  */
 export async function readPublishedTournaments(tenantId: string): Promise<PublicTournament[]> {
-  return db
+  const rows = await db
     .select({
       id: tournaments.id,
       name: tournaments.name,
@@ -128,6 +140,7 @@ export async function readPublishedTournaments(tenantId: string): Promise<Public
       startDate: tournaments.startDate,
       endDate: tournaments.endDate,
       championTeamId: tournaments.championTeamId,
+      rules: tournaments.rules,
     })
     .from(tournaments)
     .where(and(
@@ -135,6 +148,12 @@ export async function readPublishedTournaments(tenantId: string): Promise<Public
       inArray(tournaments.status, PUBLISHED_TOURNAMENT_STATUS_VALUES),
     ))
     .orderBy(desc(tournaments.startDate), asc(tournaments.id))
+  // Batch 146: same reader-side sanitization as the single read — only the
+  // strict qualification rule leaves, never the raw rules blob.
+  return rows.map(({ rules, ...publicRow }) => ({
+    ...publicRow,
+    qualificationRule: readQualificationRule(rules),
+  }))
 }
 
 /**

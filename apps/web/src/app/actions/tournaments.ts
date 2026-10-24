@@ -9,6 +9,7 @@ import { requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-serve
 import type { Permission } from "@/lib/rbac"
 import { calendarDateSchema, decimalMoney, moneySchema, readTournamentConfiguration, resizeSeedOrder, tournamentConfigurationSchema } from "@mtk/database/lib/tournament-configuration"
 import { archiveTournament, setTournamentRegistration } from "@/lib/tournament-lifecycle"
+import { writeQualificationRule } from "@mtk/database/lib/qualification-policy"
 import { generateTournamentFixtures } from "@/lib/fixture-generation"
 import { advanceKnockoutTournament } from "@/lib/tournament-advancement"
 import { createTournamentRecord, updateTournamentRecord } from "@/lib/tournament-writes"
@@ -33,6 +34,13 @@ const createTournamentSchema = z.object({
   // refuses, and a malformed key refuses rather than silently losing the
   // recovery guarantee.
   requestKey: z.string().uuid().optional().nullable(),
+  // Batch 146: the league ORGANIZER's qualification rule — the only policy
+  // that exists. Optional/nullable; "none" is a valid, explicit choice.
+  // Exact shapes, bounded sizes (the schema caps teams at 128).
+  qualificationRule: z.union([
+    z.object({ kind: z.literal("top_n"), spots: z.number().int().min(1).max(128) }).strict(),
+    z.object({ kind: z.literal("top_per_group"), perGroup: z.number().int().min(1).max(128) }).strict(),
+  ]).optional().nullable(),
 }).strict()
 
 // Configuration is persisted at creation. Ordinary edits must not replace rules.
@@ -53,7 +61,10 @@ type PersistenceInput = z.infer<typeof updateTournamentSchema> & {
 }
 
 function persistenceValues<T extends PersistenceInput>(input: T) {
-  const { registrationFee, prizeAmount, configuration, ...base } = input as PersistenceInput
+  // Batch 146: qualificationRule is NOT a column — it rides the tournament's
+  // own rules jsonb (same namespacing as the wizard configuration) and is
+  // merged by the update writer, preserving every other rules key.
+  const { registrationFee, prizeAmount, configuration, qualificationRule: _qualificationRule, ...base } = input as PersistenceInput
   return {
     ...base,
     ...(registrationFee !== undefined ? { entryFee: decimalMoney(registrationFee) } : {}),
@@ -138,6 +149,16 @@ export async function updateTournament(id: string, input: UpdateTournamentInput)
       cleanData.rules = { ...existing.rules, wizard: {
         ...configuration, seedOrder: resizeSeedOrder(configuration.seedOrder, validated.maxTeams),
       } }
+    }
+    // Batch 146: the organizer's qualification rule rides the rules jsonb,
+    // merged so every other namespaced key (the wizard config above all)
+    // survives; `null` clears it — "none" is an explicit organizer choice.
+    if (validated.qualificationRule !== undefined) {
+      const baseRules = cleanData.rules ??
+        (typeof existing.rules === "object" && existing.rules !== null && !Array.isArray(existing.rules)
+          ? existing.rules
+          : {})
+      cleanData.rules = writeQualificationRule(baseRules, validated.qualificationRule)
     }
     return cleanData
   })

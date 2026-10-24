@@ -26,7 +26,17 @@ const GROUP_HEADERS: { short: string; title: string }[] = [
   { short: "NRR", title: "Net run rate" },
 ]
 
-export function GroupStandings({ groups }: { groups: ReturnType<typeof computeGroupStandings> }) {
+export function GroupStandings({
+  groups,
+  qualifyingTeamIds = [],
+  qualificationRuleSummary = null,
+}: {
+  groups: ReturnType<typeof computeGroupStandings>
+  /** Batch 146: engine-ordered qualifying ids (per-group slices); absent → no markers, no legend. */
+  qualifyingTeamIds?: string[] | null
+  /** Verbatim restatement of the league organizer's rule. */
+  qualificationRuleSummary?: string | null
+}) {
   if (groups.length === 0) return null
   return <section aria-label="Group standings" className="space-y-4">
     <h2 className="text-lg font-semibold">Group standings</h2>
@@ -46,7 +56,18 @@ export function GroupStandings({ groups }: { groups: ReturnType<typeof computeGr
             {group.rows.map((row, position) =>
               <tr key={row.teamId} className="border-b last:border-0">
                 <td className="p-2 text-center tabular-nums text-muted-foreground" aria-label={`Position ${position + 1}`}>{position + 1}</td>
-                <th scope="row" className="text-start p-2 font-medium max-w-[10rem] truncate" title={row.name}>{row.name}</th>
+                <th scope="row" className="text-start p-2 font-medium max-w-[10rem] truncate" title={row.name}>
+                  {row.name}
+                  {qualifyingTeamIds?.includes(row.teamId) && (
+                    <span
+                      className="ml-1.5 text-[10px] font-bold text-primary align-middle"
+                      aria-label="Qualification position"
+                      title="Qualification position"
+                    >
+                      Q
+                    </span>
+                  )}
+                </th>
                 <td className="p-2 text-center tabular-nums">{row.played}</td>
                 <td className="p-2 text-center tabular-nums">{row.won}</td>
                 <td className="p-2 text-center tabular-nums">{row.lost}</td>
@@ -57,6 +78,13 @@ export function GroupStandings({ groups }: { groups: ReturnType<typeof computeGr
           </tbody>
         </table>
       </div>,
+    )}
+    {/* Batch 146: the organizer's rule restated verbatim, once, attributed
+        to the organizer — rendered only when they set a rule. */}
+    {qualificationRuleSummary && (
+      <p className="text-xs text-muted-foreground" aria-label="Qualification rule">
+        {qualificationRuleSummary}
+      </p>
     )}
   </section>
 }
