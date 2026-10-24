@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
 import { getMatchForScoring, getMatchPlayersForScoring } from "@/app/actions/scoring"
+import { isUuid } from "@mtk/contracts"
 
 export const dynamic = "force-dynamic"
 
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Sign in to score this match" }, { status: 401 })
   }
   const matchId = new URL(request.url).searchParams.get("matchId") ?? ""
-  if (!/^[0-9a-f-]{36}$/i.test(matchId)) {
+  if (!isUuid(matchId)) {
     return NextResponse.json({ error: "A valid matchId is required" }, { status: 400 })
   }
   try {

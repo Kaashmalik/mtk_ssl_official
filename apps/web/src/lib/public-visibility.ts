@@ -9,6 +9,7 @@ import {
 } from "@mtk/database/lib/milestone-policy"
 import { isPrizePubliclyVisible, PUBLIC_PRIZE_LIMIT } from "@mtk/database/lib/prize-policy"
 import { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
+import { isUuid } from "@mtk/contracts"
 export { isTournamentPublished, isMatchPublished, PUBLISHED_TOURNAMENT_STATUS_VALUES, PUBLISHED_MATCH_STATUS_VALUES } from "@mtk/database/lib/publication-policy"
 
 /**
@@ -144,6 +145,11 @@ export async function readPublishedTournaments(tenantId: string): Promise<Public
  * status alone. The returned row carries the PUB-06 public allowlist only.
  */
 export async function readPublishedMatch(tenantId: string, id: string): Promise<PublicMatch | null> {
+  // Batch 144: untrusted `[matchId]` segments fail CLOSED here — a
+  // non-uuid string used to reach the Postgres uuid cast and surface as an
+  // unhandled 500; now it is simply an unpublished (nonexistent) match and
+  // the caller's existing notFound() runs.
+  if (!isUuid(id)) return null
   const [row] = await db
     .select({
       id: matches.id,

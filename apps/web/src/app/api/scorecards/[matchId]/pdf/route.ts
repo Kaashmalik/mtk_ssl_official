@@ -5,6 +5,7 @@ import { getPublicTenantContext } from "@/lib/public-tenant"
 import { readPublishedMatch } from "@/lib/public-visibility"
 import { applyMinorNameGate } from "@mtk/database/lib/minor-consent-policy"
 import { getTenantBranding } from "@/lib/tenant"
+import { isUuid } from "@mtk/contracts"
 import { brandPresentation, brandVariables } from "@/lib/brand-presentation"
 
 /**
@@ -23,6 +24,10 @@ export async function GET(
   { params }: { params: Promise<{ matchId: string }> },
 ) {
   const { matchId } = await params
+
+  // Batch 144: a malformed id fails CLOSED as 404 — the same truth as an
+  // unpublished match — instead of reaching the uuid cast as a 500.
+  if (!isUuid(matchId)) return new NextResponse("Not Found", { status: 404 })
 
   // Tenant scope — fail closed if no tenant can be resolved
   const ctx = await getPublicTenantContext()

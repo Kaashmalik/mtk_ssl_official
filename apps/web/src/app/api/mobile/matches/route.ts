@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
 import { resolveActiveTenantId } from "@/lib/rbac-server"
 import { parseMemberMatchListQuery, readMemberMatch, readMemberMatchPage } from "@/lib/mobile-bff"
-import { MOBILE_BFF_ROUTES, MOBILE_BFF_VERSION } from "@mtk/contracts"
+import { MOBILE_BFF_ROUTES, MOBILE_BFF_VERSION, isUuid } from "@mtk/contracts"
 
 export const dynamic = "force-dynamic"
 
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const matchId = url.searchParams.get("matchId")
   if (matchId !== null) {
-    if (!/^[0-9a-fA-F-]{36}$/.test(matchId)) {
+    if (!isUuid(matchId)) {
       return NextResponse.json({ error: "invalid_query", detail: "matchId must be a uuid" }, { status: 400 })
     }
     const match = await readMemberMatch({ userId, tenantId, matchId })
