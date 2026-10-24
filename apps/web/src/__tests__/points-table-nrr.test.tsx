@@ -28,6 +28,11 @@ async function markup(rows: unknown[]): Promise<string> {
   return renderToStaticMarkup(React.createElement(PointsTable, { rows: rows as any }))
 }
 
+async function markupWithNote(hasGroups: boolean): Promise<string> {
+  const { PointsTable } = await import("../components/tournaments/points-table")
+  return renderToStaticMarkup(React.createElement(PointsTable, { rows: [row()] as any, hasGroups }))
+}
+
 describe("Points Table NRR (Batch 132)", () => {
   it("shows the NRR column with the formatted rate a reader can verify", async () => {
     const html = await markup([row()])
@@ -52,5 +57,35 @@ describe("Points Table NRR (Batch 132)", () => {
     expect(html).toContain("truncate")
     expect(html).toContain(`title="Sir Vivian Richards Memorial Cricket Club North"`)
     expect(html).toContain(">4<") // points render
+  })
+})
+
+/**
+ * Batch 138 (standings sweep): the group tables gain the Points Table's
+ * presentation; the Points Table in turn gains what only the group table
+ * had — column/scope semantics — plus the two things neither had: the
+ * engine's order rendered as positions, and the reciprocal covering note
+ * (the group tables already explain the tournament-wide table; the wide
+ * table never explained the groups). The note is a PROP: the dashboard
+ * twin mounts group standings without this table, so the sentence renders
+ * only where the page actually shows both.
+ */
+describe("Points Table sweep (Batch 138)", () => {
+  it("renders the engine's order as positions and the column semantics the group table had", async () => {
+    const zero = { played: 0, won: 0, lost: 0, points: 0, hasNetRunRate: false, netRunRate: 0 }
+    const html = await markup([row(zero), { ...row(zero), teamId: "t2", name: "Tigers" }])
+    const i1 = html.indexOf(">1<")
+    const i2 = html.indexOf(">2<")
+    expect(i1).toBeGreaterThanOrEqual(0)
+    expect(i2).toBeGreaterThan(i1)
+    expect(html).toContain('scope="col"')
+    expect((html.match(/scope="row"/g) ?? []).length).toBe(2)
+  })
+
+  it("the reciprocal group note renders only when the page says groups exist above", async () => {
+    const withNote = await markupWithNote(true)
+    expect(withNote).toContain("Group-labelled fixtures")
+    const withoutNote = await markupWithNote(false)
+    expect(withoutNote).not.toContain("Group-labelled fixtures")
   })
 })
