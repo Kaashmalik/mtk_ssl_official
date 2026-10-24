@@ -3,6 +3,7 @@ import { z } from "zod"
 import { db, matches } from "@mtk/database"
 import { and, eq } from "drizzle-orm"
 import { requireMediaMember, MediaAuthorizationError } from "@/lib/media-authorization"
+import { isUuid } from "@mtk/contracts"
 import { hasPermission } from "@/lib/rbac"
 import { broadcastOverlaySecret, signBroadcastOverlayToken } from "@/lib/broadcast-overlay-token"
 
@@ -39,6 +40,11 @@ export async function POST(
   if (!input.success) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
+
+  // Batch 147: a non-uuid broadcastId 404s here — the "no row" truth —
+  // instead of reaching the uuid cast as an unhandled 500 for an
+  // authenticated organizer (same class B144 closed on the PDF route).
+  if (!isUuid(broadcastId)) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const [match] = await db
     .select({ id: matches.id })

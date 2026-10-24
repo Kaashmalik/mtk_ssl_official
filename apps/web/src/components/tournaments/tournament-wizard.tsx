@@ -18,9 +18,21 @@ import { Skeleton } from "@mtk/ui/components/ui/skeleton"
 import dynamic from "next/dynamic"
 
 const StepSeeding = dynamic<StepSeedingProps>(
-  () => import("./steps/step-seeding").then((m) => m.StepSeeding),
+  // Batch 147: a failed chunk degrades to the loading skeleton — one failed
+  // decorative import must never throw at render and destroy an in-progress
+  // wizard write (Batch 143's idiom: the chunk fails, the product survives).
+  () => import("./steps/step-seeding").then((m) => m.StepSeeding).catch(() => StepSeedingFallback),
   { ssr: false, loading: () => <Skeleton className="h-72 w-full rounded-xl" /> }
 )
+
+/** Chunk-failure degradation: the wizard stays usable, the step just says so. */
+function StepSeedingFallback() {
+  return (
+    <div className="rounded-lg border p-4 text-sm text-muted-foreground" role="status">
+      The seeding step could not be loaded right now. Reload the page to continue — your earlier answers are saved.
+    </div>
+  )
+}
 import { CompletionScreen } from "./completion-screen"
 import { useLanguage } from "@/hooks/use-language"
 import { CopyFromPrevious } from "./copy-from-previous"

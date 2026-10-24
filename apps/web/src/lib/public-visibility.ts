@@ -99,6 +99,11 @@ export type PublicTeam = {
  * it would for a foreign or missing id (no signal that the row exists).
  */
 export async function readPublishedTournament(tenantId: string, id: string): Promise<PublicTournament | null> {
+  // Batch 147: untrusted `[id]` segments fail CLOSED here — the same gate
+  // B144 put on the sibling match reader; a non-uuid id is simply an
+  // unpublished tournament (the caller's notFound() runs), never a Postgres
+  // uuid-cast 500 on an unauthenticated, crawler-visible surface.
+  if (!isUuid(id)) return null
   const [row] = await db
     .select({
       id: tournaments.id,

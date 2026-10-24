@@ -1,4 +1,5 @@
 import { db, users, players, playerSeasonStats, tournaments, tenants } from "@mtk/database"
+import { isUuid } from "@mtk/contracts"
 import {
   careerProfilePublishable,
   mergeConsentedCareer,
@@ -86,6 +87,10 @@ export function toPublicCareerLeagues(rows: LeagueAggregateRow[]): PublicCareerL
  * returns `null` and the caller renders notFound.
  */
 export async function readPublicCareerProfile(userId: string): Promise<PublicCareerProfile | null> {
+  // Batch 147: untrusted `[userId]` segments fail CLOSED before any query —
+  // a non-uuid id can never satisfy the cast, so a doomed query whose catch
+  // rendered a fake "please try again" (HTTP 200) is now an honest 404.
+  if (!isUuid(userId)) return null
   const [account] = await db
     .select({ id: users.id, isActive: users.isActive, publicCareerConsentAt: users.publicCareerConsentAt })
     .from(users)
