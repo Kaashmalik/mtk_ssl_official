@@ -1,0 +1,285 @@
+{
+  "audit_date": "2026-10-25T09:40:55.573017",
+  "project": "MTK SSL - Shakir Super League",
+  "phases": {
+    "services": {
+      "total": 10,
+      "details": [
+        {
+          "name": "payment-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 9,
+          "test_files": 1
+        },
+        {
+          "name": "streaming-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 9,
+          "test_files": 2
+        },
+        {
+          "name": "auth-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 8,
+          "test_files": 1
+        },
+        {
+          "name": "api",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 52,
+          "test_files": 1
+        },
+        {
+          "name": "tournament-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 10,
+          "test_files": 1
+        },
+        {
+          "name": "scoring-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 37,
+          "test_files": 15
+        },
+        {
+          "name": "analytics-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 6,
+          "test_files": 1
+        },
+        {
+          "name": "ai-commentary-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 12,
+          "test_files": 4
+        },
+        {
+          "name": "api-gateway",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 13,
+          "test_files": 1
+        },
+        {
+          "name": "notification-service",
+          "has_package_json": true,
+          "has_tsconfig": true,
+          "has_dockerfile": true,
+          "has_src": true,
+          "src_files": 12,
+          "test_files": 3
+        }
+      ]
+    },
+    "apps": {
+      "total": 4,
+      "details": [
+        {
+          "name": "marketing",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 16,
+          "test_files": 0
+        },
+        {
+          "name": "mobile",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 18,
+          "test_files": 0
+        },
+        {
+          "name": "web",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 870,
+          "test_files": 50
+        },
+        {
+          "name": "admin",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 137,
+          "test_files": 0
+        }
+      ]
+    },
+    "database": {
+      "total_migrations": 94,
+      "migrations": [
+        {
+          "name": "001_enable_uuid_v7_and_helpers.sql",
+          "size_kb": 4.07
+        },
+        {
+          "name": "002_create_tables.sql",
+          "size_kb": 17.19
+        },
+        {
+          "name": "003_create_rls_policies.sql",
+          "size_kb": 11.44
+        },
+        {
+          "name": "004_microservices_schema.sql",
+          "size_kb": 16.57
+        },
+        {
+          "name": "005_seed_super_admin.sql",
+          "size_kb": 2.07
+        },
+        {
+          "name": "006_create_waitlist_table.sql",
+          "size_kb": 1.24
+        },
+        {
+          "name": "007_create_admin_tables.sql",
+          "size_kb": 7.7
+        },
+        {
+          "name": "008_white_label_enterprise.sql",
+          "size_kb": 6.19
+        },
+        {
+          "name": "009_fantasy_cricket.sql",
+          "size_kb": 5.12
+        },
+        {
+          "name": "010_event_store_cqrs.sql",
+          "size_kb": 5.58
+        }
+      ]
+    },
+    "packages": {
+      "total": 6,
+      "details": [
+        {
+          "name": "database",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 181
+        },
+        {
+          "name": "observability",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 7
+        },
+        {
+          "name": "ui",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 2
+        },
+        {
+          "name": "config",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 1
+        },
+        {
+          "name": "contracts",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 25
+        },
+        {
+          "name": "dns-provider",
+          "has_package_json": true,
+          "has_src": true,
+          "src_files": 6
+        }
+      ]
+    },
+    "documentation": {
+      "total_docs": 37,
+      "docs": [
+        {
+          "path": "docs/LOCAL_ACCEPTANCE_EVIDENCE.md",
+          "size_kb": 5.16
+        },
+        {
+          "path": "docs/MTK_SSL_PREMIUM_SAAS_PLAN_2026.md",
+          "size_kb": 11.81
+        },
+        {
+          "path": "docs/PARALLEL_SESSION_DIVISION.md",
+          "size_kb": 5.62
+        },
+        {
+          "path": "docs/ROLLBACK_RUNBOOK.md",
+          "size_kb": 5.11
+        },
+        {
+          "path": "docs/P00_BASELINE_AND_DECISIONS_2026-10-20.md",
+          "size_kb": 15.43
+        },
+        {
+          "path": "docs/RELEASE_EVIDENCE.md",
+          "size_kb": 6.0
+        },
+        {
+          "path": "docs/DELIVERY_EXECUTION_GROUPS.md",
+          "size_kb": 4.28
+        },
+        {
+          "path": "docs/ENHANCEMENT_ROADMAP_2026-10-20.md",
+          "size_kb": 261.13
+        },
+        {
+          "path": "docs/MCP_SETUP.md",
+          "size_kb": 5.17
+        },
+        {
+          "path": "docs/FRESH_REBUILD_PROOF.md",
+          "size_kb": 2.53
+        },
+        {
+          "path": "docs/TICK_DECISIONS.md",
+          "size_kb": 5.02
+        },
+        {
+          "path": "docs/UI_UX_INDUSTRY_PLAN_2026-10-25.md",
+          "size_kb": 5.74
+        },
+        {
+          "path": "docs/SAAS_MASTER_PLAN_2026-10-12.md",
+          "size_kb": 516.13
+        },
+        {
+          "path": "docs/PROJECT_GUIDE.md",
+          "size_kb": 8.48
+        },
+        {
+          "path": "docs/deployment/release-rollback-strategy.md",
+          "size_kb": 2.52
+        }
+      ]
+    }
+  }
+}
