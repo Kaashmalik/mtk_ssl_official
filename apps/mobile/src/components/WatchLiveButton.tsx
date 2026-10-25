@@ -6,7 +6,9 @@ import type { Match } from "@/types";
 const WEB_APP_URL =
   Constants.expoConfig?.extra?.webAppUrl ||
   process.env.EXPO_PUBLIC_WEB_APP_URL ||
-  "https://ssl.mtkcodex.site";
+  // Batch 149: the platform is live on cricketleague.tech (owner cut over
+  // 2026-10-24); EAS `extra.webAppUrl` overrides this default.
+  "https://www.cricketleague.tech";
 
 type PlaybackState = NonNullable<Match["playbackState"]>;
 

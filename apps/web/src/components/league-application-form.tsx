@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useMemo, useState, useTransition } from "react"
+import React, { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { Button } from "@mtk/ui/components/ui/button"
@@ -70,6 +70,13 @@ export function LeagueApplicationForm({
   const [slug, setSlug] = useState(
     initialApplication && isEditable(initialApplication.state) ? initialApplication.proposedSlug : "",
   )
+  // Batch 149: the proposed-URL preview follows the host the applicant is on
+  // (www.cricketleague.tech today, white-label apexes later); empty until
+  // hydration — window is not available during SSR.
+  const [apexHost, setApexHost] = useState("")
+  useEffect(() => {
+    setApexHost(window.location.host.replace(/^www\./, ""))
+  }, [])
   const [plan, setPlan] = useState<PlanChoice>(
     initialApplication && isEditable(initialApplication.state) ? initialApplication.desiredPlan : "free",
   )
@@ -300,7 +307,7 @@ export function LeagueApplicationForm({
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Proposed public URL: <Badge variant="outline">{(slug || derivedSlug || "your-league")}.ssl.mtkcodex.site</Badge>
+                Proposed public URL: <Badge variant="outline">{(slug || derivedSlug || "your-league")}{apexHost ? `.${apexHost}` : ""}</Badge>
               </p>
             </div>
 

@@ -5,10 +5,23 @@
 
 **Project:** Shakir Super League (SSL) — Cricket Management SaaS  
 **Version:** 2.0.0  
-**Intended domain:** `ssl.mtkcodex.site` (primary) — **not publicly deployed yet** (DNS unresolved as of 2026-09-23)  
+**LIVE domain:** `https://www.cricketleague.tech` — **DEPLOYED (owner-confirmed 2026-10-25; Vercel + DB live).** Superseded: `ssl.mtkcodex.site` (retired; data-side cutover registered in `supabase/MIGRATION_STATUS.md`, domain_cutover_cricketleague).  
 **Repository:** https://github.com/Kaashmalik/mtk-ssl2026.git  
 **Author:** Muhammad Kashif / Malik Tech  
-**Last Updated:** 2026-09-23 (deploy status reconciled with doc-truth audit)
+**Last Updated:** 2026-10-25 (Batch 149: domain cutover recorded; provider checklist below)
+
+---
+
+## 🚦 Domain cutover state — www.cricketleague.tech (Batch 149, 2026-10-25)
+
+The pre-cutover text below was written before the domain existed; the site is now LIVE. What the cutover requires NEXT (owner actions, in order):
+
+1. **Vercel env (Production):** set `WEB_APP_URL=https://www.cricketleague.tech` (and `NEXT_PUBLIC_APP_URL` if used) → **Redeploy**. This drives `metadataBase`, canonical URLs, the sitemap/robots base and JSON-LD `url`s — until it is set, those emit the localhost fallback.
+2. **Clerk:** add `https://www.cricketleague.tech` (+ apex) to the allowed redirect/Origin allowlists in the Clerk dashboard.
+3. **Supabase Auth:** set Site URL `https://www.cricketleague.tech` and add it (+ apex) to Redirect URLs.
+4. **Resend:** verify `cricketleague.tech` (SPF/DKIM/DMARC in DNS, domain in Resend dashboard), THEN set `RESEND_FROM_EMAIL=SSL <onboarding@cricketleague.tech>`, `OTP_EMAIL_FROM=…`, `PLATFORM_MAIL_DOMAIN=cricketleague.tech`. Until then the code's fallbacks intentionally keep the working `ssl.mtkcodex.site` sender (otp.ts, notification-email.ts, invitation emails, domain-verification record defaults — all env-overridable).
+5. **Mobile (EAS):** `webAppUrl` default is now `https://www.cricketleague.tech` in `app.json` — set the env `EXPO_PUBLIC_WEB_APP_URL` / EAS `extra.webAppUrl` per profile and rebuild; deep links to the retired host keep parsing in-app so already-shared links survive;
+6. **Google Search Console / Bing Webmaster:** verify `https://www.cricketleague.tech`, submit `https://www.cricketleague.tech/sitemap.xml`, request indexing of `/` and `/hub`. The per-host sitemap (Batch 117) serves tenant routes on this host automatically.
 
 ---
 
