@@ -20,6 +20,10 @@ const isPublicRoute = createRouteMatcher([
   "/api/cron/(.*)",
   "/api/webhooks/(.*)",
   "/api/auth/(.*)",
+  // Client-error beacon: error boundaries fire pre-auth (sign-in pages,
+  // expired sessions) — the payload is size-capped and log-only, never
+  // persisted, so it cannot become an authenticated data surface.
+  "/api/client-errors",
   "/verify-otp",
   // PWA assets must load pre-auth or the app cannot be installed.
   // (The manifest is now the per-host /manifest.webmanifest route, which the
