@@ -1,0 +1,300 @@
+{
+  "services": {
+    "payment-service": {
+      "name": "payment-service",
+      "source_files": 8,
+      "test_files": 1,
+      "coverage_ratio": "1/8",
+      "estimated_coverage": 12.5,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts"
+      ]
+    },
+    "streaming-service": {
+      "name": "streaming-service",
+      "source_files": 7,
+      "test_files": 2,
+      "coverage_ratio": "2/7",
+      "estimated_coverage": 28.57,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts",
+        "src/streaming.lifecycle.spec.ts"
+      ]
+    },
+    "auth-service": {
+      "name": "auth-service",
+      "source_files": 7,
+      "test_files": 1,
+      "coverage_ratio": "1/7",
+      "estimated_coverage": 14.29,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts"
+      ]
+    },
+    "api": {
+      "name": "api",
+      "source_files": 54,
+      "test_files": 1,
+      "coverage_ratio": "1/54",
+      "estimated_coverage": 1.85,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts"
+      ]
+    },
+    "tournament-service": {
+      "name": "tournament-service",
+      "source_files": 10,
+      "test_files": 1,
+      "coverage_ratio": "1/10",
+      "estimated_coverage": 10.0,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts"
+      ]
+    },
+    "scoring-service": {
+      "name": "scoring-service",
+      "source_files": 23,
+      "test_files": 15,
+      "coverage_ratio": "15/23",
+      "estimated_coverage": 65.22,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/scoring.service.spec.ts",
+        "src/scoring.gateway.spec.ts",
+        "src/match-state.spec.ts",
+        "src/kafka-scoring-publisher.spec.ts",
+        "src/scoring-revision.spec.ts",
+        "src/scoring-outbox-dispatcher.spec.ts",
+        "src/scoring-public-access.spec.ts",
+        "src/scoring-write-access.spec.ts",
+        "src/commentary-bridge.controller.spec.ts",
+        "src/env.spec.ts"
+      ]
+    },
+    "analytics-service": {
+      "name": "analytics-service",
+      "source_files": 5,
+      "test_files": 1,
+      "coverage_ratio": "1/5",
+      "estimated_coverage": 20.0,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts"
+      ]
+    },
+    "ai-commentary-service": {
+      "name": "ai-commentary-service",
+      "source_files": 8,
+      "test_files": 4,
+      "coverage_ratio": "4/8",
+      "estimated_coverage": 50.0,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/commentary.controller.spec.ts",
+        "src/env.spec.ts",
+        "src/consumer-idempotency.service.spec.ts",
+        "src/openai/openai.service.spec.ts"
+      ]
+    },
+    "api-gateway": {
+      "name": "api-gateway",
+      "source_files": 12,
+      "test_files": 1,
+      "coverage_ratio": "1/12",
+      "estimated_coverage": 8.33,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts"
+      ]
+    },
+    "notification-service": {
+      "name": "notification-service",
+      "source_files": 9,
+      "test_files": 3,
+      "coverage_ratio": "3/9",
+      "estimated_coverage": 33.33,
+      "has_jest": true,
+      "has_vitest": false,
+      "test_framework": "Jest",
+      "test_files_list": [
+        "src/env.spec.ts",
+        "src/notification.controller.spec.ts",
+        "src/notification.gateway.spec.ts"
+      ]
+    }
+  },
+  "apps": {
+    "marketing": {
+      "name": "marketing",
+      "source_files": 17,
+      "test_files": 0,
+      "coverage_ratio": "0/17",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    },
+    "mobile": {
+      "name": "mobile",
+      "source_files": 33,
+      "test_files": 0,
+      "coverage_ratio": "0/33",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    },
+    "web": {
+      "name": "web",
+      "source_files": 615,
+      "test_files": 257,
+      "coverage_ratio": "257/615",
+      "estimated_coverage": 41.79,
+      "has_jest": false,
+      "has_vitest": true,
+      "test_framework": "Vitest",
+      "test_files_list": [
+        "src/__tests__/public-allowlist.live.test.ts",
+        "src/__tests__/admin-leagues-route.test.ts",
+        "src/__tests__/playing-xi-card.test.ts",
+        "src/__tests__/audit-followups.test.ts",
+        "src/__tests__/subscription-renewal.test.ts",
+        "src/__tests__/playing-xis.test.ts",
+        "src/__tests__/resend-webhook.test.ts",
+        "src/__tests__/member-actions.test.ts",
+        "src/__tests__/venue-reads.test.ts",
+        "src/__tests__/match-readiness.test.ts"
+      ]
+    },
+    "admin": {
+      "name": "admin",
+      "source_files": 138,
+      "test_files": 0,
+      "coverage_ratio": "0/138",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    }
+  },
+  "packages": {
+    "database": {
+      "name": "database",
+      "source_files": 124,
+      "test_files": 59,
+      "coverage_ratio": "59/124",
+      "estimated_coverage": 47.58,
+      "has_jest": false,
+      "has_vitest": true,
+      "test_framework": "Vitest",
+      "test_files_list": [
+        "src/__tests__/scoring-participants-schema.test.ts",
+        "src/__tests__/fan-prediction-policy.test.ts",
+        "src/__tests__/playing-xi-policy.test.ts",
+        "src/__tests__/broadcast-schema.test.ts",
+        "src/__tests__/competition-control-policy.test.ts",
+        "src/__tests__/tenant-isolation.test.ts",
+        "src/__tests__/tournament-configuration.test.ts",
+        "src/__tests__/scorecard-correction-policy.test.ts",
+        "src/__tests__/email-templates.test.ts",
+        "src/__tests__/milestone-policy.test.ts"
+      ]
+    },
+    "observability": {
+      "name": "observability",
+      "source_files": 7,
+      "test_files": 0,
+      "coverage_ratio": "0/7",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    },
+    "ui": {
+      "name": "ui",
+      "source_files": 33,
+      "test_files": 0,
+      "coverage_ratio": "0/33",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    },
+    "config": {
+      "name": "config",
+      "source_files": 2,
+      "test_files": 0,
+      "coverage_ratio": "0/2",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    },
+    "contracts": {
+      "name": "contracts",
+      "source_files": 16,
+      "test_files": 9,
+      "coverage_ratio": "9/16",
+      "estimated_coverage": 56.25,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": [
+        "src/__tests__/broadcast-latency.test.ts",
+        "src/__tests__/broadcast-overlay.test.ts",
+        "src/__tests__/broadcast.test.ts",
+        "src/__tests__/broadcast-playback.test.ts",
+        "src/__tests__/broadcast-celebrations.test.ts",
+        "src/__tests__/scoring-participants.test.ts",
+        "src/__tests__/media.test.ts",
+        "src/__tests__/contracts.test.ts",
+        "src/__tests__/wicket-attribution.test.ts"
+      ]
+    },
+    "dns-provider": {
+      "name": "dns-provider",
+      "source_files": 6,
+      "test_files": 0,
+      "coverage_ratio": "0/6",
+      "estimated_coverage": 0.0,
+      "has_jest": false,
+      "has_vitest": false,
+      "test_framework": "None",
+      "test_files_list": []
+    }
+  },
+  "summary": {
+    "total_source_files": 1134,
+    "total_test_files": 355,
+    "coverage_percentage": 31.31
+  }
+}
