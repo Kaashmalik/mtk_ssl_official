@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import * as Sentry from "@sentry/nextjs";
+import { reportClientError } from "@/lib/client-error-reporter";
 
 export default function ErrorBoundary({
   error,
@@ -12,13 +13,16 @@ export default function ErrorBoundary({
 }) {
   useEffect(() => {
     // Report every uncaught route error to Sentry. The `digest` is Next.js'
-    // stable identifier for the error — including it lets us correlate
+    // stable identifier for the error - including it lets us correlate
     // server and client halves of the same error.
     Sentry.captureException(error, {
       level: "error",
       tags: { source: "route-error-boundary" },
       extra: { digest: error.digest },
     });
+    // Until a Sentry DSN is configured, captureException is a silent no-op;
+    // the beacon is the channel that actually reaches the runtime logs.
+    reportClientError("root-route-boundary", error);
   }, [error]);
 
   return (

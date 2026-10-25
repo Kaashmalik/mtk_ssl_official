@@ -66,7 +66,7 @@ export function DashboardMetrics({ stats }: { stats: DashboardStats }) {
         <Icon className="h-4.5 w-4.5" />
       </span>
       <p className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</p>
-      <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight sm:text-3xl">{value.toLocaleString("en-GB")}</p>
+      <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight sm:text-3xl">{(value ?? 0).toLocaleString("en-GB")}</p>
     </div>)}
   </section>
 }

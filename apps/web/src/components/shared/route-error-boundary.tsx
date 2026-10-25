@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Button } from "@mtk/ui/components/ui/button"
 import { AlertTriangle, RotateCcw } from "lucide-react"
+import { reportClientError } from "@/lib/client-error-reporter"
 
 /**
  * Batch 145: THE shared route error boundary. Batch 143 gave the scoring
@@ -49,6 +50,7 @@ export function RouteErrorBoundary({
       tags: { source: "route-error-boundary", segment: logTag },
       extra: { digest: error.digest },
     })
+    reportClientError(logTag, error)
   }, [error, logTag])
 
   return (

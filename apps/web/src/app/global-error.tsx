@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import * as Sentry from "@sentry/nextjs";
+import { reportClientError } from "@/lib/client-error-reporter";
 
 export default function GlobalError({
   error,
@@ -11,13 +12,14 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Global error boundary — catches errors that escape the root layout.
+    // Global error boundary - catches errors that escape the root layout.
     // These are the most severe (whole-page failures), so mark them fatal.
     Sentry.captureException(error, {
       level: "fatal",
       tags: { source: "global-error-boundary" },
       extra: { digest: error.digest },
     });
+    reportClientError("global-boundary", error);
   }, [error]);
 
   return (
