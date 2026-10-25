@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@mtk/ui/components/ui/button"
 import { Input } from "@mtk/ui/components/ui/input"
@@ -23,6 +23,14 @@ export function LeagueSetupForm() {
   const [isPending, startTransition] = useTransition()
   const [name, setName] = useState("")
   const [slug, setSlug] = useState("")
+  // Batch 149: the league URL preview follows the domain the organizer is
+  // actually on (www.cricketleague.tech today, any white-label apex later).
+  // Empty until hydration — window is not available during SSR, and a
+  // hardcoded host would go stale at the next domain cut.
+  const [apexHost, setApexHost] = useState("")
+  useEffect(() => {
+    setApexHost(window.location.host.replace(/^www\./, ""))
+  }, [])
   const [error, setError] = useState<string | null>(null)
 
   const derivedSlug = useMemo(() => (name ? toSlug(name) : ""), [name])
@@ -79,9 +87,9 @@ export function LeagueSetupForm() {
               placeholder={derivedSlug || "your-league"}
               required
             />
-            <p className="text-xs text-muted-foreground">
-              Your public league URL will be <Badge variant="outline">{(slug || derivedSlug || "your-league")}.ssl.mtkcodex.site</Badge>
-            </p>
+              <p className="text-xs text-muted-foreground">
+                Your public league URL will be <Badge variant="outline">{(slug || derivedSlug || "your-league")}{apexHost ? `.${apexHost}` : ""}</Badge>
+              </p>
           </div>
 
           <div className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-300">

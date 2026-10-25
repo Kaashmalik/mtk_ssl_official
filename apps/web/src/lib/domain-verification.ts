@@ -134,8 +134,19 @@ export async function upsertEmailVerification(input: {
   const { tenantId, domain, senderEmail } = input
   const dkimSelector = "default"
   const { dkimPublicKeyRecord, dkimPrivateKeyPem } = generateDkimKeyPair()
-  const spfRecord = `v=spf1 include:_spf.ssl.mtkcodex.site ~all`
-  const dmarcRecord = `v=DMARC1; p=none; rua=mailto:dmarc@ssl.mtkcodex.site`
+  // Batch 149: the PLATFORM's sending domain is configuration, not code —
+  // these per-tenant records tell the tenant's DNS to trust OUR mailer.
+  // Today the verified Resend domain is still ssl.mtkcodex.site (the
+  // fallbacks in otp.ts / notification-email.ts send from it), so the
+  // default preserves the exact records generated before this refactor.
+  // The moment Resend verifies cricketleague.tech, the cut is:
+  //   PLATFORM_MAIL_DOMAIN=cricketleague.tech
+  // (plus flipping the sending fallbacks via RESEND_FROM_EMAIL /
+  // OTP_EMAIL_FROM) — never edit the default before that verification
+  // exists, or every tenant SPF include points at an unverified domain.
+  const platformMailDomain = process.env.PLATFORM_MAIL_DOMAIN || "ssl.mtkcodex.site"
+  const spfRecord = `v=spf1 include:_spf.${platformMailDomain} ~all`
+  const dmarcRecord = `v=DMARC1; p=none; rua=mailto:dmarc@${platformMailDomain}`
 
   const verificationData = {
     tenantId,
