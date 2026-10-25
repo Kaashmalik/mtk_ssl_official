@@ -387,4 +387,64 @@
     background: var(--border); 
     border-radius: var(--radius-full); 
   }
+
+  /* ============================================
+     Motion Foundation — JS-independent reveals
+     Entrance animations run in pure CSS: content is
+     ALWAYS visible, even if hydration/JS fails. Fills
+     "both" so delayed reveals hold their start state
+     only until the animation begins, then end visible.
+     ============================================ */
+  .motion-reveal {
+    animation-duration: 0.65s;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-delay: var(--motion-delay, 0s);
+    animation-fill-mode: both;
+    will-change: opacity, transform;
+  }
+  @keyframes motion-fade {
+    from { opacity: 0; }
+  }
+  @keyframes motion-up {
+    from { opacity: 0; transform: translateY(24px); }
+  }
+  @keyframes motion-down {
+    from { opacity: 0; transform: translateY(-24px); }
+  }
+  @keyframes motion-left {
+    from { opacity: 0; transform: translateX(-24px); }
+  }
+  @keyframes motion-right {
+    from { opacity: 0; transform: translateX(24px); }
+  }
+  @keyframes motion-scale {
+    from { opacity: 0; transform: scale(0.965); }
+  }
+  .motion-fade  { animation-name: motion-fade; }
+  .motion-up    { animation-name: motion-up; }
+  .motion-down  { animation-name: motion-down; }
+  .motion-left  { animation-name: motion-left; }
+  .motion-right { animation-name: motion-right; }
+  .motion-scale { animation-name: motion-scale; }
+
+  /* Staggered children: each child reveals 70ms after the previous one */
+  .motion-stagger > * {
+    animation: motion-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .motion-stagger > *:nth-child(1) { animation-delay: 0s; }
+  .motion-stagger > *:nth-child(2) { animation-delay: 0.07s; }
+  .motion-stagger > *:nth-child(3) { animation-delay: 0.14s; }
+  .motion-stagger > *:nth-child(4) { animation-delay: 0.21s; }
+  .motion-stagger > *:nth-child(5) { animation-delay: 0.28s; }
+  .motion-stagger > *:nth-child(6) { animation-delay: 0.35s; }
+  .motion-stagger > *:nth-child(n+7) { animation-delay: 0.42s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .motion-reveal,
+    .motion-stagger > * {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
+  }
 }

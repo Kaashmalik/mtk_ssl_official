@@ -7,7 +7,7 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Card } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
-import { Trophy, Activity, Users, Zap, ArrowRight, Compass, CheckCircle2, BarChart3 } from "lucide-react"
+import { Trophy, Activity, Users, Zap, ArrowRight, Compass, BarChart3 } from "lucide-react"
 import Link from "next/link"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
@@ -152,13 +152,13 @@ export function HomeContent({ brandName }: { brandName: string }) {
               </div>
               <div className="grid gap-4 py-6 sm:grid-cols-2">
                 {[
-                  ["Live scoring", "Ball-by-ball updates for everyone watching", Zap],
-                  ["League control", "Fixtures, teams, venues, and registrations", Trophy],
-                  ["Player insights", "Career stats and match performance", BarChart3],
-                  ["Clear teamwork", "One shared workspace for match day", Users],
-                ].map(([title, description, Icon]) => (
-                  <div key={title as string} className="flex gap-3">
-                    <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+                  ["Live scoring", "Ball-by-ball updates for everyone watching", Zap, "text-yellow-500 bg-yellow-500/10"],
+                  ["League control", "Fixtures, teams, venues, and registrations", Trophy, "text-primary bg-primary/10"],
+                  ["Player insights", "Career stats and match performance", BarChart3, "text-blue-500 bg-blue-500/10"],
+                  ["Clear teamwork", "One shared workspace for match day", Users, "text-violet-500 bg-violet-500/10"],
+                ].map(([title, description, Icon, tone]) => (
+                  <div key={title as string} className="flex gap-3 rounded-lg p-2 transition-colors duration-200 hover:bg-muted/40">
+                    <div className={`mt-0.5 rounded-lg p-2 ${tone as string}`}>
                       <Icon className="h-4 w-4" />
                     </div>
                     <div>
@@ -171,10 +171,10 @@ export function HomeContent({ brandName }: { brandName: string }) {
               <div className="rounded-xl bg-muted/60 p-4">
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">Tournament readiness</span>
-                  <span className="font-bold text-primary">92%</span>
+                  <span className="font-bold tabular-nums text-primary">92%</span>
                 </div>
-                <div className="mt-3 h-2 rounded-full bg-border">
-                  <div className="h-2 w-[92%] rounded-full bg-primary" />
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-border">
+                  <div className="h-full w-[92%] rounded-full bg-linear-to-r from-primary via-primary to-emerald-400 bg-[length:200%_100%] animate-shimmer shadow-[0_0_10px_-2px] shadow-primary/50" />
                 </div>
               </div>
             </Card>
@@ -183,14 +183,16 @@ export function HomeContent({ brandName }: { brandName: string }) {
           </MotionWrapper>
         </div>
 
-        <section className="mt-24 grid gap-5 border-y border-border py-8 sm:grid-cols-3">
+        <section className="motion-stagger mt-24 grid gap-5 border-y border-border py-8 sm:grid-cols-3">
           {[
-            ["One workspace", "Organize your entire season from one place."],
-            ["Built for match day", "Fast, readable controls for busy grounds."],
-            ["Ready to share", "Give players and fans a clear public view."],
-          ].map(([title, description]) => (
-            <div key={title} className="flex gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            { title: "One workspace", description: "Organize your entire season from one place.", Icon: Trophy },
+            { title: "Built for match day", description: "Fast, readable controls for busy grounds.", Icon: Zap },
+            { title: "Ready to share", description: "Give players and fans a clear public view.", Icon: Compass },
+          ].map(({ title, description, Icon }) => (
+            <div key={title} className="group flex gap-3 rounded-xl p-3 transition-colors duration-200 hover:bg-muted/40">
+              <span aria-hidden="true" className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20 transition-transform duration-300 group-hover:scale-110">
+                <Icon className="h-5 w-5" />
+              </span>
               <div>
                 <h2 className="font-semibold">{title}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">{description}</p>

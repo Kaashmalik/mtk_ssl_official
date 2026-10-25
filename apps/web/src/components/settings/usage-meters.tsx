@@ -6,16 +6,29 @@ import { PLAN_LIMITS, type PlanKey } from "@mtk/database"
 function Meter({ label, used, max }: { label: string; used: number; max: number }) {
   const unlimited = max === Infinity
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / max) * 100))
+  const tone = unlimited
+    ? "bg-linear-to-r from-primary/70 via-primary to-primary/70 bg-[length:200%_100%] animate-shimmer opacity-60"
+    : pct >= 90
+      ? "bg-linear-to-r from-red-500 to-red-400"
+      : pct >= 70
+        ? "bg-linear-to-r from-amber-500 to-amber-400"
+        : "bg-linear-to-r from-primary to-primary/80"
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-sm">
-        <span>{label}</span>
-        <span className="tabular-nums text-muted-foreground">{used}{unlimited ? "" : ` / ${max}`}</span>
+    <div className="motion-reveal group/meter space-y-1.5">
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="font-medium">{label}</span>
+        <span className="tabular-nums text-muted-foreground">
+          <span className="font-semibold text-foreground">{used}</span>
+          {unlimited ? <span className="ml-1.5 text-xs">unlimited</span> : <span className="ml-1 text-xs">of {max}</span>}
+        </span>
       </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-primary"}`} style={{ width: `${unlimited ? 0 : Math.max(2, pct)}%` }} />
+      <div className="h-2.5 overflow-hidden rounded-full border border-border/60 bg-muted/70" role="img" aria-label={`${label}: ${used} of ${unlimited ? "unlimited" : max}`}>
+        <div
+          className={`h-full rounded-full shadow-[0_0_8px_-2px] shadow-primary/40 transition-[width] duration-700 ease-out ${tone}`}
+          style={{ width: `${unlimited ? 100 : Math.max(2, pct)}%` }}
+        />
       </div>
-      {unlimited && <p className="text-xs text-muted-foreground">Unlimited</p>}
+      {!unlimited && <p className="text-xs text-muted-foreground">{pct}% of plan capacity{pct >= 90 ? " — consider upgrading" : ""}</p>}
     </div>
   )
 }

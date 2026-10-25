@@ -8,7 +8,7 @@ import type { DashboardContext } from "@/lib/dashboard-context"
 
 const linkStyle = "rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
 export function DashboardPanel({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section aria-label={title} className="min-w-0 rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
+  return <section aria-label={title} className="motion-reveal min-w-0 rounded-2xl border bg-card p-5 shadow-sm transition-[border-color,box-shadow,transform] duration-300 hover:border-primary/30 hover:shadow-md sm:p-6">
     <h2 className="mb-4 text-lg font-semibold tracking-tight">{title}</h2>
     {children}
   </section>
@@ -35,32 +35,38 @@ export function DashboardLoading({ title }: { title: string }) {
 
 export function DashboardHeader({ context }: { context: DashboardContext }) {
   const primary = getDashboardActions(context.role)[0]
-  return <header className="flex flex-col gap-4 rounded-2xl border bg-linear-to-br from-primary/10 via-card to-card p-5 sm:p-7 lg:flex-row lg:items-center lg:justify-between">
-    <div className="min-w-0">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">League workspace · {ROLE_LABELS[context.role]}</p>
+  return <header className="motion-reveal relative flex flex-col gap-4 overflow-hidden rounded-2xl border bg-linear-to-br from-primary/10 via-card to-card p-5 shadow-sm sm:p-7 lg:flex-row lg:items-center lg:justify-between">
+    <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-primary/15 blur-3xl" />
+    <div className="min-w-0 relative">
+      <p className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary">
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary live-pulse" />
+        League workspace · {ROLE_LABELS[context.role]}
+      </p>
       <h1 className="break-words text-2xl font-bold tracking-tight sm:text-3xl">{context.tenantName}</h1>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground">{context.role === "scorer"
         ? "Pick up an assigned match and keep every delivery in sync."
         : "Your fixtures, teams, and next steps in one place."}</p>
     </div>
-    {primary && <Link href={primary.href} className={`${linkStyle} inline-flex min-h-11 shrink-0 items-center justify-center gap-2 bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground`}>
-      {primary.label}<ArrowRight aria-hidden="true" className="h-4 w-4" />
+    {primary && <Link href={primary.href} className={`${linkStyle} motion-scale relative inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0`}>
+      {primary.label}<ArrowRight aria-hidden="true" className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
     </Link>}
   </header>
 }
 
 export function DashboardMetrics({ stats }: { stats: DashboardStats }) {
   const cards = [
-    { label: "Active teams", value: stats.teams, Icon: Users },
-    { label: "Active players", value: stats.players, Icon: Sword },
-    { label: "Tournaments", value: stats.tournaments, Icon: Trophy },
-    { label: "Total matches", value: stats.matches, Icon: CalendarDays },
+    { label: "Active teams", value: stats.teams, Icon: Users, chip: "bg-primary/10 text-primary ring-primary/20" },
+    { label: "Active players", value: stats.players, Icon: Sword, chip: "bg-blue-500/10 text-blue-500 ring-blue-500/20" },
+    { label: "Tournaments", value: stats.tournaments, Icon: Trophy, chip: "bg-amber-500/10 text-amber-500 ring-amber-500/20" },
+    { label: "Total matches", value: stats.matches, Icon: CalendarDays, chip: "bg-violet-500/10 text-violet-500 ring-violet-500/20" },
   ]
-  return <section aria-label="League overview" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-    {cards.map(({ label, value, Icon }) => <div key={label} className="min-w-0 rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
-      <Icon aria-hidden="true" className="mb-3 h-5 w-5 text-primary" />
+  return <section aria-label="League overview" className="motion-stagger grid grid-cols-2 gap-3 lg:grid-cols-4">
+    {cards.map(({ label, value, Icon, chip }) => <div key={label} className="group min-w-0 rounded-2xl border bg-card p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg sm:p-5">
+      <span aria-hidden="true" className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl ring-1 ${chip}`}>
+        <Icon className="h-4.5 w-4.5" />
+      </span>
       <p className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</p>
-      <p className="mt-1 text-2xl font-bold tabular-nums sm:text-3xl">{value.toLocaleString("en-GB")}</p>
+      <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight sm:text-3xl">{value.toLocaleString("en-GB")}</p>
     </div>)}
   </section>
 }
