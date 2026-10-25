@@ -5,6 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/providers";
 import { CommandPaletteLoader } from "@/components/command-palette-loader";
+import { ChunkErrorRecovery } from "@/components/chunk-error-recovery";
 import { getLocaleDirection } from "@/i18n/config";
 import "./globals.css";
 import { Toaster } from "@mtk/ui/components/ui/sonner";
@@ -54,6 +55,7 @@ export default async function RootLayout({
         </Providers>
         </NextIntlClientProvider>
         <ServiceWorkerRegistration />
+        <ChunkErrorRecovery />
         <CommandPaletteLoader />
       </body>
     </html>

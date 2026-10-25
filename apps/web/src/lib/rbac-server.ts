@@ -10,10 +10,23 @@ import { getTenantFromRequest } from "./tenant";
  */
 export async function resolveActiveTenantId(): Promise<string | null> {
   // Resolution failure must not silently switch to another workspace.
-  const requestTenant = await getTenantFromRequest(true);
+  let requestTenant: Awaited<ReturnType<typeof getTenantFromRequest>> = null;
+  try {
+    requestTenant = await getTenantFromRequest(true);
+  } catch (error) {
+    // A host/cookie failure must not crash the whole route — the caller
+    // redirects to setup instead (truthful) or the permission check fails
+    // closed. Never fall back to another tenant.
+    console.error("[rbac] tenant resolution from request failed", error);
+  }
   if (requestTenant) return requestTenant.id;
-  const { getMyTenant } = await import("@/app/actions/tenants");
-  return (await getMyTenant())?.id ?? null;
+  try {
+    const { getMyTenant } = await import("@/app/actions/tenants");
+    return (await getMyTenant())?.id ?? null;
+  } catch (error) {
+    console.error("[rbac] primary workspace resolution failed", error);
+    return null;
+  }
 }
 
 /**
