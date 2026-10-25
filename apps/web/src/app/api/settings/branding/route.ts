@@ -12,24 +12,36 @@ export const dynamic = "force-dynamic";
  * the plan read under the lock). The PUT body is validated server-side; the
  * admin UI additionally validates with its own zod schema before sending.
  */
+const httpsUrl = z.string().url().refine((value) => {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password
+  } catch {
+    return false
+  }
+}, "Must be an HTTPS URL without credentials")
+
+const hexColor = z.string().regex(/^#[\da-f]{6}$/i, "Must be a six-digit hex color")
+const safeAppName = z.string().trim().min(1).max(128).regex(/^[^<>&"'`]+$/, "Invalid characters in app name")
+
 const schema = z.object({
   tenantId: z.string().uuid(),
-  logoUrl: z.string().max(2048).nullable().optional(),
-  faviconUrl: z.string().max(2048).nullable().optional(),
-  primaryColor: z.string().max(64).nullable().optional(),
-  secondaryColor: z.string().max(64).nullable().optional(),
-  accentColor: z.string().max(64).nullable().optional(),
-  fontFamily: z.string().max(128).nullable().optional(),
-  appName: z.string().max(128).nullable().optional(),
+  logoUrl: httpsUrl.nullable().optional(),
+  faviconUrl: httpsUrl.nullable().optional(),
+  primaryColor: hexColor.nullable().optional(),
+  secondaryColor: hexColor.nullable().optional(),
+  accentColor: hexColor.nullable().optional(),
+  fontFamily: z.enum(["Inter", "Arial", "Georgia", "system-ui", "sans-serif", "serif"]).nullable().optional(),
+  appName: safeAppName.nullable().optional(),
   hideSslBranding: z.boolean().optional(),
   emailSenderName: z.string().max(128).nullable().optional(),
   emailSenderAddress: z.string().max(254).nullable().optional(),
-  mobileAppIconUrl: z.string().max(2048).nullable().optional(),
-  mobileAppSplashUrl: z.string().max(2048).nullable().optional(),
+  mobileAppIconUrl: httpsUrl.nullable().optional(),
+  mobileAppSplashUrl: httpsUrl.nullable().optional(),
   mobileAppBundleId: z.string().max(256).nullable().optional(),
   mobileAppPackageName: z.string().max(256).nullable().optional(),
   customCss: z.string().max(20000).nullable().optional(),
-  loginPageBackgroundUrl: z.string().max(2048).nullable().optional(),
+  loginPageBackgroundUrl: httpsUrl.nullable().optional(),
   loginPageCustomHtml: z.string().max(50000).nullable().optional(),
   customDomain: z.string().max(253).nullable().optional(),
 });

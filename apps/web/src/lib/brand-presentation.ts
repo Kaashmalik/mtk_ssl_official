@@ -8,22 +8,32 @@ function color(value: unknown): string | undefined {
   return typeof value === "string" && /^#[\da-f]{6}$/i.test(value) ? value : undefined
 }
 
+const ALLOWED_FONTS = new Set(["Inter", "Arial", "Georgia", "system-ui", "sans-serif", "serif"])
+
+function appName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const cleaned = value.replace(/[\u0000-\u001f<>&"'`]/g, " ").replace(/\s+/g, " ").trim().slice(0, 128)
+  return cleaned || undefined
+}
+
+function safeHttpsUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2048) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function brandPresentation(row: unknown): BrandPresentation | null {
   if (!row || typeof row !== "object") return null
   const source = row as Record<string, unknown>
-  const fonts = ["Inter", "Arial", "Georgia", "system-ui", "sans-serif", "serif"]
-  let faviconUrl: string | undefined
-  if (typeof source.faviconUrl === "string") {
-    try {
-      const url = new URL(source.faviconUrl)
-      if (url.protocol === "https:" && !url.username && !url.password) faviconUrl = url.toString()
-    } catch { /* Unsupported URL is withheld, not inserted into the document. */ }
-  }
   return {
     primaryColor: color(source.primaryColor), secondaryColor: color(source.secondaryColor),
-    accentColor: color(source.accentColor), faviconUrl,
-    fontFamily: typeof source.fontFamily === "string" && fonts.includes(source.fontFamily) ? source.fontFamily : undefined,
-    appName: typeof source.appName === "string" ? source.appName.replace(/[\u0000-\u001f]/g, " ").slice(0, 128) : undefined,
+    accentColor: color(source.accentColor), faviconUrl: safeHttpsUrl(source.faviconUrl),
+    fontFamily: typeof source.fontFamily === "string" && ALLOWED_FONTS.has(source.fontFamily) ? source.fontFamily : undefined,
+    appName: appName(source.appName),
   }
 }
 

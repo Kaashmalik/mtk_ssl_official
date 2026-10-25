@@ -6,8 +6,9 @@
  *   - user.updated  → UPDATE users (email, name, avatar, last_login)
  *   - user.deleted  → soft-delete (is_active = false)
  *
- * Security: verifies the Svix signature using CLERK_SECRET_KEY (or the raw
- * webhook secret if set). Rejects unsigned/invalid requests.
+ * Security: verifies the Svix signature using the dedicated Clerk webhook
+ * secret. The Clerk API secret is intentionally not accepted here because it
+ * is not a Svix signing key.
  *
  * Route config: must run on Node runtime (uses crypto, DB). The matcher in
  * middleware.ts already excludes /api/webhooks from Clerk auth (public route).
@@ -27,7 +28,7 @@ import { enqueueAccountOnboardingJob } from "@/lib/notification-jobs";
  * method gives us exactly that without any JSON parsing interference.
  */
 export async function POST(req: NextRequest) {
-  const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET || process.env.CLERK_SECRET_KEY;
+  const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
   // If no secret is configured, we cannot verify — fail closed.
   if (!WEBHOOK_SECRET) {

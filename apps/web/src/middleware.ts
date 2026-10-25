@@ -27,6 +27,10 @@ const isPublicRoute = createRouteMatcher([
   "/sw.js",
   "/icons/(.*)",
   "/favicon.ico",
+  // Next metadata routes are public crawl/install surfaces and must not be
+  // redirected to Clerk sign-in.
+  "/robots.txt",
+  "/sitemap.xml",
   // Service-worker offline fallback: must render without a session.
   "/offline",
   // Token-gated handoff: the HMAC-signed single-use token is the auth.

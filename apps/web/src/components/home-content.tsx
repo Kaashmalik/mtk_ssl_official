@@ -7,7 +7,7 @@ import { Button } from "@mtk/ui/components/ui/button"
 import { Card } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
 import { MotionWrapper } from "@mtk/ui/components/ui/motion-wrapper"
-import { Trophy, Activity, Users, Zap, ArrowRight, Compass } from "lucide-react"
+import { Trophy, Activity, Users, Zap, ArrowRight, Compass, CheckCircle2, BarChart3 } from "lucide-react"
 import Link from "next/link"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
@@ -16,7 +16,7 @@ export function HomeContent({ brandName }: { brandName: string }) {
   const clerkReady = useClerkReady()
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden bg-background">
       {/* Dynamic Background Elements */}
       <div className="absolute top-0 left-1/4 h-96 w-96 rounded-full bg-primary/20 blur-[128px] animate-pulse pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 h-96 w-96 rounded-full bg-blue-500/20 blur-[128px] animate-pulse pointer-events-none" />
@@ -56,7 +56,7 @@ export function HomeContent({ brandName }: { brandName: string }) {
         </div>
       </nav>
 
-      <main className="container relative z-10 mx-auto px-6 pt-16 pb-32">
+      <main className="container relative z-10 mx-auto px-6 pt-16 pb-24">
         <div className="grid gap-16 lg:grid-cols-2 lg:items-center">
 
           {/* Hero Content */}
@@ -65,12 +65,12 @@ export function HomeContent({ brandName }: { brandName: string }) {
               Season 2026 Live Now
             </Badge>
 
-            <h1 className="text-fluid-h1 font-black leading-tight tracking-tighter text-balance">
-              Pakistan&apos;s <span className="text-primary">#1 Cricket</span> Tournament Platform
+            <h1 className="text-fluid-h1 max-w-3xl font-black leading-[1.05] tracking-tighter text-balance">
+              Run every match day with <span className="text-primary">clarity and confidence.</span>
             </h1>
 
             <p className="max-w-xl text-lg text-muted-foreground leading-relaxed">
-              Experience crickets like never before. Real-time scoring, pro-level analytics, and league management for the next generation of champions.
+              {brandName} brings tournaments, teams, live scoring, and player performance into one dependable workspace built for organizers and scorers.
             </p>
 
             <div className="flex flex-wrap gap-4">
@@ -112,7 +112,7 @@ export function HomeContent({ brandName }: { brandName: string }) {
               <Button
                 size="xl"
                 variant="neo-glass"
-                className="group border border-white/25 bg-white/10 text-white backdrop-blur-md hover:bg-white/20"
+                className="group border border-border bg-card/80 backdrop-blur-md hover:bg-accent"
                 asChild
               >
                 <Link href="/hub">
@@ -122,7 +122,7 @@ export function HomeContent({ brandName }: { brandName: string }) {
               </Button>
             </div>
 
-            <div className="flex items-center gap-8 pt-8 text-sm font-medium text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-8 text-sm font-medium text-muted-foreground">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" />
                 <span>Tournaments &amp; Leagues</span>
@@ -138,44 +138,72 @@ export function HomeContent({ brandName }: { brandName: string }) {
             </div>
           </MotionWrapper>
 
-          {/* Hero Visual / Features Grid */}
+          {/* Product preview */}
           <MotionWrapper variant="fadeInRight" delay={0.2} className="relative">
-            <div className="relative z-10 grid gap-6 sm:grid-cols-2">
-              <Card variant="glass" hoverEffect="glow" className="p-6">
-                <div className="mb-4 rounded-full bg-green-500/10 w-fit p-3">
-                  <Zap className="h-6 w-6 text-green-500" />
+            <Card variant="glass" className="relative z-10 overflow-hidden p-6 shadow-xl sm:p-8">
+              <div className="flex items-start justify-between gap-4 border-b border-border pb-5">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Match centre</p>
+                  <h2 className="mt-1 text-2xl font-bold">Everything in one view</h2>
                 </div>
-                <h3 className="text-lg font-bold">Live Scoring</h3>
-                <p className="mt-2 text-sm text-muted-foreground">Ball-by-ball updates with zero latency WebSocket connections.</p>
-              </Card>
-              <Card variant="neo" hoverEffect="lift" className="p-6 sm:mt-8">
-                <div className="mb-4 rounded-full bg-blue-500/10 w-fit p-3">
-                  <Activity className="h-6 w-6 text-blue-500" />
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1 text-xs font-semibold text-success">
+                  <span className="h-2 w-2 rounded-full bg-success" /> Live
+                </span>
+              </div>
+              <div className="grid gap-4 py-6 sm:grid-cols-2">
+                {[
+                  ["Live scoring", "Ball-by-ball updates for everyone watching", Zap],
+                  ["League control", "Fixtures, teams, venues, and registrations", Trophy],
+                  ["Player insights", "Career stats and match performance", BarChart3],
+                  ["Clear teamwork", "One shared workspace for match day", Users],
+                ].map(([title, description, Icon]) => (
+                  <div key={title as string} className="flex gap-3">
+                    <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">{title as string}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{description as string}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl bg-muted/60 p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">Tournament readiness</span>
+                  <span className="font-bold text-primary">92%</span>
                 </div>
-                <h3 className="text-lg font-bold">Analytics</h3>
-                <p className="mt-2 text-sm text-muted-foreground">Advanced player stats, worm graphs, and match insights.</p>
-              </Card>
-              <Card variant="neo" hoverEffect="lift" className="p-6">
-                <div className="mb-4 rounded-full bg-purple-500/10 w-fit p-3">
-                  <Users className="h-6 w-6 text-purple-500" />
+                <div className="mt-3 h-2 rounded-full bg-border">
+                  <div className="h-2 w-[92%] rounded-full bg-primary" />
                 </div>
-                <h3 className="text-lg font-bold">Team Mgmt</h3>
-                <p className="mt-2 text-sm text-muted-foreground">Draft players, manage squads, and generate lineups automatically.</p>
-              </Card>
-              <Card variant="glass" hoverEffect="glow" className="p-6 sm:mt-8">
-                <div className="mb-4 rounded-full bg-orange-500/10 w-fit p-3">
-                  <Trophy className="h-6 w-6 text-orange-500" />
-                </div>
-                <h3 className="text-lg font-bold">Tournaments</h3>
-                <p className="mt-2 text-sm text-muted-foreground">Automated fixtures, points tables, and knockout brackets.</p>
-              </Card>
-            </div>
-
-            {/* Decorative Background for cards */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-linear-to-tr from-primary/10 to-blue-500/10 blur-3xl -z-10" />
+              </div>
+            </Card>
+            <div className="absolute -right-10 -top-10 h-48 w-48 rounded-full bg-primary/15 blur-3xl" />
+            <div className="absolute -bottom-10 -left-10 h-48 w-48 rounded-full bg-blue-500/10 blur-3xl" />
           </MotionWrapper>
-
         </div>
+
+        <section className="mt-24 grid gap-5 border-y border-border py-8 sm:grid-cols-3">
+          {[
+            ["One workspace", "Organize your entire season from one place."],
+            ["Built for match day", "Fast, readable controls for busy grounds."],
+            ["Ready to share", "Give players and fans a clear public view."],
+          ].map(([title, description]) => (
+            <div key={title} className="flex gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+              <div>
+                <h2 className="font-semibold">{title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section className="mx-auto mt-20 max-w-3xl text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">Start with the essentials</p>
+          <h2 className="mt-3 text-fluid-h2 font-bold">From first fixture to final score</h2>
+          <p className="mt-4 text-muted-foreground">Set up your league, invite your teams, and let the platform keep match day moving.</p>
+        </section>
       </main>
     </div>
   )

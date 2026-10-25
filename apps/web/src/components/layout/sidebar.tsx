@@ -47,13 +47,10 @@ const DEFAULT_NAV_GROUPS: NavGroup[] = [
   {
     label: "Management",
     items: [
-      { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘1" },
+      { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     ],
   },
 ]
-
-// Keyboard shortcuts for the first 5 management items
-const SHORTCUTS = ["⌘1", "⌘2", "⌘3", "⌘4", "⌘5"]
 
 /**
  * Build RBAC-filtered navigation groups from the user's role.
@@ -62,11 +59,11 @@ function buildNavGroups(role: UserRole): NavGroup[] {
   const roleNav = getNavigationForRole(role)
 
   // Map RBAC nav items to our NavItem format with icons
-  const items: NavItem[] = roleNav.map((item, i) => ({
+  const items: NavItem[] = roleNav.map((item) => ({
     name: item.label,
     href: item.href,
     icon: ICON_MAP[item.icon] || LayoutDashboard,
-    shortcut: i < SHORTCUTS.length ? SHORTCUTS[i] : undefined,
+    shortcut: undefined,
     badge: item.label === "Matches" ? "live" as const : undefined,
   }))
 

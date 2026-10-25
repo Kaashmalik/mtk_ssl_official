@@ -138,7 +138,7 @@
 
   /* Muted */
   --muted: oklch(0.965 0.005 200);
-  --muted-foreground: oklch(0.5 0.02 260);
+  --muted-foreground: oklch(0.42 0.025 260);
 
   /* Accent */
   --accent: oklch(0.965 0.02 150);
@@ -159,8 +159,8 @@
   --live-foreground: oklch(0.99 0 0);
 
   /* Borders & Inputs */
-  --border: oklch(0.935 0.01 200);
-  --input: oklch(0.935 0.01 200);
+  --border: oklch(0.88 0.012 200);
+  --input: oklch(0.86 0.012 200);
   --ring: oklch(0.55 0.18 150 / 0.4);
 
   /* Charts */
@@ -178,9 +178,9 @@
   --wicket-red: oklch(0.55 0.24 25);
 
   /* Glassmorphism — Liquid Glass */
-  --glass-border: oklch(1 0 0 / 0.5);
-  --glass-bg: oklch(1 0 0 / 0.65);
-  --glass-bg-subtle: oklch(1 0 0 / 0.4);
+  --glass-border: oklch(0.25 0.02 260 / 0.14);
+  --glass-bg: oklch(1 0 0 / 0.78);
+  --glass-bg-subtle: oklch(1 0 0 / 0.62);
   --glass-shadow: 0 8px 32px 0 oklch(0.3 0.02 260 / 0.08);
   --glass-blur-sm: blur(8px);
   --glass-blur-md: blur(16px);
@@ -209,7 +209,7 @@
   --secondary-foreground: oklch(0.96 0.005 200);
 
   --muted: oklch(0.22 0.025 260);
-  --muted-foreground: oklch(0.65 0.015 260);
+  --muted-foreground: oklch(0.74 0.015 260);
 
   --accent: oklch(0.22 0.04 150);
   --accent-foreground: oklch(0.96 0.005 200);
@@ -226,8 +226,8 @@
   --live: oklch(0.6 0.22 30);
   --live-foreground: oklch(0.99 0 0);
 
-  --border: oklch(0.27 0.015 260);
-  --input: oklch(0.27 0.015 260);
+  --border: oklch(0.32 0.02 260);
+  --input: oklch(0.34 0.02 260);
   --ring: oklch(0.68 0.14 150 / 0.4);
 
   --cricket-pitch: oklch(0.5 0.14 135);
@@ -236,9 +236,9 @@
   --six-glow: oklch(0.6 0.22 300);
   --wicket-red: oklch(0.5 0.22 25);
 
-  --glass-border: oklch(1 0 0 / 0.08);
-  --glass-bg: oklch(0.15 0.02 260 / 0.6);
-  --glass-bg-subtle: oklch(0.15 0.02 260 / 0.35);
+  --glass-border: oklch(0.9 0.01 260 / 0.14);
+  --glass-bg: oklch(0.18 0.02 260 / 0.82);
+  --glass-bg-subtle: oklch(0.18 0.02 260 / 0.62);
   --glass-shadow: 0 8px 32px 0 oklch(0 0 0 / 0.4);
 }
 
