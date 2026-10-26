@@ -3,6 +3,16 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **26 October 2026 - `20261026130000_match_chat.sql` LOCAL ONLY, NOT applied**
+> Additive ENH-10 match chat: `league_chat_settings`, `match_chat_messages`,
+> `match_chat_mutes`, `match_chat_reports`. New tables only. Messages reference
+> the match through `(match_id, tenant_id)` → `matches_id_tenant_key`, so that
+> unique index must exist (it does since `20261016102316`). RLS forced, no
+> `anon`/`authenticated` grants, no DELETE grant (moderation hides, never
+> deletes). Chat is **off for every league** until its owner enables it in
+> Dashboard → Settings → Fan interactions; until the migration is applied the
+> match pages simply render no chat panel (the enabled read fails closed).
+
 > **26 October 2026 - `20261026120000_admin_action_approvals.sql` LOCAL ONLY, NOT applied**
 > Additive two-person approval queue for destructive platform-admin actions
 > (today: `tenant.delete`). New table only; touches no existing rows. RLS forced,

@@ -31,6 +31,8 @@ import { deriveInningsOverlay, type OverlayBallKind } from "@mtk/database/lib/ma
 import { resolvePublicMatchMetadata } from "@/lib/public-match-metadata"
 import { buildMatchSportsEvent } from "@/lib/sports-event-structured-data"
 import { JsonLd } from "@/components/json-ld"
+import { MatchChat } from "@/components/live/match-chat"
+import { readPublicChatEnabled } from "@/lib/match-chat"
 
 export async function generateMetadata({ params }: { params: Promise<{ matchId: string }> }) {
   const { matchId } = await params
@@ -116,6 +118,8 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
   } catch {
     myReactions = []
   }
+
+  const chatEnabled = await readPublicChatEnabled(tenantId)
 
   let venueName = "TBD Venue"
   if (match.venueId) {
@@ -423,6 +427,9 @@ export default async function PublicMatchPage({ params }: { params: Promise<{ ma
           </div>
         </CardContent>
       </Card>
+
+      {/* ENH-10: moderated match chat, only when the league turned it on. */}
+      {chatEnabled && <MatchChat matchId={matchId} />}
 
       {/* Batch 137: the announced playing XIs — mounted only when at least
           one side has a complete declared XI; the card itself says when a

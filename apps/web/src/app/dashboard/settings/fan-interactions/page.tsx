@@ -9,6 +9,9 @@ import { requireActiveLeagueContext } from "@/lib/league-reads"
 import { readLeagueOpenReports } from "@/lib/fan-report-records"
 import { readActiveFanBlocks } from "@/lib/fan-block-records"
 import { FanInteractionsManager } from "@/components/settings/fan-interactions-manager"
+import { MatchChatSettings } from "@/components/settings/match-chat-settings"
+import { hasPermission } from "@/lib/rbac"
+import { readLeagueChatSettings, readOpenChatReports } from "@/lib/match-chat"
 
 export const metadata = {
   title: "Fan interactions",
@@ -29,7 +32,7 @@ export default async function FanInteractionsPage() {
 
   // Owner-gated exactly like the per-match moderation surface
   // (match:update, not settings:manage - moderation authority, not settings).
-  await requireActiveLeagueContext("match:update")
+  const league = await requireActiveLeagueContext("match:update")
 
   // Fail closed to empty queues - a read failure is never a page failure.
   let reports: Awaited<ReturnType<typeof readLeagueOpenReports>> = []
@@ -43,6 +46,22 @@ export default async function FanInteractionsPage() {
     blocks = await readActiveFanBlocks()
   } catch {
     blocks = []
+  }
+  // ENH-10: chat controls appear only for owners who may change settings.
+  const canManageChat = hasPermission(league.role, "settings:manage")
+  let chatSettings = { enabled: false, slowModeSeconds: 10 }
+  let chatReports: Awaited<ReturnType<typeof readOpenChatReports>> = []
+  if (canManageChat) {
+    try {
+      chatSettings = await readLeagueChatSettings(league.tenantId)
+    } catch {
+      // Fail closed: show chat as off rather than guess.
+    }
+    try {
+      chatReports = await readOpenChatReports()
+    } catch {
+      chatReports = []
+    }
   }
 
   return (
@@ -69,6 +88,12 @@ export default async function FanInteractionsPage() {
       <MotionWrapper variant="fadeInUp" delay={0.05}>
         <FanInteractionsManager initialReports={reports} initialBlocks={blocks} />
       </MotionWrapper>
+
+      {canManageChat && (
+        <MotionWrapper variant="fadeInUp" delay={0.1}>
+          <MatchChatSettings initialSettings={chatSettings} initialReports={chatReports} />
+        </MotionWrapper>
+      )}
     </div>
   )
 }

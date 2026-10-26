@@ -45,6 +45,7 @@ export * from "./schema/user-invites";
 export * from "./schema/invitation-email-jobs";
 export * from "./schema/ownership-transfers";
 export * from "./schema/admin-action-approvals";
+export * from "./schema/match-chat";
 export * from "./schema/league-applications";
 export * from "./schema/league-application-replies";
 export * from "./schema/profiles";
@@ -115,5 +116,6 @@ export * from "./lib/cricket-rules-policy";
 export * from "./lib/fan-prediction-policy";
 export * from "./lib/application-reply-policy";
 export * from "./lib/admin-approval-policy";
+export * from "./lib/match-chat-policy";
 
 
