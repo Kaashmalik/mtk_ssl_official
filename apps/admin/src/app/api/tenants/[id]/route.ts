@@ -2,8 +2,24 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from "next/server";
 import { verifySuperAdmin } from "@/lib/admin-auth";
-import { db, tenants, tenantBranding, tournaments, teams, venues, userTenantRoles, users } from "@mtk/database";
+import { createTenantDeletionRequest } from "@/lib/admin-approvals";
+import { writeAuditLog } from "@/lib/audit-log";
+import {
+  db,
+  tenants,
+  tenantBranding,
+  tournaments,
+  teams,
+  venues,
+  userTenantRoles,
+  users,
+  normalizeApprovalReason,
+  ADMIN_APPROVAL_MIN_REASON_LENGTH,
+} from "@mtk/database";
 import { asc, eq } from "drizzle-orm";
+import { z } from "zod";
+
+const isUuid = (value: string) => z.string().uuid().safeParse(value).success;
 
 // GET /api/tenants/[id] - Get tenant details
 //
@@ -206,6 +222,27 @@ export async function PATCH(
         .where(eq(tenantBranding.tenantId, id));
     }
 
+    await writeAuditLog({
+      method: "PATCH",
+      path: `/api/tenants/${id}`,
+      actorId: adminId,
+      actorRole: "super_admin",
+      tenantId: id,
+      payload: {
+        action: "tenant.updated",
+        changed: {
+          ...(name !== undefined ? { name } : {}),
+          ...(slug !== undefined ? { slug } : {}),
+          ...(plan !== undefined ? { plan } : {}),
+          ...(is_active !== undefined ? { isActive: is_active } : {}),
+          ...(custom_domain !== undefined ? { customDomain: custom_domain } : {}),
+          ...(branding ? { brandingKeys: Object.keys(branding) } : {}),
+        },
+      },
+      statusCode: "200",
+      request,
+    });
+
     return NextResponse.json({ tenant });
   } catch (error) {
     console.error("Error updating tenant:", error);
@@ -216,9 +253,14 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/tenants/[id] - Delete tenant
+// DELETE /api/tenants/[id] - Request deletion of a tenant
+//
+// Deleting a league cascades through every league-owned row and cannot be
+// undone, so it is a two-person action: this records a pending request with a
+// reason and returns 202. Nothing is deleted until a DIFFERENT super admin
+// approves it via POST /api/admin-approvals/[id].
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const adminId = await verifySuperAdmin();
@@ -226,21 +268,19 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const { id } = await params;
-    
-    // Delete tenant (cascade will handle related data)
-    await db
-      .delete(tenants)
-      .where(eq(tenants.id, id));
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting tenant:", error);
+  const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
+  }
+  const body = (await request.json().catch(() => null)) as { reason?: unknown } | null;
+  const reason = normalizeApprovalReason(body?.reason);
+  if (!reason) {
     return NextResponse.json(
-      { error: "Failed to delete tenant" },
-      { status: 500 }
+      { error: `Explain why in at least ${ADMIN_APPROVAL_MIN_REASON_LENGTH} characters.` },
+      { status: 400 }
     );
   }
+
+  return createTenantDeletionRequest({ adminId, tenantId: id, reason, request });
 }
 

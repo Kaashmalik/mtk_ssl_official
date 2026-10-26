@@ -9,6 +9,7 @@ export * from "./user-tenant-roles";
 export * from "./user-invites";
 export * from "./invitation-email-jobs";
 export * from "./ownership-transfers";
+export * from "./admin-action-approvals";
 export * from "./league-applications";
 export * from "./profiles";
 

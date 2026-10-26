@@ -6,6 +6,7 @@ import {
   LayoutDashboard, Building2, Trophy, Users2, PersonStanding,
   Calendar, Radio, Mic2, MapPin, DollarSign, Megaphone,
   ToggleLeft, Activity, ShieldCheck, ChevronRight, CreditCard, ClipboardList,
+  UserCheck, ScrollText,
 } from "lucide-react";
 
 const navGroups = [
@@ -45,6 +46,8 @@ const navGroups = [
       { name: "Announcements", href: "/announcements", icon: Megaphone },
       { name: "Feature Flags", href: "/feature-flags", icon: ToggleLeft },
       { name: "System Health", href: "/system-health", icon: Activity },
+      { name: "Approvals",     href: "/approvals",     icon: UserCheck },
+      { name: "Audit Logs",    href: "/audit-logs",    icon: ScrollText },
     ],
   },
 ];

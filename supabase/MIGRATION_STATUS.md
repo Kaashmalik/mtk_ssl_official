@@ -3,6 +3,18 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **26 October 2026 - `20261026120000_admin_action_approvals.sql` LOCAL ONLY, NOT applied**
+> Additive two-person approval queue for destructive platform-admin actions
+> (today: `tenant.delete`). New table only; touches no existing rows. RLS forced,
+> no `anon`/`authenticated` grants, and no DELETE grant even for `service_role`
+> (evidence rows are never removed by the app). `target_tenant_id` has NO foreign
+> key on purpose so the record survives the deletion it authorised.
+> **Deploy order matters:** after the matching admin build ships,
+> `DELETE /api/tenants/[id]` only files a request in this table. Until the
+> migration is applied, that request (and the `/approvals` page) answers 500 and
+> **no league can be deleted at all** - fail-closed, never a silent delete. Apply
+> this migration before or together with the admin deploy.
+
 > **23 October 2026 (Batch 101 apply session) - the Batch 96/100 chain APPLIED to the LIVE
 > project + one migration file corrected pre-adoption**
 > The five pending migrations were applied to the live project

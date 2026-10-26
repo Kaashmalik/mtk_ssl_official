@@ -52,15 +52,24 @@ export function TenantList() {
   }
 
   async function deleteTenant(id: string, name: string) {
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    // Deletion is a two-person action: this only files a request that a
+    // second super admin must approve on /approvals.
+    const reason = prompt(
+      `Request permanent deletion of "${name}"?\n\nA second super admin must approve before anything is deleted. Why should it be deleted? (at least 10 characters)`
+    );
+    if (reason === null) return;
     setDeleting(id);
     try {
-      const res = await fetch(`/api/tenants/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/tenants/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success("Tenant deleted");
-        fetchTenants();
+        toast.success("Deletion requested. It runs only after a second super admin approves it on Approvals.");
       } else {
-        toast.error("Failed to delete tenant");
+        toast.error(data.error || "Failed to request deletion");
       }
     } catch {
       toast.error("Failed to delete tenant");
