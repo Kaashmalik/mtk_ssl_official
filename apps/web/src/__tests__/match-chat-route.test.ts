@@ -66,3 +66,59 @@ describe("GET /api/matches/[matchId]/chat", () => {
     expect(JSON.stringify(await res.json())).not.toContain("relation")
   })
 })
+
+describe("POST /api/matches/[matchId]/chat (native send)", () => {
+  const sendMocks = vi.hoisted(() => ({ send: vi.fn() }))
+
+  beforeEach(() => {
+    sendMocks.send.mockReset()
+  })
+
+  async function post(body: unknown, matchId = MATCH) {
+    vi.doMock("@/lib/match-chat", () => {
+      class MatchChatUnavailable extends Error {}
+      return { MatchChatUnavailable, pollMatchChat: mocks.poll, sendMatchChatMessage: sendMocks.send }
+    })
+    vi.resetModules()
+    const { POST } = await import("../app/api/matches/[matchId]/chat/route")
+    return POST(
+      new Request(`http://league.test/api/matches/${matchId}/chat`, {
+        method: "POST",
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ matchId }) },
+    )
+  }
+
+  it("takes the match from the path and never forwards a pin request", async () => {
+    sendMocks.send.mockResolvedValue({ ok: true, message: { id: "m1" } })
+    const res = await post({ matchId: "someone-else", body: "hi", clientKey: "k", pin: true })
+    expect(res.status).toBe(200)
+    expect(sendMocks.send).toHaveBeenCalledWith({ matchId: MATCH, body: "hi", clientKey: "k", replyToId: null })
+  })
+
+  it("rejects malformed bodies before the writer runs", async () => {
+    for (const body of ["not json", "[1,2]", "null"]) {
+      expect((await post(body)).status).toBe(400)
+    }
+    expect(sendMocks.send).not.toHaveBeenCalled()
+  })
+
+  it("answers policy refusals with 422 and a Retry-After for timed ones", async () => {
+    sendMocks.send.mockResolvedValue({ ok: false, reason: "slow_mode", retryAfterSeconds: 7, error: "Slow mode" })
+    const res = await post({ body: "hi", clientKey: "k" })
+    expect(res.status).toBe(422)
+    expect(res.headers.get("Retry-After")).toBe("7")
+  })
+
+  it("maps identity failures to 401/403 and hides internal errors", async () => {
+    sendMocks.send.mockRejectedValueOnce(new Error("Unauthorized — sign in"))
+    expect((await post({ body: "hi", clientKey: "k" })).status).toBe(401)
+    sendMocks.send.mockRejectedValueOnce(new Error("Forbidden: no league"))
+    expect((await post({ body: "hi", clientKey: "k" })).status).toBe(403)
+    sendMocks.send.mockRejectedValueOnce(new Error("connection refused at 10.0.0.5"))
+    const res = await post({ body: "hi", clientKey: "k" })
+    expect(res.status).toBe(503)
+    expect(JSON.stringify(await res.json())).not.toContain("10.0.0.5")
+  })
+})

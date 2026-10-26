@@ -1,0 +1,74 @@
+name: Visual baselines
+
+# Manual only. Generates the Playwright screenshot baselines on the same Linux
+# runner image that compares them in CI, then uploads them as an artifact.
+# Review the images, then commit them under
+# tests/e2e/specs/visual.spec.ts-snapshots/ - nothing is committed by CI.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      NEXT_TELEMETRY_DISABLED: "1"
+      SENTRY_UPLOAD: "0"
+    steps:
+      - name: Require app secrets
+        run: |
+          if [ -z "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ] || [ -z "$CLERK_SECRET_KEY" ]; then
+            echo "::error::The web app cannot start without Clerk keys; add the CI secrets first."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages and web app
+        run: |
+          pnpm --filter @mtk/database build
+          pnpm --filter @mtk/web build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @mtk/e2e exec playwright install --with-deps chromium
+
+      - name: Start web server
+        run: |
+          pnpm --filter @mtk/web exec next start -p 3001 &
+          npx -y wait-on http://localhost:3001 -t 120000
+
+      - name: Generate baselines
+        run: pnpm --filter @mtk/e2e exec playwright test visual --project=chromium --update-snapshots
+        env:
+          CI: "1"
+          BASE_URL: http://localhost:3001
+          E2E_VISUAL: "1"
+
+      - name: Upload baselines for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: tests/e2e/specs/visual.spec.ts-snapshots
+          if-no-files-found: error
+          retention-days: 14

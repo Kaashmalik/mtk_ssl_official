@@ -8,6 +8,7 @@ import { useOfflineStore } from "@/store/offline-store";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorView } from "@/components/ErrorView";
 import { WatchLiveButton } from "@/components/WatchLiveButton";
+import { MatchChatButton } from "@/components/MatchChatButton";
 
 export default function MatchScreen() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>();
@@ -91,6 +92,7 @@ export default function MatchScreen() {
           </Text>
         )}
         <WatchLiveButton match={currentMatch} />
+        {matchId ? <MatchChatButton matchId={matchId} /> : null}
         {currentMatch.result && (
           <Text style={styles.result}>{currentMatch.result}</Text>
         )}

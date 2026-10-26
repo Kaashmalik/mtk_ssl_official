@@ -118,3 +118,33 @@ export function normalizeSlowModeSeconds(value: unknown): number {
 export function isMatchChatMuteMinutes(value: unknown): value is (typeof MATCH_CHAT_MUTE_MINUTES)[number] {
   return typeof value === "number" && (MATCH_CHAT_MUTE_MINUTES as readonly number[]).includes(value)
 }
+
+/** How many messages a client keeps in memory; older ones scroll away. */
+export const MATCH_CHAT_MAX_KEPT_MESSAGES = 300
+
+/**
+ * Apply one poll (or a just-sent message) to a client's message list - the
+ * single merge rule shared by web and native so they can never drift:
+ * de-duplicate by id (the settle-window cursor re-delivers rows on purpose,
+ * ADR 003), drop moderator-removed ids, order by server sequence, cap length.
+ * `added` counts ids the client had not seen, for "N new messages" prompts.
+ */
+export function mergeChatMessages(
+  current: readonly MatchChatMessage[],
+  incoming: readonly MatchChatMessage[],
+  removedIds: readonly string[] = [],
+  max: number = MATCH_CHAT_MAX_KEPT_MESSAGES,
+): { messages: MatchChatMessage[]; added: number } {
+  const byId = new Map(current.map((m) => [m.id, m]))
+  let added = 0
+  for (const message of incoming) {
+    if (!byId.has(message.id)) added += 1
+    byId.set(message.id, message)
+  }
+  const removed = new Set(removedIds)
+  for (const id of removed) byId.delete(id)
+  // A message removed in the same poll it arrived in was never really "new".
+  added -= incoming.filter((m) => removed.has(m.id) && !current.some((c) => c.id === m.id)).length
+  const messages = [...byId.values()].sort((a, b) => a.seq - b.seq)
+  return { messages: messages.length > max ? messages.slice(-max) : messages, added: Math.max(0, added) }
+}

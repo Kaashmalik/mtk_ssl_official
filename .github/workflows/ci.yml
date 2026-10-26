@@ -66,6 +66,10 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
           SENTRY_UPLOAD: "0"
 
+      - name: Build Storybook (UI kit)
+        # A story that no longer compiles against the UI kit fails the PR.
+        run: pnpm --filter @mtk/ui build-storybook
+
       - name: Run API E2E Tests
         run: pnpm --filter @mtk/api test:e2e
 
@@ -151,6 +155,18 @@ jobs:
           pnpm --filter @mtk/web exec next start -p 3001 &
           npx -y wait-on http://localhost:3001 -t 120000
 
+      - name: Detect visual baselines
+        # Screenshot comparison runs only once baselines are committed (see the
+        # visual-baselines job), so a missing baseline never fails CI.
+        id: visual
+        run: |
+          if ls tests/e2e/specs/visual.spec.ts-snapshots/*-chromium-linux.png >/dev/null 2>&1; then
+            echo "enabled=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::Visual regression skipped: no baselines committed yet (run the visual-baselines job)."
+          fi
+
       - name: Run Playwright E2E
         run: pnpm --filter @mtk/e2e exec playwright test --project=chromium
         env:
@@ -159,6 +175,14 @@ jobs:
           # Optional: enables the database-backed specs.
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           NEXT_TELEMETRY_DISABLED: "1"
+          # Optional journeys (tests/e2e/support/env.ts). Missing values skip.
+          E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
+          E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+          # Writes are opt-in per repository and must point at a staging DB.
+          E2E_ALLOW_WRITES: ${{ vars.E2E_ALLOW_WRITES }}
+          E2E_SCORING_MATCH_ID: ${{ vars.E2E_SCORING_MATCH_ID }}
+          E2E_CHAT_MATCH_ID: ${{ vars.E2E_CHAT_MATCH_ID }}
+          E2E_VISUAL: ${{ steps.visual.outputs.enabled }}
 
       - name: Upload Playwright report
         if: always()

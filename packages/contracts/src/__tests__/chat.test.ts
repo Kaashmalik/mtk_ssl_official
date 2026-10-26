@@ -3,6 +3,7 @@ import {
   MATCH_CHAT_DEFAULT_SLOW_MODE_SECONDS,
   MATCH_CHAT_MAX_LENGTH,
   isMatchChatMuteMinutes,
+  mergeChatMessages,
   isMatchChatReportReason,
   normalizeChatBody,
   normalizeSlowModeSeconds,
@@ -69,5 +70,42 @@ describe("chat option guards", () => {
     expect(isMatchChatMuteMinutes(30)).toBe(true)
     expect(isMatchChatMuteMinutes(31)).toBe(false)
     expect(isMatchChatMuteMinutes("30")).toBe(false)
+  })
+})
+
+describe("mergeChatMessages (shared by web and native)", () => {
+  const msg = (seq: number, id = `m${seq}`) => ({
+    id, seq, authorId: "u", authorName: "Fan", body: `b${seq}`,
+    isModerator: false, pinned: false, replyToId: null, createdAt: "2026-10-26T12:00:00.000Z",
+  })
+
+  it("orders by server sequence and counts only unseen messages", () => {
+    const { messages, added } = mergeChatMessages([msg(2)], [msg(3), msg(1)])
+    expect(messages.map((m) => m.seq)).toEqual([1, 2, 3])
+    expect(added).toBe(2)
+  })
+
+  it("treats settle-window re-deliveries as duplicates, never new", () => {
+    const first = mergeChatMessages([], [msg(1), msg(2)])
+    const again = mergeChatMessages(first.messages, [msg(2), msg(3)])
+    expect(again.messages.map((m) => m.seq)).toEqual([1, 2, 3])
+    expect(again.added).toBe(1)
+  })
+
+  it("drops moderator-removed messages, even ones arriving in the same poll", () => {
+    const { messages, added } = mergeChatMessages([msg(1), msg(2)], [msg(3)], ["m2", "m3"])
+    expect(messages.map((m) => m.id)).toEqual(["m1"])
+    expect(added).toBe(0)
+  })
+
+  it("keeps only the newest messages past the cap", () => {
+    const many = Array.from({ length: 5 }, (_, i) => msg(i + 1))
+    expect(mergeChatMessages([], many, [], 3).messages.map((m) => m.seq)).toEqual([3, 4, 5])
+  })
+
+  it("does not mutate its inputs", () => {
+    const current = Object.freeze([msg(1)])
+    expect(() => mergeChatMessages(current, [msg(2)])).not.toThrow()
+    expect(current).toHaveLength(1)
   })
 })

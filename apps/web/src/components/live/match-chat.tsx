@@ -14,6 +14,7 @@ import {
   type MatchChatMessage,
   type MatchChatPoll,
   type MatchChatReportReason,
+  mergeChatMessages,
 } from "@mtk/contracts"
 import {
   moderateChatMessageAction,
@@ -41,7 +42,6 @@ const REPORT_LABELS: Record<MatchChatReportReason, string> = {
   inappropriate: "Inappropriate",
   other: "Other",
 }
-const MAX_KEPT_MESSAGES = 300
 const MAX_BACKOFF_MS = 30_000
 
 function newClientKey() {
@@ -76,21 +76,17 @@ export function MatchChat({ matchId }: { matchId: string }) {
   const atBottomRef = useRef(true)
   const backoffRef = useRef(MATCH_CHAT_POLL_MS)
 
+  // Merged outside a state updater: updaters must stay pure (React may run
+  // them twice), and the unseen counter is a side effect of the merge.
+  const messagesRef = useRef<MatchChatMessage[]>([])
   const merge = useCallback((incoming: MatchChatMessage[], removed: string[]) => {
-    setMessages((current) => {
-      const byId = new Map(current.map((m) => [m.id, m]))
-      let added = 0
-      for (const m of incoming) {
-        if (!byId.has(m.id)) added += 1
-        byId.set(m.id, m)
-      }
-      for (const id of removed) byId.delete(id)
-      if (added > 0 && !atBottomRef.current) {
-        setUnseen((n) => n + added)
-        setAnnouncement(`${added} new chat ${added === 1 ? "message" : "messages"}`)
-      }
-      return [...byId.values()].sort((a, b) => a.seq - b.seq).slice(-MAX_KEPT_MESSAGES)
-    })
+    const { messages: next, added } = mergeChatMessages(messagesRef.current, incoming, removed)
+    messagesRef.current = next
+    setMessages(next)
+    if (added > 0 && !atBottomRef.current) {
+      setUnseen((n) => n + added)
+      setAnnouncement(`${added} new chat ${added === 1 ? "message" : "messages"}`)
+    }
   }, [])
 
   const fetchOnce = useCallback(async (): Promise<boolean> => {

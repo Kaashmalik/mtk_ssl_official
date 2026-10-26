@@ -154,6 +154,12 @@ function AppTree() {
             }}
           />
           <Stack.Screen
+            name="match-chat/[matchId]"
+            options={{
+              title: "Match chat",
+            }}
+          />
+          <Stack.Screen
             name="player/[playerId]"
             options={{
               title: "Player Profile",
