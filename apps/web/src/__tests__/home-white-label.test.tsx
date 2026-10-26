@@ -23,6 +23,8 @@ vi.mock("@/lib/request-brand", () => ({
 
 vi.mock("@/components/structured-data", () => ({ StructuredData: () => null }))
 
+vi.mock("@/lib/home-pulse", () => ({ readHomePulse: vi.fn(async () => null) }))
+
 vi.mock("@/components/providers", () => ({ useClerkReady: () => true }))
 
 vi.mock("@mtk/ui/components/theme-toggle", () => ({ ThemeToggle: () => null }))

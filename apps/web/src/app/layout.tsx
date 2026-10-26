@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { Bricolage_Grotesque } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/providers";
@@ -19,6 +20,13 @@ import { brandVariables } from "@/lib/brand-presentation";
 
 import { buildRootMetadata } from "@/lib/site-metadata";
 import { buildTenantBrandMetadata } from "@/lib/white-label-metadata";
+
+// Display face for headings only; body copy and numbers stay on Geist.
+const displayFont = Bricolage_Grotesque({
+  subsets: ["latin"],
+  variable: "--font-bricolage",
+  display: "swap",
+});
 
 export async function generateMetadata(): Promise<Metadata> {
   // Batch 115 white-label: the tenant's own product name and favicon are
@@ -41,7 +49,7 @@ export default async function RootLayout({
   const branding = await readRequestBrand();
   return (
     <html lang={locale} dir={getLocaleDirection(locale)} suppressHydrationWarning>
-      <body style={brandVariables(branding)} className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}>
+      <body style={brandVariables(branding)} className={`${GeistSans.variable} ${GeistMono.variable} ${displayFont.variable} font-sans antialiased`}>
         <NextIntlClientProvider>
         <Providers>
           <SkipLink />

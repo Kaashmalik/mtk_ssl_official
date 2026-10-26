@@ -31,7 +31,7 @@ vi.mock("@clerk/nextjs", () => ({
   UserButton: () => null,
 }))
 
-async function heroTexts(): Promise<string[]> {
+async function heroTexts(pulse: unknown = null): Promise<string[]> {
   const mod = (await import("../components/home-content")) as { HomeContent: (p: any) => any }
   const out: string[] = []
   // Client component: CALL it (returns its JSX), then walk — executing any
@@ -46,7 +46,7 @@ async function heroTexts(): Promise<string[]> {
     }
     walk(node.props.children, depth)
   }
-  walk(mod.HomeContent({ brandName: "Shakir Super League" }))
+  walk(mod.HomeContent({ brandName: "Shakir Super League", pulse }))
   return out
 }
 
@@ -61,5 +61,51 @@ describe("Home hero honesty (Batch 130)", () => {
     const text = (await heroTexts()).join(" ")
     expect(text).toContain("Live Scoring")
     expect(text).toContain("Pro Analytics")
+  })
+})
+
+describe("Home landing honesty (review gap closure)", () => {
+  const pulse = (overrides: Record<string, unknown> = {}) => ({
+    leagues: 3,
+    competitions: 5,
+    liveMatches: 0,
+    complete: true,
+    featured: [{ tenantId: "t1", name: "Falcon Premier League", url: null, liveMatches: 0, publishedCompetitions: 2 }],
+    ...overrides,
+  })
+
+  it("carries no invented readiness metric or always-on live badge", async () => {
+    const text = (await heroTexts()).join(" ")
+    expect(text).not.toContain("92%")
+    expect(text).not.toMatch(/readiness/i)
+    expect(text).not.toMatch(/live now/i)
+  })
+
+  it("labels the scorer illustration as sample data", async () => {
+    const text = (await heroTexts()).join(" ")
+    expect(text).toContain("Sample data")
+  })
+
+  it("renders no activity numbers at all without a trustworthy hub read", async () => {
+    const text = (await heroTexts(null)).join(" ")
+    expect(text).not.toContain("On the public hub right now")
+  })
+
+  it("shows the real hub counts it was given, and never claims live matches when there are none", async () => {
+    const text = (await heroTexts(pulse())).join(" ")
+    expect(text).toContain("On the public hub right now")
+    expect(text).toContain("Falcon Premier League")
+    expect(text).toContain("Matches live now")
+    expect(text).not.toMatch(/\d+ live\b/)
+  })
+
+  it("discloses an incomplete hub read instead of presenting it as the total", async () => {
+    const text = (await heroTexts(pulse({ complete: false, leagues: 50 }))).join(" ")
+    expect(text).toContain("50+")
+  })
+
+  it("invites the first league honestly when nothing is listed", async () => {
+    const text = (await heroTexts(pulse({ leagues: 0, competitions: 0, featured: [] }))).join(" ")
+    expect(text).toContain("No league has listed itself publicly yet")
   })
 })

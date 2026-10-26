@@ -27,6 +27,7 @@ vi.mock("@/app/sign-in/[[...sign-in]]/clerk-sign-in", () => ({ ClerkSignIn: () =
 
 // Client boundaries for executing the real hero component (same stand-ins
 // as the Batch 125 home harness — the brand wiring itself is not mocked).
+vi.mock("@/lib/home-pulse", () => ({ readHomePulse: vi.fn(async () => null) }))
 vi.mock("@/components/providers", () => ({ useClerkReady: () => true }))
 vi.mock("@mtk/ui/components/theme-toggle", () => ({ ThemeToggle: () => null }))
 vi.mock("@mtk/ui/components/ui/motion-wrapper", () => ({
