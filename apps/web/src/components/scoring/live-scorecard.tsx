@@ -68,7 +68,7 @@ export function LiveScorecard({ targetRuns, totalOvers = 20, compact = false }: 
     return (
       <div className="flex items-center justify-between gap-3 px-1 py-1">
         <div className="min-w-0">
-          <div className="text-2xl font-bold tabular-nums leading-none">
+          <div data-testid="innings-score" className="text-2xl font-bold tabular-nums leading-none">
             {currentInnings.totalRuns}/{currentInnings.totalWickets}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
@@ -90,7 +90,7 @@ export function LiveScorecard({ targetRuns, totalOvers = 20, compact = false }: 
     <Card className="p-3 sm:p-6 space-y-3 sm:space-y-4">
       {/* Main Score */}
       <div className="text-center space-y-1 sm:space-y-2">
-        <div className="text-3xl sm:text-4xl md:text-5xl font-bold tabular-nums">
+        <div data-testid="innings-score" className="text-3xl sm:text-4xl md:text-5xl font-bold tabular-nums">
           {currentInnings.totalRuns} / {currentInnings.totalWickets}
         </div>
         <div className="text-base sm:text-xl text-muted-foreground">
