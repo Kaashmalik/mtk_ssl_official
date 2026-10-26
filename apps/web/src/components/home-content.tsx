@@ -127,7 +127,7 @@ function NavAuth({ clerkReady }: { clerkReady: boolean }) {
     <>
       <SignedOut>
         <SignInButton mode="modal">
-          <Button variant="ghost">Sign In</Button>
+          <Button variant="ghost" className="hidden sm:inline-flex">Sign In</Button>
         </SignInButton>
         <SignInButton mode="modal">
           <Button className="rounded-full px-5 font-semibold">Get Started</Button>
@@ -228,6 +228,10 @@ function ScorerPreview() {
   )
 }
 
+// Literal class names so Tailwind can see them; a partly filled row would
+// otherwise show empty grid cells.
+const FEATURED_COLUMNS: Record<number, string> = { 1: "", 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" }
+
 /** Real published activity from the public hub. Renders nothing when there is no trustworthy read. */
 function HubPulse({ pulse }: { pulse: HomePulse | null }) {
   if (!pulse) return null
@@ -271,7 +275,7 @@ function HubPulse({ pulse }: { pulse: HomePulse | null }) {
         ))}
       </dl>
       {pulse.featured.length > 0 && (
-        <ul className="grid gap-px border-t border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+        <ul className={`grid gap-px border-t border-border bg-border ${FEATURED_COLUMNS[pulse.featured.length] ?? ""}`}>
           {pulse.featured.map((league) => {
             const body = (
               <>
@@ -312,11 +316,11 @@ export function HomeContent({ brandName, pulse = null }: { brandName: string; pu
       />
 
       <header className="container relative z-10 mx-auto flex items-center justify-between gap-4 px-6 py-5">
-        <Link href="/" className="flex items-center gap-2.5 rounded-lg">
+        <Link href="/" className="flex min-w-0 items-center gap-2.5 rounded-lg">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Trophy className="h-5 w-5" />
           </span>
-          <span className="font-display text-lg font-bold tracking-tight">{brandName}</span>
+          <span className="font-display truncate text-base font-bold tracking-tight sm:text-lg">{brandName}</span>
         </Link>
         <nav aria-label="Primary" className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
           <a href="#features" className="hover:text-foreground">Features</a>

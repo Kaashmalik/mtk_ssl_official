@@ -1,0 +1,9 @@
+/* The web app's real theme (tokens, dark mode, utilities), so stories show
+   exactly what ships. Tailwind also scans the UI kit's own sources. */
+@import "../../../apps/web/src/app/globals.css";
+@source "../src";
+
+:root {
+  --font-geist-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-geist-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}

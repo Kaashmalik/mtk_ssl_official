@@ -80,3 +80,4 @@ playwright-report/
 
 # Local browser-automation artifacts
 .playwright-mcp/
+storybook-static
