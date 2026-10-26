@@ -62,6 +62,7 @@ export const matchChatMessages = pgTable(
     clientKey: uniqueIndex("match_chat_messages_client_key").on(table.authorUserId, table.clientKey),
     matchSeqIdx: index("idx_match_chat_messages_match_seq").on(table.matchId, table.seq),
     authorRecentIdx: index("idx_match_chat_messages_author_recent").on(table.tenantId, table.authorUserId, table.createdAt),
+    retentionIdx: index("idx_match_chat_messages_retention").on(table.status, table.createdAt),
     pinnedKey: uniqueIndex("match_chat_messages_pinned_key")
       .on(table.matchId)
       .where(sql`${table.pinned} AND ${table.status} = 'visible'`),
@@ -82,6 +83,7 @@ export const matchChatMutes = pgTable(
     windowCheck: check("match_chat_mutes_window_check", sql`${table.mutedUntil} > ${table.createdAt}`),
     selfCheck: check("match_chat_mutes_self_check", sql`${table.userId} <> ${table.mutedBy}`),
     activeIdx: index("idx_match_chat_mutes_active").on(table.tenantId, table.userId, table.mutedUntil),
+    retentionIdx: index("idx_match_chat_mutes_retention").on(table.mutedUntil),
   }),
 );
 

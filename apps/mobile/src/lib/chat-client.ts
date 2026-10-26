@@ -74,3 +74,21 @@ export function newChatClientKey(): string {
     return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);
   });
 }
+
+export type ChatModeration =
+  | { action: "hide"; messageId: string }
+  | { action: "mute"; userId: string; minutes: number };
+
+/** Moderator action; the server re-checks moderator authority on every call. */
+export async function moderateChat(matchId: string, input: ChatModeration): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await authedFetch(`/api/matches/${encodeURIComponent(matchId)}/chat/moderate`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    return { ok: res.ok && data.ok === true, error: data.error };
+  } catch {
+    return { ok: false, error: "No connection. Nothing was changed." };
+  }
+}

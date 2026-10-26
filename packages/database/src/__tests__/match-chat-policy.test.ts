@@ -8,6 +8,9 @@ import {
   chatReadable,
   chatSendDecision,
   settledChatCursor,
+  chatRetentionCutoffs,
+  MATCH_CHAT_RETENTION_BATCH,
+  MATCH_CHAT_RETENTION_DAYS,
   type ChatSendFacts,
 } from "../lib/match-chat-policy"
 
@@ -146,5 +149,46 @@ describe("match chat schema and migration contracts (not real SQL execution)", (
     expect(migration.match(/FORCE ROW LEVEL SECURITY/g)).toHaveLength(4)
     expect(migration).not.toMatch(/GRANT[^;]*TO\s+(anon|authenticated)/i)
     expect(migration).not.toMatch(/GRANT[^;]*DELETE/i)
+  })
+})
+
+describe("chat retention cutoffs", () => {
+  it("keeps moderation evidence longer than ordinary chat", () => {
+    const c = chatRetentionCutoffs(NOW)
+    const days = (d: Date) => Math.round((NOW.getTime() - d.getTime()) / 86_400_000)
+    expect(days(c.visibleBefore)).toBe(MATCH_CHAT_RETENTION_DAYS.visible)
+    expect(days(c.hiddenBefore)).toBe(MATCH_CHAT_RETENTION_DAYS.hidden)
+    expect(c.hiddenBefore.getTime()).toBeLessThan(c.visibleBefore.getTime())
+    expect(days(c.mutesEndedBefore)).toBe(MATCH_CHAT_RETENTION_DAYS.expiredMutes)
+  })
+
+  it("bounds each run", () => {
+    expect(MATCH_CHAT_RETENTION_BATCH).toBeGreaterThan(0)
+    expect(MATCH_CHAT_RETENTION_BATCH).toBeLessThanOrEqual(1000)
+  })
+})
+
+describe("chat retention migration contract (not real SQL execution)", () => {
+  const retention = readFileSync(new URL("../../../../supabase/migrations/20261027120000_match_chat_retention.sql", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n")
+
+  // Executable SQL only: the header comment legitimately names roles.
+  const sql = retention.split("\n").filter((line) => !line.trim().startsWith("--")).join("\n")
+
+  it("grants DELETE on exactly the two purged tables, to internal roles only", () => {
+    const grants = retention.match(/GRANT [^']+/g) ?? []
+    expect(grants).toEqual([
+      "GRANT DELETE ON public.match_chat_messages TO %I",
+      "GRANT DELETE ON public.match_chat_mutes TO %I",
+    ])
+    expect(retention).toContain("ARRAY['ssl', 'service_role']")
+    expect(sql).not.toMatch(/anon|authenticated|PUBLIC/)
+  })
+
+  it("is additive and never deletes data itself", () => {
+    expect(retention).toContain("BEGIN;")
+    expect(retention.trim()).toMatch(/COMMIT;$/)
+    expect(sql).not.toMatch(/DELETE FROM|DROP |TRUNCATE/i)
+    expect(retention).toContain("CREATE INDEX IF NOT EXISTS idx_match_chat_messages_retention")
   })
 })

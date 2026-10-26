@@ -3,6 +3,14 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **27 October 2026 - `20261027120000_match_chat_retention.sql` LOCAL ONLY, NOT applied**
+> Apply AFTER `20261026130000_match_chat`. Grants DELETE on `match_chat_messages`
+> and `match_chat_mutes` to `ssl`/`service_role` only (no other table, no
+> `anon`/`authenticated`), plus two retention indexes. The purge cron
+> (`/api/cron/chat-retention`) deletes nothing until
+> `MATCH_CHAT_RETENTION_READY=1`; schedule it daily from your cron runner with
+> the `CRON_SECRET` bearer, like the other `/api/cron/*` jobs.
+
 > **26 October 2026 - `20261026130000_match_chat.sql` LOCAL ONLY, NOT applied**
 > Additive ENH-10 match chat: `league_chat_settings`, `match_chat_messages`,
 > `match_chat_mutes`, `match_chat_reports`. New tables only. Messages reference

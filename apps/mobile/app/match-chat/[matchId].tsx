@@ -19,12 +19,13 @@ import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import {
   MATCH_CHAT_MAX_LENGTH,
+  MATCH_CHAT_MUTE_MINUTES,
   MATCH_CHAT_REPORT_REASONS,
   type MatchChatMessage,
   type MatchChatReportReason,
 } from "@mtk/contracts";
 import { useMatchChat } from "@/hooks/use-match-chat";
-import { newChatClientKey, reportChat, sendChat } from "@/lib/chat-client";
+import { moderateChat, newChatClientKey, reportChat, sendChat, type ChatModeration } from "@/lib/chat-client";
 import { useThemeColors, type ThemeColors } from "@/theme/tokens";
 
 /**
@@ -34,6 +35,10 @@ import { useThemeColors, type ThemeColors } from "@/theme/tokens";
  */
 
 const AWAY_OFFSET = 80;
+
+function muteLabel(minutes: number) {
+  return minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`;
+}
 
 function timeLabel(iso: string) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -189,6 +194,21 @@ export default function MatchChatScreen() {
     if (!matchId || !message) return;
     const result = await reportChat(matchId, message.id, reason);
     const text = result.ok ? t("chat.reported") : result.error ?? "That report could not be sent.";
+    setError(result.ok ? null : text);
+    AccessibilityInfo.announceForAccessibility(text);
+  }
+
+  async function moderate(input: ChatModeration) {
+    const message = reporting;
+    setReporting(null);
+    if (!matchId || !message) return;
+    const result = await moderateChat(matchId, input);
+    if (result.ok && input.action === "hide") apply([], [input.messageId]);
+    const text = !result.ok
+      ? result.error ?? "That action could not be completed."
+      : input.action === "hide"
+        ? t("chat.hidden")
+        : t("chat.muted.done", { name: message.authorName, duration: muteLabel(input.minutes) });
     setError(result.ok ? null : text);
     AccessibilityInfo.announceForAccessibility(text);
   }
@@ -349,6 +369,33 @@ export default function MatchChatScreen() {
                 <Text style={{ color: colors.text, fontSize: 16 }}>{t(`chat.reason.${reason}`)}</Text>
               </Pressable>
             ))}
+            {meta?.viewer.canModerate && reporting ? (
+              <>
+                <Text style={[styles.sheetSection, { color: colors.textMuted }]} accessibilityRole="header">{t("chat.moderate")}</Text>
+                <Pressable
+                  onPress={() => moderate({ action: "hide", messageId: reporting.id })}
+                  accessibilityRole="button"
+                  style={[styles.sheetOption, { borderColor: colors.border }]}
+                >
+                  <Text style={{ color: colors.danger, fontSize: 16 }}>{t("chat.hide")}</Text>
+                </Pressable>
+                {!reporting.isModerator ? (
+                  <View style={styles.muteRow}>
+                    {MATCH_CHAT_MUTE_MINUTES.map((minutes) => (
+                      <Pressable
+                        key={minutes}
+                        onPress={() => moderate({ action: "mute", userId: reporting.authorId, minutes })}
+                        accessibilityRole="button"
+                        accessibilityLabel={t("chat.mute", { duration: muteLabel(minutes) })}
+                        style={[styles.muteChip, { borderColor: colors.border }]}
+                      >
+                        <Text style={{ color: colors.text, fontSize: 14 }}>{muteLabel(minutes)}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </>
+            ) : null}
             <Pressable onPress={() => setReporting(null)} accessibilityRole="button" style={styles.sheetCancel}>
               <Text style={{ color: colors.textMuted, fontSize: 16 }}>{t("chat.cancel")}</Text>
             </Pressable>
@@ -395,4 +442,7 @@ const styles = StyleSheet.create({
   sheetQuote: { fontSize: 13, marginBottom: 8 },
   sheetOption: { minHeight: 48, justifyContent: "center", borderTopWidth: StyleSheet.hairlineWidth },
   sheetCancel: { minHeight: 48, justifyContent: "center", alignItems: "center", marginTop: 4 },
+  sheetSection: { fontSize: 13, fontWeight: "700", textTransform: "uppercase", marginTop: 12 },
+  muteRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 4 },
+  muteChip: { minHeight: 44, minWidth: 64, paddingHorizontal: 12, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

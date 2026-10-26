@@ -98,6 +98,11 @@ const resources = {
       "chat.mod": "Mod",
       "chat.announcement": "Announcement",
       "chat.cancel": "Cancel",
+      "chat.moderate": "Moderate",
+      "chat.hide": "Hide for everyone",
+      "chat.hidden": "Message hidden for everyone.",
+      "chat.mute": "Mute {{duration}}",
+      "chat.muted.done": "{{name}} is muted for {{duration}}.",
     },
   },
   ur: {
@@ -193,6 +198,11 @@ const resources = {
       "chat.mod": "ماڈ",
       "chat.announcement": "اعلان",
       "chat.cancel": "منسوخ",
+      "chat.moderate": "ماڈریٹ کریں",
+      "chat.hide": "سب کے لیے چھپائیں",
+      "chat.hidden": "پیغام سب کے لیے چھپا دیا گیا۔",
+      "chat.mute": "{{duration}} کے لیے خاموش کریں",
+      "chat.muted.done": "{{name}} کو {{duration}} کے لیے خاموش کر دیا گیا۔",
     },
   },
 };

@@ -89,3 +89,23 @@ export function settledChatCursor(
   }
   return cursor
 }
+
+/**
+ * Retention (ENH-10-01). Visible chat is short-lived engagement; hidden
+ * messages are moderation evidence and are kept longer; lapsed mutes are
+ * housekeeping. A message with an OPEN report is never purged - the writer
+ * skips it until a moderator resolves the report.
+ */
+export const MATCH_CHAT_RETENTION_DAYS = { visible: 90, hidden: 365, expiredMutes: 30 } as const
+/** Upper bound on rows removed per table per run, so one run stays short. */
+export const MATCH_CHAT_RETENTION_BATCH = 500
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export function chatRetentionCutoffs(now: Date) {
+  return {
+    visibleBefore: new Date(now.getTime() - MATCH_CHAT_RETENTION_DAYS.visible * DAY_MS),
+    hiddenBefore: new Date(now.getTime() - MATCH_CHAT_RETENTION_DAYS.hidden * DAY_MS),
+    mutesEndedBefore: new Date(now.getTime() - MATCH_CHAT_RETENTION_DAYS.expiredMutes * DAY_MS),
+  }
+}
