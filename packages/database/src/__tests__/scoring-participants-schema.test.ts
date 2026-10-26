@@ -16,6 +16,8 @@ const migration = readFileSync(
   new URL("../../../../supabase/migrations/20261022120000_scoring_wicket_attribution.sql", import.meta.url),
   "utf8",
 )
+  // Windows checkouts use CRLF; the pinned substrings are written with \n.
+  .replace(/\r\n/g, "\n")
 
 describe("Batch 100: wicket attribution schema", () => {
   it("adds exactly the two optional attribution columns to match_balls", () => {

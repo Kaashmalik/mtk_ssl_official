@@ -18,6 +18,9 @@ export async function resolveActiveTenantId(): Promise<string | null> {
     // redirects to setup instead (truthful) or the permission check fails
     // closed. Never fall back to another tenant.
     console.error("[rbac] tenant resolution from request failed", error);
+    // We cannot tell whether this host belongs to a league, so falling
+    // through to the user's primary membership could act in the wrong one.
+    return null;
   }
   if (requestTenant) return requestTenant.id;
   try {

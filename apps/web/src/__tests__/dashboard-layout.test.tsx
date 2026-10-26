@@ -14,6 +14,27 @@ vi.mock("@/app/dashboard/dashboard-shell", () => ({ DashboardShell: () => null }
 vi.mock("@/lib/subscription-status", () => ({ getSubscriptionStatus: mocks.subscription }))
 vi.mock("@/components/billing/trial-banner", () => ({ TrialBanner: () => null }))
 const context = { tenantId: "host-tenant", tenantName: "League", actorId: "actor", role: "league_owner" as const }
+
+// Structure-agnostic inspection of the rendered element tree: the blocked
+// notice's markup may be restyled freely as long as it still carries an
+// alert and never the private children.
+function elementsIn(node: unknown, found: React.ReactElement<{ children?: ReactNode; role?: string }>[] = []) {
+  React.Children.forEach(node as ReactNode, (child) => {
+    if (!React.isValidElement(child)) return
+    const element = child as React.ReactElement<{ children?: ReactNode; role?: string }>
+    found.push(element)
+    elementsIn(element.props?.children, found)
+  })
+  return found
+}
+function textIn(node: unknown): string {
+  let text = ""
+  React.Children.forEach(node as ReactNode, (child) => {
+    if (typeof child === "string" || typeof child === "number") text += ` ${child}`
+    else if (React.isValidElement(child)) text += textIn((child.props as { children?: ReactNode }).children)
+  })
+  return text
+}
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.auth.mockResolvedValue({ userId: "clerk" })
@@ -28,9 +49,9 @@ describe("Active-tenant dashboard shell and billing notice", () => {
     const privateChild = <p>Private league records</p>
     const shell = await DashboardLayout({ children: privateChild })
     expect(shell.props.children).not.toBe(privateChild)
-    const alert = React.Children.toArray(shell.props.children.props.children).find(
-      (child: any) => child?.props?.role === "alert",
-    )
+    const rendered = elementsIn(shell.props.children)
+    expect(rendered).not.toContain(privateChild)
+    const alert = rendered.find((element) => element.props?.role === "alert")
     expect(alert).toBeTruthy()
   })
   it("keeps the authenticated no-league onboarding child available", async () => {
@@ -42,7 +63,7 @@ describe("Active-tenant dashboard shell and billing notice", () => {
   it("shows a truthful provisioning notice on a delayed webhook — not the access-denied lie (ENH-02-01)", async () => {
     mocks.context.mockResolvedValue({ status: "provisioning" })
     const shell = await DashboardLayout({ children: <p>Setup</p> })
-    const notice = JSON.stringify(shell.props.children)
+    const notice = textIn(shell.props.children)
     expect(notice).not.toContain("Contact the organizer")
     expect(notice).not.toContain("Setup") // children withheld while unprovisioned
   })
@@ -78,7 +99,7 @@ describe("Active-tenant dashboard shell and billing notice", () => {
     mocks.context.mockResolvedValue({ status: "provisioning" })
     mocks.reconcile.mockResolvedValue(false)
     const shell = await DashboardLayout({ children: <p>Setup</p> })
-    const notice = JSON.stringify(shell.props.children)
+    const notice = textIn(shell.props.children)
     expect(notice).not.toContain("Setup")
     expect(mocks.context).toHaveBeenCalledTimes(1)
   })

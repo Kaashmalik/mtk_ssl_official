@@ -5,6 +5,8 @@ import { userTenantRoles } from "../schema/user-tenant-roles"
 import { membershipGrantsAccess, parseMembershipExpiry } from "../lib/membership-effectiveness"
 
 const migration = readFileSync(new URL("../../../../supabase/migrations/20261016120000_membership_expiry_delegation.sql", import.meta.url), "utf8")
+  // Windows checkouts use CRLF; the pinned substrings are written with \n.
+  .replace(/\r\n/g, "\n")
 const NOW = new Date("2026-10-16T12:00:00.000Z")
 
 describe("Membership effectiveness policy (SCORE-09, pure decisions)", () => {

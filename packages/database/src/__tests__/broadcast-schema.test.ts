@@ -20,6 +20,8 @@ const migration = readFileSync(
   new URL("../../../../supabase/migrations/20261021150000_broadcast_provider.sql", import.meta.url),
   "utf8",
 )
+  // Windows checkouts use CRLF; the pinned substrings are written with \n.
+  .replace(/\r\n/g, "\n")
 
 const columnNames = (columns: unknown): string[] =>
   ((columns as Array<{ name: string }> | undefined) ?? []).map(column => column.name)
