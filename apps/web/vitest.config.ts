@@ -4,6 +4,14 @@ import path from "path"
 export default defineConfig({
   test: {
     environment: "node",
+    // Several suites dynamically import a whole route/segment tree and render it
+    // through React's server renderer. That is import/render CPU time, not a
+    // hang: the same tests pass in a few seconds alone and starve when every
+    // workspace suite runs at once. `pnpm turbo run test` also runs them next to
+    // 15 Jest services, so allow real headroom instead of flaking. A genuinely
+    // hung test still fails, just later.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
   resolve: {
     // Exercise workspace schema/source without a build or stale dist columns.

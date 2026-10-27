@@ -87,11 +87,11 @@ export function LiveStreamsMonitor() {
                     </td>
                     <td className="py-2 text-xs capitalize">{s.status}</td>
                     <td className="py-2 text-right">
-                      <a href={`/matches/${s.id}/live`} target="_blank" rel="noreferrer">
-                        <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={`/matches/${s.id}/live`} target="_blank" rel="noreferrer">
                           <ExternalLink className="h-4 w-4 mr-1" /> Open
-                        </Button>
-                      </a>
+                        </a>
+                      </Button>
                     </td>
                   </tr>
                 ))}

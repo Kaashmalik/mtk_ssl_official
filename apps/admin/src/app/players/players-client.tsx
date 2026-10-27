@@ -12,6 +12,7 @@ import {
 
 interface Player {
   id: string;
+  name: string | null;
   jersey_number: number;
   role: string;
   batting_style: string;
@@ -57,7 +58,9 @@ export function PlayersClient() {
           <h1 className="text-3xl font-bold tracking-tight">Players</h1>
           <p className="text-muted-foreground mt-2">Manage cricket players across all teams.</p>
         </div>
-        <Link href="/players/new"><Button>Create Player</Button></Link>
+        <Button asChild>
+          <Link href="/players/new">Create Player</Link>
+        </Button>
       </div>
       <Card>
         <CardHeader><CardTitle>All Players ({players.length})</CardTitle></CardHeader>
@@ -83,7 +86,9 @@ export function PlayersClient() {
                         <div className="font-medium">
                           {player.profiles?.display_name ||
                             `${player.profiles?.first_name || ""} ${player.profiles?.last_name || ""}`.trim() ||
-                            player.users?.email || "Unnamed"}
+                            player.name ||
+                            player.users?.email ||
+                            "Unnamed"}
                         </div>
                         {player.users?.email && (
                           <div className="text-xs text-muted-foreground">{player.users.email}</div>
@@ -113,7 +118,9 @@ export function PlayersClient() {
                       : <Badge variant="secondary">Inactive</Badge>}
                   </TableCell>
                   <TableCell>
-                    <Link href={`/players/${player.id}`}><Button variant="ghost" size="sm">View</Button></Link>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={`/players/${player.id}`}>View</Link>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}

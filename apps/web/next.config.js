@@ -136,7 +136,15 @@ const sentryEnabled =
 // UX-03 (Batch 139): next-intl's App Router plugin - wires i18n/request.ts
 // so Server Components resolve the request locale (cookie, else
 // Accept-Language negotiation, else en) without URL restructuring.
-const withNextIntl = require("next-intl/plugin");
+//
+// `next-intl/plugin` exports the FACTORY, not the wrapper: calling it with no
+// argument resolves ./src/i18n/request.ts and returns `withNextIntl`. Passing
+// nextConfig straight to the factory (the previous code) exported a wrapper
+// function instead of a config object. Next then called it with the build
+// phase string, silently discarding this entire file - security headers,
+// images, env, transpilePackages and the i18n alias were all ignored.
+const createNextIntlPlugin = require("next-intl/plugin");
+const withNextIntl = createNextIntlPlugin();
 
 if (isDev || !sentryEnabled) {
   module.exports = withNextIntl(nextConfig);

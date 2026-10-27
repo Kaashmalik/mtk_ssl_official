@@ -45,7 +45,11 @@ jobs:
       - name: Run Unit Tests
         # Runs every workspace's test task (turbo also builds dependencies first),
         # so no service can ship with a silently skipped test suite.
-        run: pnpm turbo run test
+        # Bounded concurrency: Vitest and Jest each size their worker pool to the
+        # runner's CPU count, so turbo's default of 10 simultaneous suites makes
+        # 4-core runners oversubscribe and turns import-heavy tests into
+        # timeouts. Four matches the runner.
+        run: pnpm turbo run test --concurrency=4
 
       - name: Build Web App
         run: pnpm --filter @mtk/web build

@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { verifySuperAdmin } from "@/lib/admin-auth";
 import { db, players, teams, profiles, users } from "@mtk/database";
 import { eq, and, desc } from "drizzle-orm";
@@ -134,11 +135,48 @@ export async function POST(request: Request) {
       bowling_style,
     } = body;
 
-    if (!tenant_id || !role) {
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!tenant_id || !role || !name) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "League, player name and role are required" },
         { status: 400 }
       );
+    }
+    if (!z.string().uuid().safeParse(tenant_id).success) {
+      return NextResponse.json({ error: "Invalid league" }, { status: 400 });
+    }
+    if (team_id && !z.string().uuid().safeParse(team_id).success) {
+      return NextResponse.json({ error: "Invalid team" }, { status: 400 });
+    }
+
+    // A player must never be filed under a team from another league: the
+    // console is a super-admin surface, so RLS cannot catch this for us.
+    if (team_id) {
+      const [team] = await db
+        .select({ tenantId: teams.tenantId })
+        .from(teams)
+        .where(eq(teams.id, team_id))
+        .limit(1);
+      if (!team) {
+        return NextResponse.json({ error: "Team not found" }, { status: 400 });
+      }
+      if (team.tenantId !== tenant_id) {
+        return NextResponse.json(
+          { error: "Team does not belong to the selected league" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const parsedJersey =
+      jersey_number === undefined || jersey_number === null || jersey_number === ""
+        ? null
+        : Number(jersey_number);
+    if (
+      parsedJersey !== null &&
+      (!Number.isInteger(parsedJersey) || parsedJersey < 0 || parsedJersey > 999)
+    ) {
+      return NextResponse.json({ error: "Invalid jersey number" }, { status: 400 });
     }
 
     const [player] = await db
@@ -148,12 +186,12 @@ export async function POST(request: Request) {
         teamId: team_id || null,
         userId: user_id || null,
         profileId: profile_id || null,
-        jerseyNumber: jersey_number ? parseInt(jersey_number) : null,
+        jerseyNumber: parsedJersey,
         role: role,
         battingStyle: batting_style || null,
         bowlingStyle: bowling_style || null,
         isActive: true,
-        name: body.name || "Unknown Player",
+        name,
       })
       .returning();
 
@@ -163,6 +201,7 @@ export async function POST(request: Request) {
       team_id: player.teamId,
       user_id: player.userId,
       profile_id: player.profileId,
+      name: player.name,
       jersey_number: player.jerseyNumber,
       role: player.role,
       batting_style: player.battingStyle,

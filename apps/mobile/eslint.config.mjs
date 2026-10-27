@@ -49,6 +49,9 @@ const config = [
     },
     rules: {
       "no-unused-vars": "off",
+      // TypeScript already rejects undefined identifiers; the base rule cannot
+      // see ambient lib types such as RequestInit and reports them as undefined.
+      "no-undef": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
         {

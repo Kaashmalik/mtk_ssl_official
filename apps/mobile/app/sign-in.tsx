@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useAuth, useClerk, useSignIn } from "@clerk/clerk-expo";
+import { useClerk, useSignIn } from "@clerk/clerk-expo";
 
 /** Shape of Clerk's email_code first factor (from @clerk/types). */
 type EmailCodeFactor = { strategy: "email_code"; emailAddressId: string; safeIdentifier: string; primary?: boolean };

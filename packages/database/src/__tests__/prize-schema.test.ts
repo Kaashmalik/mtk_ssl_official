@@ -52,7 +52,7 @@ describe("Tournament prize schema and migration contracts (not real SQL executio
     expect(column("superseded_at")?.notNull).toBe(false)
     expect(column("superseded_by_prize_id")?.notNull).toBe(false)
     // The index mirrors the drizzle schema's (tournament_id, superseded_at).
-    const indexNames = config.indexes.map((i: any) => i.config?.name ?? i.name)
+    const indexNames = config.indexes.map((i) => i.config.name)
     expect(indexNames).toContain("tournament_prizes_superseded_idx")
   })
 

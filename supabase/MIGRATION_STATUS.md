@@ -3,7 +3,29 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
-> **27 October 2026 - `20261027120000_match_chat_retention.sql` LOCAL ONLY, NOT applied**
+> **27 October 2026 (ENH-10 apply session) - all three pending migrations APPLIED to the
+> LIVE project + ledgered; `--db` drift gate GREEN**
+> Applied to `anxstufkbqnjkxgksfkn` via the `DATABASE_URL` fallback (repo `postgres`
+> driver, whole original file executed in one connection), in folder order:
+> `20261026120000_admin_action_approvals`, `20261026130000_match_chat`,
+> `20261027120000_match_chat_retention`. Verification-first preflight: none of the five
+> target tables existed, no ledger rows for the three stamps, `matches_id_tenant_key`
+> present (the `match_chat_messages` composite FK needs it), `ssl` + `service_role`
+> present. Post-apply verification, all green: 5 tables with
+> `relrowsecurity/relforcerowsecurity = t/t`, ZERO `anon`/`authenticated`/`PUBLIC`
+> grants, grants only to `ssl`/`service_role` (SELECT/INSERT/UPDATE everywhere;
+> DELETE only on `match_chat_messages` + `match_chat_mutes`, per the retention file),
+> `admin_action_approvals_pending_key`, `match_chat_messages_seq_key`,
+> `idx_match_chat_messages_retention` and `idx_match_chat_mutes_retention` present.
+> Ledger rows carry the folder's original stamps (`created_by
+> enh10-remote-apply`), so the deployed schema mirrors the folder exactly:
+> `missingInDb` (none), `untrackedInDb` (none). RUNTIME GATES UNCHANGED: chat stays off
+> per league until an owner enables it, and the `/api/cron/chat-retention` purge still
+> deletes nothing until `MATCH_CHAT_RETENTION_READY=1` is deployed with `CRON_SECRET`
+> scheduling.
+
+> **27 October 2026 - `20261027120000_match_chat_retention.sql` - HISTORICAL PRE-APPLY NOTE**
+> (superseded: applied to the live project on 27 Oct 2026 - see the entry at the top)
 > Apply AFTER `20261026130000_match_chat`. Grants DELETE on `match_chat_messages`
 > and `match_chat_mutes` to `ssl`/`service_role` only (no other table, no
 > `anon`/`authenticated`), plus two retention indexes. The purge cron
@@ -11,7 +33,8 @@
 > `MATCH_CHAT_RETENTION_READY=1`; schedule it daily from your cron runner with
 > the `CRON_SECRET` bearer, like the other `/api/cron/*` jobs.
 
-> **26 October 2026 - `20261026130000_match_chat.sql` LOCAL ONLY, NOT applied**
+> **26 October 2026 - `20261026130000_match_chat.sql` - HISTORICAL PRE-APPLY NOTE**
+> (superseded: applied to the live project on 27 Oct 2026 - see the entry at the top)
 > Additive ENH-10 match chat: `league_chat_settings`, `match_chat_messages`,
 > `match_chat_mutes`, `match_chat_reports`. New tables only. Messages reference
 > the match through `(match_id, tenant_id)` → `matches_id_tenant_key`, so that
@@ -21,7 +44,8 @@
 > Dashboard → Settings → Fan interactions; until the migration is applied the
 > match pages simply render no chat panel (the enabled read fails closed).
 
-> **26 October 2026 - `20261026120000_admin_action_approvals.sql` LOCAL ONLY, NOT applied**
+> **26 October 2026 - `20261026120000_admin_action_approvals.sql` - HISTORICAL PRE-APPLY NOTE**
+> (superseded: applied to the live project on 27 Oct 2026 - see the entry at the top)
 > Additive two-person approval queue for destructive platform-admin actions
 > (today: `tenant.delete`). New table only; touches no existing rows. RLS forced,
 > no `anon`/`authenticated` grants, and no DELETE grant even for `service_role`

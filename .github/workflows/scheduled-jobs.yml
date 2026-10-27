@@ -1,0 +1,96 @@
+name: Scheduled jobs
+
+# Triggers the web app's /api/cron/* endpoints. The app deliberately does not
+# care WHO schedules them: every route authenticates a CRON_SECRET bearer and is
+# bounded per run, and each worker stays fail-closed behind its own *_READY gate.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   CRON_APP_URL  - production origin, e.g. https://www.cricketleague.tech
+#   CRON_SECRET   - must equal the web deployment's CRON_SECRET
+#
+# If either secret is missing this workflow logs a notice and exits 0, so a
+# repository without deployments stays green instead of failing daily.
+#
+# Vercel alternative: a Pro plan can run the same routes from apps/web/vercel.json
+# `crons`; do not enable both or the queues will be driven twice (harmless but
+# wasteful - every worker is idempotent/leased).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # fast queues
+    - cron: "0 3 * * *" # daily sweeps
+  workflow_dispatch:
+    inputs:
+      set:
+        description: Which job set to run
+        type: choice
+        options: [fast, daily, all]
+        default: fast
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-jobs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve job set
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          INPUT_SET: ${{ inputs.set }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            set_name="$INPUT_SET"
+          elif [ "$EVENT_SCHEDULE" = "0 3 * * *" ]; then
+            set_name="daily"
+          else
+            set_name="fast"
+          fi
+          echo "set=$set_name" >> "$GITHUB_OUTPUT"
+          echo "Running job set: $set_name"
+
+      - name: Invoke cron endpoints
+        env:
+          APP_URL: ${{ secrets.CRON_APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          JOB_SET: ${{ steps.plan.outputs.set }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::CRON_APP_URL and CRON_SECRET are not configured - skipping scheduled jobs."
+            exit 0
+          fi
+          APP_URL="${APP_URL%/}"
+
+          case "$JOB_SET" in
+            fast) jobs="broadcast-jobs notification-jobs invitation-emails push-receipts media-cleanup" ;;
+            daily) jobs="chat-retention ssl-renewal subscription-renewal" ;;
+            all) jobs="broadcast-jobs notification-jobs invitation-emails push-receipts media-cleanup chat-retention ssl-renewal subscription-renewal" ;;
+            *) echo "::error::Unknown job set '$JOB_SET'"; exit 2 ;;
+          esac
+
+          failed=0
+          for job in $jobs; do
+            body="$(mktemp)"
+            code="$(curl -sS -o "$body" -w '%{http_code}' \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              --max-time 120 \
+              "$APP_URL/api/cron/$job" || echo 000)"
+            echo "--- $job -> HTTP $code"
+            head -c 600 "$body" || true
+            echo
+            case "$code" in
+              2*) ;;
+              000) echo "::error::$job did not answer"; failed=1 ;;
+              401|403) echo "::error::$job rejected CRON_SECRET"; failed=1 ;;
+              503) echo "::warning::$job answered 503 (gate/config off)" ;;
+              *) echo "::warning::$job answered HTTP $code"; failed=1 ;;
+            esac
+          done
+          exit "$failed"
