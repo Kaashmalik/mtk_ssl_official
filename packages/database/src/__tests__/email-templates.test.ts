@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
   EMAIL_TEMPLATE_LOCALES,
+  INVITATION_TEMPLATES,
+  VERIFICATION_TEMPLATES,
+  ROLE_LABELS,
   normalizeEmailLocale,
   plainEmailLine,
   renderInvitationEmail,
   renderVerificationEmail,
+  type EmailLocale,
 } from "../lib/email-templates"
 
 const BASE = {
@@ -78,5 +82,47 @@ describe("email template policy (Batch 144, UX-03 localized emails)", () => {
     const hostile = renderInvitationEmail({ ...BASE, locale: "en", appName: "X\nBcc: victim@x" })
     expect(hostile.subject).not.toMatch(/[\r\n]/)
     expect(hostile.subject).toContain("on X Bcc: victim@x")
+  })
+
+  it("Batch 176 (P3c): every locale table has EXACT key parity with en - for functions, slots; for labels, keys", () => {
+    // Structure pin: a locale missing (or inventing) a role key or a
+    // subject/body slot must fail HERE, not surface as an undefined render
+    // in production. en is the reference vocabulary; bn/ar are sets that
+    // must stay equal to it, not merely contain it.
+    const roleKeysOf = (locale: EmailLocale) =>
+      Object.keys(ROLE_LABELS[locale]).sort().join(",")
+    for (const locale of EMAIL_TEMPLATE_LOCALES) {
+      expect(roleKeysOf(locale), `ROLE_LABELS[${locale}]`).toBe(roleKeysOf("en"))
+      for (const role of Object.keys(ROLE_LABELS[locale]) as (keyof typeof ROLE_LABELS["en"])[]) {
+        expect(ROLE_LABELS[locale][role].length, `${locale}/${role}`).toBeGreaterThan(0)
+      }
+
+      expect(
+        Object.keys(INVITATION_TEMPLATES[locale]).sort().join(","),
+        `INVITATION_TEMPLATES[${locale}]`,
+      ).toBe(Object.keys(INVITATION_TEMPLATES.en).sort().join(","))
+      expect(
+        Object.keys(VERIFICATION_TEMPLATES[locale]).sort().join(","),
+        `VERIFICATION_TEMPLATES[${locale}]`,
+      ).toBe(Object.keys(VERIFICATION_TEMPLATES.en).sort().join(","))
+    }
+
+    // Slot pin: every locale's slots are callable with the SAME argument
+    // shape en uses and yield non-empty strings - a bn/ar body that only
+    // compiles because it ignores its variables still renders, so the pin
+    // exercises the interpolation end to end.
+    const inviteVars = {
+      inviterName: "Rashid", leagueName: "Dhaka Premier Cup", roleLabel: "captain",
+      link: BASE.link, expiresDays: 7, siteName: "SSL",
+    }
+    for (const locale of EMAIL_TEMPLATE_LOCALES) {
+      const invited = INVITATION_TEMPLATES[locale]
+      expect(invited.subject(inviteVars).length).toBeGreaterThan(0)
+      expect(invited.body(inviteVars)).toContain(BASE.link)
+      expect(invited.body(inviteVars)).toContain("7")
+      const otp = VERIFICATION_TEMPLATES[locale]
+      expect(otp.subject({ ttlMinutes: 10 }).length).toBeGreaterThan(0)
+      expect(otp.body({ ttlMinutes: 10 })).toContain("10")
+    }
   })
 })

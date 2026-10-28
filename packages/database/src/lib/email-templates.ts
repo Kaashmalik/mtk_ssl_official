@@ -38,7 +38,10 @@ export function plainEmailLine(input: string): string {
 
 type RoleKey = "team_manager" | "captain" | "coach" | "scorer" | "player"
 
-const ROLE_LABELS: Record<EmailLocale, Record<RoleKey, string>> = {
+// Batch 176 (P3c): the locale tables are EXPORTED so the key-parity tests
+// can pin their structure — a locale missing a role or subject/body slot
+// must fail a test, not be discovered in production by an undefined render.
+export const ROLE_LABELS: Record<EmailLocale, Record<RoleKey, string>> = {
   en: {
     team_manager: "team manager",
     captain: "captain",
@@ -63,7 +66,7 @@ const ROLE_LABELS: Record<EmailLocale, Record<RoleKey, string>> = {
   },
 }
 
-const INVITATION_TEMPLATES: Record<
+export const INVITATION_TEMPLATES: Record<
   EmailLocale,
   {
     subject: (v: { leagueName: string; siteName: string }) => string
@@ -122,7 +125,7 @@ export function renderInvitationEmail(input: InvitationEmailInput): { subject: s
   return { subject: INVITATION_TEMPLATES[locale].subject(vars), text: INVITATION_TEMPLATES[locale].body(vars) }
 }
 
-const VERIFICATION_TEMPLATES: Record<
+export const VERIFICATION_TEMPLATES: Record<
   EmailLocale,
   { subject: (v: { ttlMinutes: number }) => string; body: (v: { ttlMinutes: number }) => string }
 > = {
