@@ -1,5 +1,6 @@
 import { db } from '@mtk/database';
 import { PgDialect } from 'drizzle-orm/pg-core';
+import { backoffMs, OUTBOX_MAX_ATTEMPTS } from '@mtk/database/lib/outbox-policy';
 import { ScoringOutboxDispatcher } from './scoring-outbox-dispatcher.service';
 import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 import { BALL_TOPIC, MATCH_TOPIC, validateOutboxMessage } from './scoring-outbox';
@@ -12,8 +13,8 @@ const dialect = new PgDialect();
 const TENANT = '00000000-0000-4000-8000-000000000001';
 const MATCH = '00000000-0000-4000-8000-000000000002';
 const EVENT = '00000000-0000-4000-8000-000000000003';
-function pending() {
-  return { id: '42', tenantId: TENANT, matchId: MATCH, eventId: EVENT, topic: BALL_TOPIC,
+function pending(attempts = 0) {
+  return { id: '42', tenantId: TENANT, matchId: MATCH, eventId: EVENT, topic: BALL_TOPIC, attempts,
     payload: { eventId: EVENT, tenantId: TENANT, matchId: MATCH, timestamp: '2026-10-16T12:00:00Z', data: { tenantId: TENANT, matchId: MATCH, inningsId: EVENT },
       type: 'FOUR_HIT', inning: 1, over: 0, ball: 1, sequenceNumber: 1, runs: 4,
       // ENH-09-02: canonical revision + stable match_balls identity on every ball envelope.
@@ -43,7 +44,9 @@ describe('Durable scoring outbox worker (transaction/transport doubles, not real
     expect(query.sql).toContain('predecessor.match_id = candidate.match_id');
     expect(query.sql).toContain('predecessor.delivered_at IS NULL AND predecessor.id < candidate.id');
     expect(query.sql).toContain('candidate.next_attempt_at <= now()');
-expect(query.sql).toContain('candidate.attempts < 8');
+    // Batch 176: the retry budget is the shared policy constant (no local 8).
+    expect(query.sql).toContain('candidate.attempts <');
+    expect(query.params).toContain(OUTBOX_MAX_ATTEMPTS);
     expect(query.sql).toContain('ORDER BY candidate.id LIMIT 1');
     expect(query.sql).not.toContain('public.matches');
     expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'read committed' });
@@ -66,23 +69,50 @@ expect(query.sql).toContain('candidate.attempts < 8');
     expect(publisher.publishMatchEvent).toHaveBeenCalledWith(row.payload);
     expect(publisher.publishBallEvent).not.toHaveBeenCalled();
   });
-  it('retains broker failures with capped backoff and sanitized error code', async () => {
+  it('retains broker failures with the policy backoff schedule and a sanitized error code', async () => {
     tx.execute.mockResolvedValueOnce([pending()]);
     publisher.publishBallEvent.mockRejectedValue(new Error('credentials: secret-value'));
     await expect(worker.dispatchOne()).resolves.toBe(true);
     const update = dialect.sqlToQuery(tx.execute.mock.calls[1][0]);
-    expect(update.params).toEqual(['broker_delivery_failed', '42', TENANT, MATCH]);
-    expect(update.sql).toContain("interval '3600 seconds'");
+    // Batch 176: the delay derives from the shared outbox policy — a first
+    // failure (attempts 0 -> 1) backs off backoffMs(1) = 5000ms.
+    expect(update.params).toEqual([backoffMs(1), 'broker_delivery_failed', '42', TENANT, MATCH]);
+    expect(update.sql).toContain("* interval '1 millisecond'");
     expect(update.sql).not.toContain('delivered_at = now()');
     expect(JSON.stringify(update)).not.toContain('secret-value');
     expect(update.sql).not.toContain('DELETE');
+  });
+
+  it('caps the backoff at the policy ceiling for late attempts', async () => {
+    tx.execute.mockResolvedValueOnce([pending(6)]);
+    publisher.publishBallEvent.mockRejectedValue(new Error('still failing'));
+    await worker.dispatchOne();
+    const update = dialect.sqlToQuery(tx.execute.mock.calls[1][0]);
+    expect(update.params[0]).toBe(backoffMs(7));
+  });
+
+  it('dead-letters at the policy cap WITHOUT scheduling another attempt', async () => {
+    tx.execute.mockResolvedValueOnce([pending(OUTBOX_MAX_ATTEMPTS - 1)]);
+    publisher.publishBallEvent.mockRejectedValue(new Error('final failure'));
+    await worker.dispatchOne();
+    const update = dialect.sqlToQuery(tx.execute.mock.calls[1][0]);
+    // The policy forbids a dead-lettered row from being rescheduled: it
+    // keeps its last next_attempt_at (the candidate predicate above already
+    // excludes attempts >= cap); the audit trail (last_error) survives.
+    expect(update.sql).toContain('next_attempt_at = next_attempt_at');
+    expect(update.params).not.toContain(backoffMs(OUTBOX_MAX_ATTEMPTS));
   });
   it.each(['tenantId', 'matchId', 'eventId'])('retains mismatched envelope %s without sending', async key => {
     const row = pending(); row.payload[key] = MATCH === row.payload[key] ? TENANT : MATCH;
     tx.execute.mockResolvedValueOnce([row]);
     await worker.dispatchOne();
     expect(publisher.publishBallEvent).not.toHaveBeenCalled();
-    expect(dialect.sqlToQuery(tx.execute.mock.calls[1][0]).params[0]).toBe('invalid_envelope');
+    // Batch 176: the failure UPDATE binds the policy backoff first (the
+    // schedule now derives from outbox-policy, not a raw CASE ladder), so
+    // the retained error code is the SECOND bound parameter.
+    const update = dialect.sqlToQuery(tx.execute.mock.calls[1][0]);
+    expect(update.params[0]).toBe(backoffMs(1));
+    expect(update.params[1]).toBe('invalid_envelope');
   });
   it('retains unsupported topics and malformed payloads instead of executing/fetching them', async () => {
     tx.execute.mockResolvedValueOnce([{ ...pending(), topic: 'https://untrusted.invalid' }]);
@@ -95,7 +125,10 @@ expect(query.sql).toContain('candidate.attempts < 8');
     tx.execute.mockResolvedValueOnce([row]);
     await worker.dispatchOne();
     expect(publisher.publishBallEvent).not.toHaveBeenCalled();
-    expect(dialect.sqlToQuery(tx.execute.mock.calls[1][0]).params[0]).toBe('invalid_envelope');
+    // Batch 176: backoff-first binding order (see the it.each note above).
+    const update = dialect.sqlToQuery(tx.execute.mock.calls[1][0]);
+    expect(update.params[0]).toBe(backoffMs(1));
+    expect(update.params[1]).toBe('invalid_envelope');
   });
   it('rejects lifecycle identity that is not the deterministic match/type key', () => {
     const payload = { ...pending().payload, type: 'MatchStarted' };
