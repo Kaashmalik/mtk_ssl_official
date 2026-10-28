@@ -1,7 +1,33 @@
-/** The only branding fields allowed to cross the server/client boundary. */
+/**
+ * The only branding fields allowed to cross the server/client boundary.
+ *
+ * Batch 176 (PREM-02): logoUrl, hideSslBranding and customCss join the
+ * whitelist so the published snapshot reaches the dashboard chrome, not
+ * just colors/fonts/name. Sanitization is trust-boundary discipline:
+ *   - logoUrl: HTTPS-only URL (same rule as faviconUrl);
+ *   - hideSslBranding: boolean only (it gates the platform credit);
+ *   - customCss: length-bounded and structure-neutralized, NOT "sanitized
+ *     into safety" — CSS is the tenant's own premium surface (plan-gated
+ *     write path); the neutralization only stops the string breaking out
+ *     of its <style> element.
+ */
 export type BrandPresentation = {
   primaryColor?: string; secondaryColor?: string; accentColor?: string;
   fontFamily?: string; faviconUrl?: string; appName?: string;
+  logoUrl?: string; hideSslBranding?: boolean; customCss?: string;
+}
+
+const CUSTOM_CSS_MAX_LENGTH = 20_000
+
+function customCss(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined
+  // Control characters (except tab/newline/carriage return) have no honest
+  // business in a stylesheet; `</style` (any case) would close the element
+  // the CSS is injected into - split the tag instead of deleting words.
+  const bounded = value.slice(0, CUSTOM_CSS_MAX_LENGTH)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .replace(/<\/style/gi, "<\\/style")
+  return bounded.trim().length > 0 ? bounded : undefined
 }
 
 function color(value: unknown): string | undefined {
@@ -34,6 +60,9 @@ export function brandPresentation(row: unknown): BrandPresentation | null {
     accentColor: color(source.accentColor), faviconUrl: safeHttpsUrl(source.faviconUrl),
     fontFamily: typeof source.fontFamily === "string" && ALLOWED_FONTS.has(source.fontFamily) ? source.fontFamily : undefined,
     appName: appName(source.appName),
+    logoUrl: safeHttpsUrl(source.logoUrl),
+    hideSslBranding: source.hideSslBranding === true,
+    customCss: customCss(source.customCss),
   }
 }
 

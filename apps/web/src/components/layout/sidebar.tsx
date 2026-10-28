@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { cn } from "@mtk/ui/lib/utils"
 import { motion, AnimatePresence } from "framer-motion"
 import { useTenantBrandName } from "@/components/tenant-brand-name"
+import { PlatformCredit } from "@/components/layout/platform-credit"
 import { useState, useEffect, useMemo } from "react"
 import {
   LayoutDashboard, Users, Trophy, Sword, Settings,
@@ -93,7 +94,7 @@ function buildNavGroups(role: UserRole): NavGroup[] {
 export function Sidebar({ userRole }: { userRole?: UserRole }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
-  const { name: brandName } = useTenantBrandName()
+  const { name: brandName, logoUrl } = useTenantBrandName()
 
   // Build RBAC-filtered navigation
   const navGroups = useMemo(() => {
@@ -122,7 +123,19 @@ export function Sidebar({ userRole }: { userRole?: UserRole }) {
     >
       <div className="flex h-14 items-center border-b px-4 lg:h-[60px] justify-between">
         <Link href="/" className="flex items-center gap-2 font-semibold overflow-hidden">
-          <Trophy className="h-6 w-6 text-primary shrink-0" />
+          {/* PREM-02 (Batch 176): the published brand's logo takes the
+           * switcher icon slot — HTTPS-only at the presentation boundary;
+           * absent logo keeps the platform icon (no fabricated marks). */}
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt=""
+              aria-hidden="true"
+              className="h-6 w-6 rounded object-contain shrink-0"
+            />
+          ) : (
+            <Trophy className="h-6 w-6 text-primary shrink-0" />
+          )}
           <AnimatePresence>
             {!collapsed && (
               <motion.span
@@ -224,6 +237,13 @@ export function Sidebar({ userRole }: { userRole?: UserRole }) {
       <AnimatePresence>
         {!collapsed && <SidebarUserCard />}
       </AnimatePresence>
+      {/* PREM-02 (Batch 176): the platform credit answers the Brand Studio's
+       * hideSslBranding promise; collapsed mode has no room for it. */}
+      {!collapsed && (
+        <div className="border-t p-3">
+          <PlatformCredit />
+        </div>
+      )}
     </motion.aside>
   )
 }

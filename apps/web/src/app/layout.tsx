@@ -50,11 +50,27 @@ export default async function RootLayout({
   return (
     <html lang={locale} dir={getLocaleDirection(locale)} suppressHydrationWarning>
       <body style={brandVariables(branding)} className={`${GeistSans.variable} ${GeistMono.variable} ${displayFont.variable} font-sans antialiased`}>
+        {branding?.customCss && (
+          // PREM-02 (Batch 176): the published snapshot's customCss, injected
+          // SERVER-side so the branded chrome never flashes unbranded. The
+          // presentation layer already bounded its length and neutralized
+          // `</style`; a <style> element's content is the one place raw CSS
+          // belongs. dangerouslySetInnerHTML is deliberate here.
+          <style id="tenant-custom-css" dangerouslySetInnerHTML={{ __html: branding.customCss }} />
+        )}
         <NextIntlClientProvider>
         <Providers>
           <SkipLink />
           <TenantBrandingProvider branding={branding} />
-          <TenantBrandNameProvider value={{ name: resolveBrandName(branding), short: shortTenantLabel(branding) }}>
+          <TenantBrandNameProvider value={{
+            name: resolveBrandName(branding),
+            short: shortTenantLabel(branding),
+            // Chrome identity joins the context in Batch 176: the tenant's
+            // own logo in the switcher slot, and the Pro/Enterprise credit
+            // gate (undefined on unbranded hosts - defaults inherited).
+            logoUrl: branding?.logoUrl,
+            hideSslBranding: branding?.hideSslBranding,
+          }}>
           <div id="main-content">
           {children}
           </div>

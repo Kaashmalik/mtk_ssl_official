@@ -10,9 +10,22 @@ import { PLATFORM_NAME, shortTenantLabel } from "@/lib/white-label-metadata"
  * sidebar, share surfaces) render THE TENANT'S name; hosts with no
  * configured branding get the platform brand. No client component ever
  * hardcodes either string.
+ *
+ * Batch 176 (PREM-02): the context also carries the chrome identity fields
+ * that previously never reached the client — the tenant logo (sidebar
+ * switcher replaces the platform icon) and the hideSslBranding flag (the
+ * Pro/Enterprise-gated "Powered by" credit). Both stay optional so every
+ * pre-176 consumer contract is unchanged.
  */
 
-export type TenantBrandName = { name: string; short: string }
+export type TenantBrandName = {
+  name: string
+  short: string
+  /** HTTPS-only tenant logo; absent = the platform icon. */
+  logoUrl?: string
+  /** Pro/Enterprise-gated: hide the platform credit from the chrome. */
+  hideSslBranding?: boolean
+}
 
 const Context = React.createContext<TenantBrandName>({
   name: PLATFORM_NAME,

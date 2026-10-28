@@ -39,7 +39,7 @@ const ICON_MAP: Record<string, typeof LayoutDashboard> = {
 
 export function Header({ userRole }: { userRole?: UserRole }) {
   const pathname = usePathname()
-  const { name: brandName } = useTenantBrandName()
+  const { name: brandName, logoUrl } = useTenantBrandName()
   const router = useRouter()
   const clerkReady = useClerkReady()
   const [commandOpen, setCommandOpen] = useState(false)
@@ -110,7 +110,13 @@ export function Header({ userRole }: { userRole?: UserRole }) {
                 className="flex items-center gap-2 font-semibold mb-4 px-3"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                <Trophy className="h-6 w-6 text-primary" />
+                {/* PREM-02 (Batch 176): the tenant logo takes the icon slot,
+                 * same presentation-boundary rules as the sidebar. */}
+                {logoUrl ? (
+                  <img src={logoUrl} alt="" aria-hidden="true" className="h-6 w-6 rounded object-contain" />
+                ) : (
+                  <Trophy className="h-6 w-6 text-primary" />
+                )}
                 <span>{brandName}</span>
               </Link>
               {resolvedNavigation.map((item) => {
