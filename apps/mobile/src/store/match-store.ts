@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { supabase } from "@/lib/supabase";
 import { appApiUrl, currentSessionToken } from "@/lib/app-api";
 import {
   MOBILE_BFF_MAX_PAGE_SIZE,
@@ -238,45 +237,53 @@ export const useMatchStore = create<MatchStore>()(
       setCurrentMatch: (match) => set({ currentMatch: match }),
 
       subscribeToMatch: (matchId: string) => {
-        // Realtime remains the database channel for push-style updates; its
-        // raw payload carries only the snake_case row, so only fields that
-        // exist verbatim (id, status) are applied to the store buckets. The
-        // canonical projection still arrives through fetchMatch on focus.
-        const channel = supabase
-          .channel(`match:${matchId}`)
-          .on(
-            "postgres_changes",
-            {
-              event: "UPDATE",
-              schema: "public",
-              table: "matches",
-              filter: `id=eq.${matchId}`,
-            },
-            (payload) => {
-              const raw = payload.new as { id?: string; status?: Match["status"] };
-              if (!raw.status) return;
-              const status = raw.status;
-              set((state) => {
-                // Same-field patch: id and status come from the channel,
-                // everything else waits for the next canonical fetch.
-                const updatedMatches = state.matches.map((m) =>
-                  m.id === matchId ? { ...m, status } : m
-                );
-                return {
-                  matches: updatedMatches,
-                  ...bucket(updatedMatches),
-                  currentMatch:
-                    state.currentMatch?.id === matchId
-                      ? { ...state.currentMatch, status }
-                      : state.currentMatch,
-                };
-              });
-            }
-          )
-          .subscribe();
-
+        // Batch 176: the read path is THE authenticated BFF - the previous
+        // Supabase realtime subscription was a bare-anon postgres_changes
+        // read (the exact pattern ENH-03-03 retired): it forced the matches
+        // table to be anon-readable and carried the raw snake_case row to
+        // the client anyway. Same contract, honest transport: poll the same
+        // `?matchId=` route fetchMatch uses, apply ONLY the status (the
+        // canonical projection still arrives through fetchMatch on focus
+        // and pull-to-refresh), and never surface transport noise - a failed
+        // or signed-out tick is silent by design so it cannot clobber a
+        // canonical fetch's loading/error flags.
+        let cancelled = false;
+        const poll = async () => {
+          try {
+            const token = await currentSessionToken();
+            if (!token || cancelled) return;
+            const res = await fetch(
+              `${appApiUrl()}${MOBILE_BFF_ROUTES.matches}?matchId=${encodeURIComponent(matchId)}`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (cancelled || !res.ok) return;
+            const page = (await res.json()) as MobileBffListResponse<MemberMatch>;
+            const status = page.items[0]?.status;
+            if (!status) return;
+            set((state) => {
+              // Same status-only patch semantics as the realtime handler it
+              // replaces: id and status from the wire, everything else waits.
+              const updatedMatches = state.matches.map((m) =>
+                m.id === matchId ? { ...m, status } : m
+              );
+              return {
+                matches: updatedMatches,
+                ...bucket(updatedMatches),
+                currentMatch:
+                  state.currentMatch?.id === matchId
+                    ? { ...state.currentMatch, status }
+                    : state.currentMatch,
+              };
+            });
+          } catch {
+            // Silent by design: transport hiccups must not become UI errors.
+          }
+        };
+        void poll();
+        const timer = setInterval(poll, 20_000);
         return () => {
-          supabase.removeChannel(channel);
+          cancelled = true;
+          clearInterval(timer);
         };
       },
     }),
