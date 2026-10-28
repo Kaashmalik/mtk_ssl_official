@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
-import { auditLogs, db, getPlanLimits, tenantBranding, tenants } from "@mtk/database"
+import { auditLogs, db, getPlanLimits, tenantBranding, tenants, users } from "@mtk/database"
 import { eq, sql } from "drizzle-orm"
+import { z } from "zod"
 import type { PlanKey } from "@mtk/database"
 
 /**
@@ -118,11 +119,32 @@ const brandingValuesOf = (data: BrandingSettingsData) => ({
 
 export type BrandingValues = ReturnType<typeof brandingValuesOf>
 
+/**
+ * Batch 176 (P2 audit honesty): the Actor for Brand Studio audit rows. The
+ * writers previously recorded actorId: null — the audit proved THAT a brand
+ * operation ran but never WHO ran it. The Clerk session's platform users row
+ * (one projection read, uuid only) is the actor; a session without a users
+ * row resolves to null honestly (recorded absence, never a fabricated id).
+ */
+export async function resolveBrandingActor(clerkUserId: string | null | undefined): Promise<string | null> {
+  if (!clerkUserId) return null
+  const [account] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.clerkId, clerkUserId))
+    .limit(1)
+  return account?.id ?? null
+}
+
+const brandingActorSchema = z.string().uuid().nullable()
+
 export async function saveBrandingDraft(input: {
   tenantId: string
+  actorId: string | null
   data: BrandingSettingsData
 }): Promise<{ ok: true; draft: BrandingValues } | { missing: true } | { violation: string }> {
   const { tenantId, data } = input
+  const actorId = brandingActorSchema.parse(input.actorId)
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR UPDATE`)
     const [tenant] = await tx.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1)
@@ -140,15 +162,17 @@ export async function saveBrandingDraft(input: {
     } else {
       await tx.insert(tenantBranding).values({ tenantId, draft })
     }
-    await auditBranding(tx, tenantId, "BRAND_DRAFT_SAVED", { fields: Object.keys(draft).length })
+    await auditBranding(tx, tenantId, actorId, "BRAND_DRAFT_SAVED", { fields: Object.keys(draft).length })
     return { ok: true as const, draft }
   })
 }
 
 export async function publishBrandingDraft(input: {
   tenantId: string
+  actorId: string | null
 }): Promise<{ ok: true; published: BrandingValues } | { missing: true } | { nothingToPublish: true }> {
   const { tenantId } = input
+  const actorId = brandingActorSchema.parse(input.actorId)
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR UPDATE`)
     const [branding] = await tx.select().from(tenantBranding).where(eq(tenantBranding.tenantId, tenantId)).limit(1)
@@ -162,15 +186,17 @@ export async function publishBrandingDraft(input: {
       draft: null,
       updatedAt: new Date(),
     }).where(eq(tenantBranding.tenantId, tenantId))
-    await auditBranding(tx, tenantId, "BRAND_PUBLISHED", {})
+    await auditBranding(tx, tenantId, actorId, "BRAND_PUBLISHED", {})
     return { ok: true as const, published: draft }
   })
 }
 
 export async function rollbackBranding(input: {
   tenantId: string
+  actorId: string | null
 }): Promise<{ ok: true; published: BrandingValues | null } | { changed: false } | { missing: true }> {
   const { tenantId } = input
+  const actorId = brandingActorSchema.parse(input.actorId)
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT ${tenants.id} FROM ${tenants} WHERE ${tenants.id} = ${tenantId} FOR UPDATE`)
     const [branding] = await tx.select().from(tenantBranding).where(eq(tenantBranding.tenantId, tenantId)).limit(1)
@@ -186,7 +212,7 @@ export async function rollbackBranding(input: {
       draft: null,
       updatedAt: new Date(),
     }).where(eq(tenantBranding.tenantId, tenantId))
-    await auditBranding(tx, tenantId, "BRAND_ROLLBACK", {})
+    await auditBranding(tx, tenantId, actorId, "BRAND_ROLLBACK", {})
     return { ok: true as const, published: previous }
   })
 }
@@ -226,10 +252,13 @@ export function activeBrandingSnapshot(
 async function auditBranding(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   tenantId: string,
+  // Batch 176: the resolved actor (resolveBrandingActor) or an HONEST null
+  // when the session has no platform users row — never a fabricated id.
+  actorId: string | null,
   method: string,
   payload: Record<string, unknown>,
 ) {
-  await tx.insert(auditLogs).values({ requestId: randomUUID(), tenantId, actorId: null, method,
+  await tx.insert(auditLogs).values({ requestId: randomUUID(), tenantId, actorId, method,
     path: "/api/settings/branding", statusCode: "200", payload })
 }
 

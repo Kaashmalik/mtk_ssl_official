@@ -207,9 +207,6 @@ importers:
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
         version: 2.2.0(react-native@0.81.5(@babel/core@7.28.5)(@react-native-community/cli@13.6.9(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@react-native/metro-config@0.85.3(@babel/core@7.28.5))(@types/react@19.1.17)(bufferutil@4.1.0)(react@19.1.0)(utf-8-validate@6.0.6))
-      '@supabase/supabase-js':
-        specifier: ^2.39.0
-        version: 2.84.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       date-fns:
         specifier: ^3.0.6
         version: 3.6.0
@@ -18433,7 +18430,7 @@ snapshots:
       metro-babel-transformer: 0.83.3
       metro-cache: 0.83.3
       metro-cache-key: 0.83.3
-      metro-config: 0.83.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      metro-config: 0.83.3(bufferutil@4.1.0)
       metro-core: 0.83.3
       metro-file-map: 0.83.3
       metro-minify-terser: 0.83.3
@@ -22278,7 +22275,7 @@ snapshots:
       debug: 4.4.3(supports-color@10.2.2)
       invariant: 2.2.4
       metro: 0.83.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      metro-config: 0.83.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      metro-config: 0.83.3(bufferutil@4.1.0)
       metro-core: 0.83.3
       semver: 7.7.3
     optionalDependencies:
@@ -29982,21 +29979,6 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  metro-config@0.83.3(bufferutil@4.1.0)(utf-8-validate@6.0.6):
-    dependencies:
-      connect: 3.7.0
-      flow-enums-runtime: 0.0.6
-      jest-validate: 29.7.0
-      metro: 0.83.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      metro-cache: 0.83.3
-      metro-core: 0.83.3
-      metro-runtime: 0.83.3
-      yaml: 2.8.1
-    transitivePeerDependencies:
-      - bufferutil
-      - supports-color
-      - utf-8-validate
-
   metro-config@0.84.6(bufferutil@4.1.0):
     dependencies:
       connect: 3.7.0
@@ -30286,7 +30268,7 @@ snapshots:
       metro-babel-transformer: 0.83.3
       metro-cache: 0.83.3
       metro-cache-key: 0.83.3
-      metro-config: 0.83.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      metro-config: 0.83.3(bufferutil@4.1.0)
       metro-core: 0.83.3
       metro-file-map: 0.83.3
       metro-resolver: 0.83.3

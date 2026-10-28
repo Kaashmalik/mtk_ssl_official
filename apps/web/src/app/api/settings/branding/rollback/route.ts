@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { rollbackBranding } from "@/lib/branding-settings";
+import { resolveBrandingActor, rollbackBranding } from "@/lib/branding-settings";
 import { isSuperAdmin } from "@/lib/super-admin";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const result = await rollbackBranding({ tenantId: parsed.data.tenantId });
+    const result = await rollbackBranding({
+      tenantId: parsed.data.tenantId,
+      // Batch 176: brand audit rows record the acting platform user.
+      actorId: await resolveBrandingActor(userId),
+    });
     if ("missing" in result) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }

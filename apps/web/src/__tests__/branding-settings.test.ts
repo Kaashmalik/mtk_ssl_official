@@ -77,6 +77,8 @@ beforeEach(() => {
 
 const queryRecords = () => mocks.state.records as QueryRecord[]
 const TENANT = "00000000-0000-4000-8000-000000000010"
+// Batch 176: the resolved platform actor audit rows must record.
+const ACTOR = "00000000-0000-4000-8000-0000000000aa"
 
 describe("branding plan gating", () => {
   it("reserves white-label fields for pro and up", () => {
@@ -155,11 +157,62 @@ describe("branding writes are tenant-locked and plan-gated", () => {
   })
 })
 
+// PREM-02 (Batch 176): every Brand Studio audit row records the acting
+// platform user (resolveBrandingActor output) or an HONEST null - the
+// audit never fabricates an id, and a non-uuid actor REFUSES before any
+// write (a raw Clerk id threaded by mistake cannot become an audit actor).
+describe("Brand Studio audit rows record the actor (Batch 176)", () => {
+  const data = { primaryColor: "#123456" }
+
+  it("refuses a non-uuid actor before any write", async () => {
+    mocks.state.selectResults = [[{ id: TENANT, plan: "pro" }], []]
+    await expect(saveBrandingDraft({ tenantId: TENANT, actorId: "user_2notauuid", data })).rejects.toThrow()
+  })
+
+  it("records the resolved actor on the draft-save audit", async () => {
+    mocks.state.selectResults = [[{ id: TENANT, plan: "pro" }], []]
+    await saveBrandingDraft({ tenantId: TENANT, actorId: ACTOR, data })
+    // No branding row existed, so the FIRST insert is the draft itself; the
+    // audit row is identified by its method, not by array position.
+    const audit = queryRecords().find((r) => r.kind === "insert" && (r.values as Record<string, unknown>)?.method === "BRAND_DRAFT_SAVED")
+    expect(audit?.values).toMatchObject({ tenantId: TENANT, method: "BRAND_DRAFT_SAVED", actorId: ACTOR })
+  })
+
+  it("records an honest null actor on the publish audit when the session has no users row", async () => {
+    mocks.state.selectResults = [[{ tenantId: TENANT, draft: data, published: null, previousPublished: null }]]
+    await publishBrandingDraft({ tenantId: TENANT, actorId: null })
+    const inserts = queryRecords().filter((r) => r.kind === "insert")
+    expect(inserts[0].values).toMatchObject({ tenantId: TENANT, method: "BRAND_PUBLISHED", actorId: null })
+  })
+
+  it("records the resolved actor on the rollback audit", async () => {
+    mocks.state.selectResults = [[{ tenantId: TENANT, published: data, previousPublished: data, draft: null }]]
+    await rollbackBranding({ tenantId: TENANT, actorId: ACTOR })
+    const inserts = queryRecords().filter((r) => r.kind === "insert")
+    expect(inserts[0].values).toMatchObject({ tenantId: TENANT, method: "BRAND_ROLLBACK", actorId: ACTOR })
+  })
+
+  it("resolves the session's platform users row by clerk id, projection-only", async () => {
+    mocks.state.selectResults = [[{ id: ACTOR }]]
+    expect(await resolveBrandingActor("user_clerk_session")).toBe(ACTOR)
+    const select = queryRecords().filter((r) => r.kind === "select")[0]
+    expect(select.params).toEqual(["user_clerk_session"])
+  })
+
+  it("resolves a missing users row or session to honest null without guessing", async () => {
+    mocks.state.selectResults = [[]]
+    expect(await resolveBrandingActor("user_no_row")).toBeNull()
+    expect(await resolveBrandingActor(null)).toBeNull()
+    expect(await resolveBrandingActor(undefined)).toBeNull()
+  })
+})
+
 // PREM-02 (Batch 135): Brand Studio draft -> publish -> rollback. The same
 // tenant-lock + plan-gate discipline as the direct writer; publish consumes
 // the draft; rollback swaps the snapshot pair; replays answer honestly.
 import {
   activeBrandingSnapshot,
+  resolveBrandingActor,
   publishBrandingDraft,
   rollbackBranding,
   saveBrandingDraft,
@@ -170,7 +223,7 @@ describe("Brand Studio draft saves are tenant-locked and plan-gated (Batch 135)"
 
   it("rejects gated draft fields against the plan read under the lock, before any write", async () => {
     mocks.state.selectResults = [[{ id: TENANT, plan: "free" }]]
-    const result = await saveBrandingDraft({ tenantId: TENANT, data: { fontFamily: "Inter" } })
+    const result = await saveBrandingDraft({ tenantId: TENANT, actorId: ACTOR, data: { fontFamily: "Inter" } })
     expect("violation" in result && result.violation).toContain("White-label")
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.insert).not.toHaveBeenCalled()
@@ -178,13 +231,13 @@ describe("Brand Studio draft saves are tenant-locked and plan-gated (Batch 135)"
 
   it("answers missing without any write when the tenant does not exist", async () => {
     mocks.state.selectResults = [[]]
-    expect(await saveBrandingDraft({ tenantId: TENANT, data })).toEqual({ missing: true })
+    expect(await saveBrandingDraft({ tenantId: TENANT, actorId: ACTOR, data })).toEqual({ missing: true })
     expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it("inserts the draft and an audit row when no branding row exists", async () => {
     mocks.state.selectResults = [[{ id: TENANT, plan: "pro" }], []]
-    const result = await saveBrandingDraft({ tenantId: TENANT, data })
+    const result = await saveBrandingDraft({ tenantId: TENANT, actorId: ACTOR, data })
     expect("ok" in result && result.ok).toBe(true)
     expect("draft" in result && result.draft?.primaryColor).toBe("#123456")
     expect("draft" in result && result.draft?.fontFamily).toBe("Inter")
@@ -193,12 +246,12 @@ describe("Brand Studio draft saves are tenant-locked and plan-gated (Batch 135)"
     expect(lock.kind).toBe("execute") // tenant row locked FOR UPDATE
     expect(tenantRead.kind).toBe("select")
     expect(draftInsert.values).toMatchObject({ tenantId: TENANT, draft: { primaryColor: "#123456", fontFamily: "Inter" } })
-    expect(auditInsert.values).toMatchObject({ tenantId: TENANT, method: "BRAND_DRAFT_SAVED" })
+    expect(auditInsert.values).toMatchObject({ tenantId: TENANT, method: "BRAND_DRAFT_SAVED", actorId: ACTOR })
    })
 
   it("retargets the existing draft without publishing it", async () => {
     mocks.state.selectResults = [[{ id: TENANT, plan: "pro" }], [{ tenantId: TENANT, published: { primaryColor: "#000000" } }]]
-    await saveBrandingDraft({ tenantId: TENANT, data: { primaryColor: "#ffffff" } })
+    await saveBrandingDraft({ tenantId: TENANT, actorId: ACTOR, data: { primaryColor: "#ffffff" } })
     const updates = queryRecords().filter((r) => r.kind === "update")
     expect(mocks.update).toHaveBeenCalled()
     expect(updates[0].setValues).toMatchObject({ draft: { primaryColor: "#ffffff" } })
@@ -208,7 +261,7 @@ describe("Brand Studio draft saves are tenant-locked and plan-gated (Batch 135)"
   it("a draft save never changes the active published snapshot", async () => {
     const published = { primaryColor: "#000000" }
     mocks.state.selectResults = [[{ id: TENANT, plan: "pro" }], [{ tenantId: TENANT, published }]]
-    await saveBrandingDraft({ tenantId: TENANT, data: { primaryColor: "#ffffff" } })
+    await saveBrandingDraft({ tenantId: TENANT, actorId: ACTOR, data: { primaryColor: "#ffffff" } })
     const updates = queryRecords().filter((r) => r.kind === "update")
     expect(updates[0].setValues?.published).toBeUndefined()
   })
@@ -220,7 +273,7 @@ describe("Brand Studio publish consumes the draft (Batch 135)", () => {
 
   it("moves the draft into published, keeps the previous snapshot and audits under the lock", async () => {
     mocks.state.selectResults = [[{ tenantId: TENANT, draft, published: previouslyPublished, previousPublished: null }]]
-    const result = await publishBrandingDraft({ tenantId: TENANT })
+    const result = await publishBrandingDraft({ tenantId: TENANT, actorId: ACTOR })
     expect(result).toEqual({ ok: true, published: draft })
 
     const [lock, rowRead, publishUpdate] = queryRecords().filter((r) => r.kind === "execute" || r.kind === "select" || r.kind === "update")
@@ -236,19 +289,19 @@ describe("Brand Studio publish consumes the draft (Batch 135)", () => {
     // insert with the BRAND_PUBLISHED method - one insert total.
     const inserts = queryRecords().filter((r) => r.kind === "insert")
     expect(inserts).toHaveLength(1)
-    expect(inserts[0].values).toMatchObject({ tenantId: TENANT, method: "BRAND_PUBLISHED" })
+    expect(inserts[0].values).toMatchObject({ tenantId: TENANT, method: "BRAND_PUBLISHED", actorId: ACTOR })
   })
 
   it("answers nothingToPublish honestly when there is no draft and writes nothing", async () => {
     mocks.state.selectResults = [[{ tenantId: TENANT, draft: null, published: previouslyPublished, previousPublished: null }]]
-    expect(await publishBrandingDraft({ tenantId: TENANT })).toEqual({ nothingToPublish: true })
+    expect(await publishBrandingDraft({ tenantId: TENANT, actorId: ACTOR })).toEqual({ nothingToPublish: true })
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it("answers missing when no branding row exists", async () => {
     mocks.state.selectResults = [[]]
-    expect(await publishBrandingDraft({ tenantId: TENANT })).toEqual({ missing: true })
+    expect(await publishBrandingDraft({ tenantId: TENANT, actorId: ACTOR })).toEqual({ missing: true })
   })
 })
 
@@ -258,18 +311,18 @@ describe("Brand Studio rollback swaps the snapshot pair (Batch 135)", () => {
 
   it("restores the previous snapshot under the lock and audits the rollback", async () => {
     mocks.state.selectResults = [[{ tenantId: TENANT, published, previousPublished: previous, draft: null }]]
-    const result = await rollbackBranding({ tenantId: TENANT })
+    const result = await rollbackBranding({ tenantId: TENANT, actorId: ACTOR })
     expect(result).toEqual({ ok: true, published: previous })
 
     const updates = queryRecords().filter((r) => r.kind === "update")
     expect(updates[0].setValues).toMatchObject({ published: previous, previousPublished: published, draft: null })
     const inserts = queryRecords().filter((r) => r.kind === "insert")
-    expect(inserts[0].values).toMatchObject({ tenantId: TENANT, method: "BRAND_ROLLBACK" })
+    expect(inserts[0].values).toMatchObject({ tenantId: TENANT, method: "BRAND_ROLLBACK", actorId: ACTOR })
   })
 
   it("a first publish has no previous snapshot: the replay answers changed:false and writes nothing", async () => {
     mocks.state.selectResults = [[{ tenantId: TENANT, published, previousPublished: null, draft: null }]]
-    expect(await rollbackBranding({ tenantId: TENANT })).toEqual({ changed: false })
+    expect(await rollbackBranding({ tenantId: TENANT, actorId: ACTOR })).toEqual({ changed: false })
     expect(mocks.update).not.toHaveBeenCalled()
     expect(mocks.insert).not.toHaveBeenCalled()
   })

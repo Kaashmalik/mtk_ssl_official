@@ -7,7 +7,7 @@ import { and, desc, eq, gt, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { withAuth } from "./action-guard"
 import { getTenantFromRequest } from "@/lib/tenant"
-import { publishBrandingDraft, rollbackBranding, saveBrandingDraft } from "@/lib/branding-settings"
+import { publishBrandingDraft, resolveBrandingActor, rollbackBranding, saveBrandingDraft } from "@/lib/branding-settings"
 
 
 const createTenantSchema = z.object({
@@ -260,6 +260,8 @@ export const updateTenantBrandingSettings = withAuth("settings:manage", async (i
   // same locked, plan-gated draft the Brand Studio publishes from.
   const result = await saveBrandingDraft({
     tenantId: tenant.id,
+    // Batch 176: brand audit rows record the acting platform user.
+    actorId: await resolveBrandingActor(userId),
     data: {
       appName: validated.appName || validated.name,
       logoUrl: validated.logoUrl || null,
@@ -287,7 +289,7 @@ export const publishTenantBranding = withAuth("settings:manage", async () => {
   const tenant = await getMyTenant()
   if (!tenant) throw new Error("Tenant not found")
 
-  const result = await publishBrandingDraft({ tenantId: tenant.id })
+  const result = await publishBrandingDraft({ tenantId: tenant.id, actorId: await resolveBrandingActor(userId) })
   if ("missing" in result) throw new Error("Tenant not found")
   if ("nothingToPublish" in result) return { success: true, changed: false }
   revalidatePath("/dashboard/settings")
@@ -305,7 +307,7 @@ export const rollbackTenantBranding = withAuth("settings:manage", async () => {
   const tenant = await getMyTenant()
   if (!tenant) throw new Error("Tenant not found")
 
-  const result = await rollbackBranding({ tenantId: tenant.id })
+  const result = await rollbackBranding({ tenantId: tenant.id, actorId: await resolveBrandingActor(userId) })
   if ("missing" in result) throw new Error("Tenant not found")
   if ("changed" in result) return { success: true, changed: false }
   revalidatePath("/dashboard/settings")

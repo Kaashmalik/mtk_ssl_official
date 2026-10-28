@@ -1,11 +1,12 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { db } from '@mtk/database';
 import { sql } from 'drizzle-orm';
+import { backoffMs, isDeadLettered, OUTBOX_MAX_ATTEMPTS } from '@mtk/database/lib/outbox-policy';
 import { KafkaScoringPublisher } from './kafka-scoring-publisher.service';
 import { BALL_TOPIC, validateOutboxMessage } from './scoring-outbox';
 import { env } from './env';
 
-interface PendingMessage { id: string; tenantId: string; matchId: string; eventId: string; topic: string; payload: unknown }
+interface PendingMessage { id: string; tenantId: string; matchId: string; eventId: string; topic: string; attempts: number; payload: unknown }
 
 @Injectable()
 export class ScoringOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
@@ -47,12 +48,15 @@ export class ScoringOutboxDispatcher implements OnModuleInit, OnModuleDestroy {
     return db.transaction(async tx => {
       // Only lock the outbox row, never the match/actor/teams. The predecessor
       // predicate prevents SKIP LOCKED from overtaking the same match's head.
+      // Batch 176: the retry budget is the SHARED outbox policy's constant,
+      // not a local literal - the candidate read reports `attempts` so the
+      // backoff schedule below also derives from the policy (single source).
       const rows = await tx.execute(sql`SELECT candidate.id::text AS id,
         candidate.tenant_id AS "tenantId", candidate.match_id AS "matchId",
-        candidate.event_id AS "eventId", candidate.topic, candidate.payload
+        candidate.event_id AS "eventId", candidate.topic, candidate.attempts, candidate.payload
         FROM public.scoring_outbox AS candidate
         WHERE candidate.delivered_at IS NULL AND candidate.next_attempt_at <= now()
-AND candidate.attempts < 8
+AND candidate.attempts < ${OUTBOX_MAX_ATTEMPTS}
           AND NOT EXISTS (SELECT 1 FROM public.scoring_outbox AS predecessor
             WHERE predecessor.tenant_id = candidate.tenant_id AND predecessor.match_id = candidate.match_id
               AND predecessor.delivered_at IS NULL AND predecessor.id < candidate.id)
@@ -70,19 +74,22 @@ AND candidate.attempts < 8
         } catch { failure = 'broker_delivery_failed'; }
       }
       if (failure) {
+        // Batch 176: backoffMs()/isDeadLettered() are THE policy — this used
+        // to re-encode the schedule as a raw SQL CASE ladder (drift risk) and
+        // even scheduled a new delay on the dead-letter increment, which the
+        // policy forbids: a dead-lettered row keeps its last next_attempt_at
+        // permanently and stays excluded by the candidate predicate above.
+        const nextAttempts = Number(row.attempts) + 1;
+        const deadLettered = isDeadLettered(nextAttempts);
+        const schedule = deadLettered
+          ? sql`next_attempt_at`
+          : sql`now() + (${backoffMs(nextAttempts)} * interval '1 millisecond')`;
         await tx.execute(sql`UPDATE public.scoring_outbox SET
           attempts = LEAST(attempts::bigint + 1, 2147483647)::integer,
-          next_attempt_at = now() + CASE
-WHEN attempts >= 5 THEN interval '3600 seconds'
-WHEN attempts = 4 THEN interval '1800 seconds'
-WHEN attempts = 3 THEN interval '600 seconds'
-WHEN attempts = 2 THEN interval '120 seconds'
-WHEN attempts = 1 THEN interval '30 seconds'
-ELSE interval '5 seconds'
-END,
+          next_attempt_at = ${schedule},
           last_error = ${failure}
           WHERE id = ${row.id}::bigint AND tenant_id = ${row.tenantId}::uuid AND match_id = ${row.matchId}::uuid AND delivered_at IS NULL`);
-        this.logger.warn(`Scoring outbox retry scheduled for row ${row.id} (${failure})`);
+        this.logger.warn(`Scoring outbox retry ${deadLettered ? 'dead-lettered' : 'scheduled'} for row ${row.id} (${failure})`);
       } else {
         // A broker ACK followed by DB/process failure can redeliver this event.
         // Stable eventId is mandatory; consumers must deduplicate durable effects.
