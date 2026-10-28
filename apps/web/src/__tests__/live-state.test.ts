@@ -77,6 +77,48 @@ describe("Full live snapshot reconciliation", () => {
     expect(useScoringStore.getState().innings1?.balls).toHaveLength(1)
   })
 
+  // SCORE-11 (Batch 176): the reconcile carry/discard decision on
+  // `local.inningsId === remote.inningsId` — coded since the live-state
+  // layer shipped but never pinned. Server-CONFIRMED balls (any id NOT
+  // carrying the offline `ball-` prefix) survive a newer authoritative
+  // snapshot of the SAME innings; a snapshot bearing a DIFFERENT innings
+  // identity discards them — carrying ball history across two different
+  // innings objects would invent deliveries the server never recorded.
+  it("carries server-confirmed balls through a newer snapshot of the same innings", () => {
+    apply(snapshot())
+    const confirmedBall = {
+      id: "00000000-0000-4000-8000-00000000004b",
+      overNumber: 1, ballNumber: 1, input: 4 as const, runs: 4,
+      isWicket: false, isWide: false, isNoBall: false, isBye: false, isLegBye: false,
+      timestamp: Date.parse("2026-10-12T12:00:01.000Z"),
+    }
+    useScoringStore.setState({ innings1: { ...useScoringStore.getState().innings1!, balls: [confirmedBall] } })
+    apply({ ...snapshot(), innings1: { ...innings(), totalRuns: 24, updatedAt: "2026-10-12T12:00:05.000Z" } })
+    const innings1 = useScoringStore.getState().innings1!
+    expect(innings1.totalRuns).toBe(24) // accounting still authoritative
+    expect(innings1.inningsId).toBe(innings().inningsId)
+    expect(innings1.balls).toEqual([confirmedBall]) // same innings: history carried
+    expect(innings1.lastSnapshotAt).toBe("2026-10-12T12:00:05.000Z")
+  })
+
+  it("discards local balls when the snapshot carries a different innings identity", () => {
+    apply(snapshot())
+    const confirmedBall = {
+      id: "00000000-0000-4000-8000-00000000004c",
+      overNumber: 1, ballNumber: 1, input: 6 as const, runs: 6,
+      isWicket: false, isWide: false, isNoBall: false, isBye: false, isLegBye: false,
+      timestamp: Date.parse("2026-10-12T12:00:01.000Z"),
+    }
+    useScoringStore.setState({ innings1: { ...useScoringStore.getState().innings1!, balls: [confirmedBall] } })
+    apply({ ...snapshot(), innings1: { ...innings(),
+      inningsId: "00000000-0000-4000-8000-000000000004", totalRuns: 25,
+      updatedAt: "2026-10-12T12:00:05.000Z" } })
+    const innings1 = useScoringStore.getState().innings1!
+    expect(innings1.inningsId).toBe("00000000-0000-4000-8000-000000000004")
+    expect(innings1.totalRuns).toBe(25)
+    expect(innings1.balls).toEqual([]) // different innings: stale history never carried
+  })
+
   it.each([null, {}, { ...snapshot(), matchId: "00000000-0000-4000-8000-000000000099" },
     { ...snapshot(), innings1: { ...innings(), extras: -1 } }])("ignores invalid/cross-match traffic %s", (input) => {
     expect(reconcileLiveState(useScoringStore.getState(), input)).toEqual({})
