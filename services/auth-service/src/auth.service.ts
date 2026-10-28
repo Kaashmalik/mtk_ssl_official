@@ -9,10 +9,14 @@ export interface ValidateTokenRequest {
   tenantId?: string;
 }
 
+// ISO-06 (Batch 176): `tenant_ids` mimicked the retired users.tenantIds
+// membership column; the validation carries the ONE tenant the request was
+// scoped to (memberships are asserted via user_tenant_roles, never assumed
+// as an array on the account).
 export interface User {
   id: string;
   email: string;
-  tenant_ids: string[];
+  tenant_id: string;
   roles: string[];
 }
 
@@ -57,7 +61,7 @@ export class AuthService {
             user: {
               id: userId,
               email: email || 'authenticated-user@clerk.internal',
-              tenant_ids: [tenantId],
+              tenant_id: tenantId,
               roles: roles.length > 0 ? roles : ['user'],
             },
           };
@@ -78,7 +82,7 @@ export class AuthService {
       const user: User = {
         id: 'user_123',
         email: 'test@ssl.mtkcodex.site',
-        tenant_ids: [tenantId],
+        tenant_id: tenantId,
         roles: ['user'],
       };
 

@@ -25,7 +25,7 @@ function adapter() {
     [NONSTRIKER, { id: NONSTRIKER, tenantId: TENANT, teamId: TEAM_A, isActive: true, status: 'active' }],
   ]);
   const mock = { execute: jest.fn().mockResolvedValue([]), query: {
-    users: { findFirst: jest.fn().mockResolvedValue({ id: ACTOR, isActive: true, role: 'league_owner', tenantIds: [TENANT] }) },
+    users: { findFirst: jest.fn().mockResolvedValue({ id: ACTOR, isActive: true, role: 'league_owner' }) },
     userTenantRoles: { findFirst: jest.fn().mockResolvedValue({ userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active' }) },
     tenants: { findFirst: jest.fn().mockResolvedValue({ id: TENANT, isActive: true }) },
     teams: { findFirst: jest.fn(async ({ where }) => ({ id: dialect.sqlToQuery(where).params[0], tenantId: TENANT, isActive: true })) },

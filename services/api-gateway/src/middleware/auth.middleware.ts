@@ -14,12 +14,14 @@ interface AuthenticatedRequest extends Request {
   tenantId?: string;
 }
 
+// ISO-06 (Batch 176): mirrors auth-service's honest single-tenant User
+// contract (previously `tenant_ids: string[]`, the retired column's shape).
 interface ValidateTokenResponse {
   valid: boolean;
   user?: {
     id: string;
     email: string;
-    tenant_ids: string[];
+    tenant_id: string;
     roles: string[];
   };
   error?: string;
@@ -116,7 +118,7 @@ export class AuthMiddleware implements NestMiddleware, OnModuleInit {
         return {
           id: response.user.id,
           email: response.user.email,
-          tenantId: response.user.tenant_ids?.[0] || tenantId || 'default',
+          tenantId: response.user.tenant_id || tenantId || 'default',
           roles: response.user.roles || ['user'],
         };
       }

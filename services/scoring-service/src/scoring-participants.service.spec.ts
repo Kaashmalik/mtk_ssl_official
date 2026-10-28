@@ -79,7 +79,7 @@ function createTransaction() {
     match: { id: MATCH, tenantId: TENANT, tournamentId: null as string | null, scorerId: ACTOR as string | null, backupScorerId: null as string | null, teamAId: TENANT, teamBId: TEAM_B,
       winnerId: null as string | null, result: null as string | null, manOfMatchId: null as string | null,
       status: 'live', scoringRevision: 0, scorerHandoverEpoch: 0, startDate: new Date(), updatedAt: new Date('2026-10-22T12:00:00.000Z') },
-    actor: { id: ACTOR, isActive: true, role: 'scorer', tenantIds: [TENANT] },
+    actor: { id: ACTOR, isActive: true, role: 'scorer' },
     membership: { userId: ACTOR, tenantId: TENANT, role: 'scorer', status: 'active', expiresAt: null },
     roster: new Map<string, Record<string, any>>([
       [OPENER, { id: OPENER, tenantId: TENANT, teamId: TENANT, isActive: true, status: 'active', name: 'Opener' }],

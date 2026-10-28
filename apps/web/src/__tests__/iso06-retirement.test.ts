@@ -18,14 +18,16 @@ const WEB_SRC = join(dirname(fileURLToPath(import.meta.url)), "..")
 const WEB_APP = join(WEB_SRC, "..")
 const ADMIN_SRC = join(WEB_APP, "..", "admin", "src")
 const DB_SRC = join(WEB_APP, "..", "..", "packages", "database", "src")
+const SERVICES_SRC = join(WEB_APP, "..", "..", "services")
 
 function walk(dir: string): string[] {
   const out: string[] = []
   for (const name of readdirSync(dir)) {
     if (name === "node_modules" || name === "__tests__" || name.startsWith(".")) continue
+    if (/\.(spec|test)\.tsx?$/.test(name)) continue
     const p = join(dir, name)
     if (statSync(p).isDirectory()) out.push(...walk(p))
-    else if (/\.(ts|tsx)$/.test(name)) out.push(p)
+    else if (/\.(ts|tsx|proto)$/.test(name)) out.push(p)
   }
   return out
 }
@@ -41,8 +43,17 @@ describe("ISO-06 (B165): the tenantIds array is retired from every production so
   // Repo-wide scans walk every production file on disk; give them an
   // explicit timeout instead of vitest's 5s default (they are IO-bound
   // and machine-speed dependent - both timed out on a cold cache).
+  //
+  // Batch 176: the scan now covers the SERVICE tree too (auth-service,
+  // api-gateway carried tenant_ids-shaped DTOs/proto mirrors of the
+  // retired column) and .proto contracts (the gRPC User message was the
+  // same fabricated array). Test files are skipped by name exactly the
+  // way the comment-stripper tolerates documentation: a spec may
+  // deliberately simulate the retired shape to pin that it grants
+  // nothing (see scoring-write-access.spec "legacy arrays" case) - but
+  // no production file may reference it.
   it("no non-test production source references users.tenantIds or the tenant_ids column", { timeout: 120_000 }, () => {
-    for (const dir of [WEB_APP, ADMIN_SRC, DB_SRC]) {
+    for (const dir of [WEB_APP, ADMIN_SRC, DB_SRC, SERVICES_SRC]) {
       for (const file of walk(dir)) {
         const code = stripComments(readFileSync(file, "utf8"))
         expect(code, file).not.toMatch(/users\.tenantIds|\btenantIds\b|\btenant_ids\b/)

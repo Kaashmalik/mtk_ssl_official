@@ -13,10 +13,15 @@ message ValidateTokenRequest {
   string tenant_id = 2;
 }
 
+// ISO-06 (Batch 176): this was `repeated string tenant_ids = 3` — a shape
+// mimicking the RETIRED users.tenantIds membership column, fabricated by
+// the service from the request's single tenant. The honest contract is the
+// one tenant the validation was scoped to; memberships live in
+// user_tenant_roles and are NEVER asserted here.
 message User {
   string id = 1;
   string email = 2;
-  repeated string tenant_ids = 3;
+  string tenant_id = 3;
   repeated string roles = 4;
 }
 
