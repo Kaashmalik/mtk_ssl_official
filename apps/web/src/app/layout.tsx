@@ -17,6 +17,8 @@ import { TenantBrandNameProvider } from "@/components/tenant-brand-name";
 import { resolveBrandName, shortTenantLabel } from "@/lib/white-label-metadata";
 import { readRequestBrand } from "@/lib/request-brand";
 import { brandVariables } from "@/lib/brand-presentation";
+import { adsenseClient } from "@/lib/adsense";
+import { AdSenseScript } from "@/components/ads/adsense";
 
 import { buildRootMetadata } from "@/lib/site-metadata";
 import { buildTenantBrandMetadata } from "@/lib/white-label-metadata";
@@ -34,7 +36,11 @@ export async function generateMetadata(): Promise<Metadata> {
   // tenant's brand directly, and pages without a specific title still read
   // as the tenant's product. A tenant without branding keeps the platform
   // default untouched (buildTenantBrandMetadata returns the seed as-is).
-  return buildTenantBrandMetadata(buildRootMetadata(), await readRequestBrand());
+  const metadata = buildTenantBrandMetadata(buildRootMetadata(), await readRequestBrand());
+  // AdSense site verification (<meta name="google-adsense-account">); only
+  // emitted once the publisher id is configured.
+  const client = adsenseClient();
+  return client ? { ...metadata, other: { "google-adsense-account": client } } : metadata;
 }
 
 export default async function RootLayout({
@@ -74,6 +80,7 @@ export default async function RootLayout({
           <div id="main-content">
           {children}
           </div>
+          <AdSenseScript client={adsenseClient()} />
           </TenantBrandNameProvider>
           <Toaster />
         </Providers>

@@ -84,4 +84,24 @@ describe("middleware auth gate (v6 callable auth contract)", () => {
     const res = await run("/leaderboards", null)
     expect(res.status).not.toBe(307)
   })
+
+  it("serves the public content and policy pages to signed-out visitors and crawlers", async () => {
+    for (const path of ["/guides", "/guides/net-run-rate-explained", "/about", "/contact", "/privacy", "/terms", "/ads.txt", "/tournaments", "/hall-of-fame"]) {
+      const res = await run(path, null)
+      expect(res.status, path).not.toBe(307)
+    }
+  })
+
+  it("lets an unknown path fall through to the 404 page instead of a sign-in redirect", async () => {
+    const res = await run("/this-page-does-not-exist", null)
+    expect(res.status).not.toBe(307)
+    expect(res.headers.get("location")).toBeNull()
+  })
+
+  it("still gates every private area and the scorer view when signed out", async () => {
+    for (const path of ["/dashboard/teams", "/settings", "/broadcast/abc", "/impersonation/start", "/matches/abc/scoring"]) {
+      const res = await run(path, null)
+      expect(res.status, path).toBe(307)
+    }
+  })
 })

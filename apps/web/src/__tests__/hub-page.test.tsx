@@ -5,6 +5,11 @@ import HubPage from "@/app/hub/page"
 const mocks = vi.hoisted(() => ({ leagues: vi.fn() }))
 vi.mock("next/cache", () => ({ unstable_noStore: () => {} }))
 vi.mock("@/lib/public-hub", () => ({ readListedHubLeagues: mocks.leagues }))
+// The shared public chrome is an async server component (request brand read);
+// these pins are about the hub's own content, so the shell passes through.
+vi.mock("@/components/public/public-shell", () => ({
+  PublicShell: (props: { children?: React.ReactNode }) => props.children,
+}))
 
 /** Collects rendered text from the element tree the page returns (whitespace-normalized).
  * Batch 134: league cards are now the extracted HubLeagueCard component — the walk

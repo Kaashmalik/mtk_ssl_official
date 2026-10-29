@@ -1,4 +1,5 @@
 import React from "react"
+import { PublicShell } from "@/components/public/public-shell"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { Badge } from "@mtk/ui/components/ui/badge"
@@ -30,6 +31,7 @@ export default async function PublicHallOfFamePage() {
   const entries = await readPublishedHallOfFame(tenantId)
 
   return (
+    <PublicShell>
     <div className="space-y-6 max-w-4xl mx-auto px-4 py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -79,5 +81,6 @@ export default async function PublicHallOfFamePage() {
         </div>
       )}
     </div>
+    </PublicShell>
   )
 }

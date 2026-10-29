@@ -57,6 +57,28 @@ const isPublicRoute = createRouteMatcher([
   "/hub/(.*)",
   // NOTE: no top-level `/players` entry exists on purpose (see note above);
   // public career profiles live only under /hub/players/<id>.
+  // Readable public content and the policy pages AdSense and visitors need.
+  "/guides",
+  "/guides/(.*)",
+  "/about",
+  "/contact",
+  "/privacy",
+  "/terms",
+  "/ads.txt",
+]);
+
+// The authenticated areas. A path that is neither public nor private does
+// not exist, so it falls through to the 404 page instead of redirecting to
+// sign-in: crawlers and ad reviewers otherwise read the whole site as a
+// login wall. Every top-level app route must appear in one of the two lists
+// (pinned by __tests__/middleware-route-coverage.test.ts).
+const isPrivateRoute = createRouteMatcher([
+  "/dashboard(.*)",
+  "/settings(.*)",
+  "/broadcast(.*)",
+  "/impersonation(.*)",
+  "/api(.*)",
+  "/trpc(.*)",
 ]);
 
 /** Edge-safe request id: prefer the inbound header, else generate a UUIDv4. */
@@ -148,7 +170,7 @@ export default clerkMiddleware(async (auth, request: NextRequest) => {
 
     // Handle authentication for protected routes
     const scoringPath = /^\/matches\/[^/]+\/scoring/.test(path);
-    if (!isPublicRoute(request) || scoringPath) {
+    if ((!isPublicRoute(request) && isPrivateRoute(request)) || scoringPath) {
       if (!userId) {
         // API routes must answer with JSON status codes, never an HTML redirect.
         // The handler performs its own authorization and returns the real reason.

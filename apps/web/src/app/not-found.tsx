@@ -37,6 +37,15 @@ export default function NotFound() {
             </Button>
           </Link>
         </div>
+
+        {/* Unknown URLs land here now instead of on sign-in, so offer the
+            public content a visitor or crawler most likely wanted. */}
+        <nav aria-label="Popular pages" className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+          <Link href="/guides" className="hover:text-foreground">Cricket guides</Link>
+          <Link href="/hub" className="hover:text-foreground">Public hub</Link>
+          <Link href="/leaderboards" className="hover:text-foreground">Leaderboards</Link>
+          <Link href="/contact" className="hover:text-foreground">Contact</Link>
+        </nav>
       </MotionWrapper>
     </div>
   )

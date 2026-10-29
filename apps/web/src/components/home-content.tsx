@@ -13,14 +13,12 @@ import {
   ChevronDown,
   ClipboardCheck,
   Compass,
-  Menu,
   MonitorPlay,
   Radio,
   ShieldCheck,
   Trophy,
   Users,
   WifiOff,
-  X,
   Zap,
 } from "lucide-react"
 import Link from "next/link"
@@ -28,6 +26,9 @@ import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
 import { BrandMark } from "@/components/brand-mark"
 import { HOME_FAQ } from "@/lib/home-faq"
+import { MobileNav } from "@/components/public/public-nav"
+import { SiteFooter } from "@/components/public/site-footer"
+import { GUIDES } from "@/content/guides"
 import type { HomePulse } from "@/lib/home-pulse"
 
 /*
@@ -90,6 +91,17 @@ const ROLES = [
   },
 ] as const
 
+const HOME_NAV = [
+  { label: "Features", href: "#features" },
+  { label: "How it works", href: "#how-it-works" },
+  { label: "Guides", href: "/guides" },
+  { label: "Leaderboards", href: "/leaderboards" },
+  { label: "Public hub", href: "/hub" },
+] as const
+
+// Guides featured on the landing page: the most searched-for topics.
+const FEATURED_GUIDES = ["how-to-organize-a-cricket-tournament", "net-run-rate-explained", "cricket-extras-wides-no-balls-byes-leg-byes"]
+
 const STEPS = [
   { title: "Apply for your league", description: "Tell us about your league. Once approved, your workspace is ready." },
   { title: "Add teams and fixtures", description: "Invite teams, open registrations and generate the schedule." },
@@ -145,35 +157,6 @@ function NavAuth({ clerkReady }: { clerkReady: boolean }) {
         <UserButton />
       </SignedIn>
     </>
-  )
-}
-
-/**
- * Below md the Primary nav is hidden, so phones need their own way to reach
- * it. A native <details> disclosure keeps this hook-free (see the rules
- * above) and works before hydration.
- */
-function MobileNav() {
-  const close = (e: React.MouseEvent<HTMLElement>) => e.currentTarget.closest("details")?.removeAttribute("open")
-  const itemClass = "block rounded-lg px-3 py-2.5 hover:bg-muted hover:text-foreground"
-  return (
-    <details className="group relative md:hidden">
-      <summary
-        aria-label="Open navigation menu"
-        className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground [&::-webkit-details-marker]:hidden"
-      >
-        <Menu className="h-5 w-5 group-open:hidden" aria-hidden="true" />
-        <X className="hidden h-5 w-5 group-open:block" aria-hidden="true" />
-      </summary>
-      <nav
-        aria-label="Primary mobile"
-        className="absolute right-0 top-12 z-50 w-56 rounded-xl border border-border bg-card p-2 text-sm font-medium text-muted-foreground shadow-xl"
-      >
-        <a href="#features" className={itemClass} onClick={close}>Features</a>
-        <a href="#how-it-works" className={itemClass} onClick={close}>How it works</a>
-        <Link href="/leaderboards" className={itemClass} onClick={close}>Leaderboards</Link>
-      </nav>
-    </details>
   )
 }
 
@@ -348,7 +331,6 @@ export function HomeContent({
   pulse?: HomePulse | null
 }) {
   const clerkReady = useClerkReady()
-  const year = new Date().getFullYear()
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
@@ -370,12 +352,13 @@ export function HomeContent({
         <nav aria-label="Primary" className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
           <a href="#features" className="hover:text-foreground">Features</a>
           <a href="#how-it-works" className="hover:text-foreground">How it works</a>
+          <Link href="/guides" className="hover:text-foreground">Guides</Link>
           <Link href="/leaderboards" className="hover:text-foreground">Leaderboards</Link>
         </nav>
         <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <NavAuth clerkReady={clerkReady} />
-          <MobileNav />
+          <MobileNav items={HOME_NAV} />
         </div>
       </header>
 
@@ -492,6 +475,34 @@ export function HomeContent({
           </ol>
         </section>
 
+        <section aria-labelledby="guides-heading" className="mt-28">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="max-w-2xl">
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-primary">Guides</p>
+              <h2 id="guides-heading" className="font-display mt-3 text-[clamp(1.875rem,4vw,3rem)] font-extrabold leading-tight tracking-tight">
+                Learn to run and score cricket
+              </h2>
+            </div>
+            <Link href="/guides" className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
+              All guides
+            </Link>
+          </div>
+          <ul className="mt-10 grid gap-4 md:grid-cols-3">
+            {GUIDES.filter((guide) => FEATURED_GUIDES.includes(guide.slug)).map((guide) => (
+              <li key={guide.slug}>
+                <Link
+                  href={`/guides/${guide.slug}`}
+                  className="flex h-full flex-col rounded-2xl border border-border bg-card p-6 transition-colors hover:border-primary/40"
+                >
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">{guide.category}</span>
+                  <span className="mt-3 font-semibold leading-snug">{guide.title}</span>
+                  <span className="mt-2 text-sm leading-relaxed text-muted-foreground">{guide.description}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         <section id="faq" aria-labelledby="faq-heading" className="mt-28 scroll-mt-24">
           <div className="max-w-2xl">
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-primary">Questions</p>
@@ -536,27 +547,7 @@ export function HomeContent({
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-border">
-        <div className="container mx-auto flex flex-col gap-6 px-6 py-10 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-          <p className="flex items-center gap-2.5">
-            {logoUrl ? (
-              <img src={logoUrl} alt="" aria-hidden="true" className="h-6 w-6 shrink-0 rounded-md object-contain" />
-            ) : (
-              <BrandMark idPrefix="home-footer-mark" className="h-6 w-6 shrink-0" />
-            )}
-            <span>
-              © {year} {brandName}
-            </span>
-          </p>
-          <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">
-            <Link href="/hub" className="hover:text-foreground">Public hub</Link>
-            <Link href="/tournaments" className="hover:text-foreground">Tournaments</Link>
-            <Link href="/leaderboards" className="hover:text-foreground">Leaderboards</Link>
-            <Link href="/hall-of-fame" className="hover:text-foreground">Hall of fame</Link>
-            <Link href="/sign-in" className="hover:text-foreground">Sign in</Link>
-          </nav>
-        </div>
-      </footer>
+      <SiteFooter brandName={brandName} logoUrl={logoUrl} />
     </div>
   )
 }

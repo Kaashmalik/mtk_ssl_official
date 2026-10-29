@@ -1,4 +1,5 @@
 import React from "react"
+import { PublicShell } from "@/components/public/public-shell"
 import { HubLeagueCard } from "@/components/hub/hub-league-card"
 import { unstable_noStore as noStore } from "next/cache"
 import { buildPageMetadata } from "@/lib/site-metadata"
@@ -37,6 +38,7 @@ export default async function HubPage() {
   const hubItemList = failed ? null : buildHubItemList(read)
 
   return (
+    <PublicShell>
     <>
       {/* Batch 118: the platform->league discovery edge as an ItemList —
           only leagues with a verified public host are advertised, and a
@@ -68,5 +70,6 @@ export default async function HubPage() {
       </div>
     </div>
     </>
+    </PublicShell>
   )
 }

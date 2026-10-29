@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { appUrl } from "@/lib/site-metadata"
 import { getPublicTenantContext } from "@/lib/public-tenant"
 import { readPublishedTournaments } from "@/lib/public-visibility"
+import { GUIDES } from "@/content/guides"
 
 /**
  * The sitemap, PER HOST (Batch 117). A sitemap must never enumerate a URL a
@@ -21,8 +22,11 @@ import { readPublishedTournaments } from "@/lib/public-visibility"
  */
 // /sign-in is deliberately absent: a login form has nothing to rank for and
 // spends crawl budget the public pages should get.
-const PLATFORM_ROUTES = ["/", "/hub"]
-const TENANT_ROUTES = ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments"]
+// Guides and policy pages are host-independent static content, so every host
+// lists them (each canonicalizes to its own host).
+const CONTENT_ROUTES = ["/guides", "/about", "/contact", "/privacy", "/terms"]
+const PLATFORM_ROUTES = ["/", "/hub", ...CONTENT_ROUTES]
+const TENANT_ROUTES = ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments", ...CONTENT_ROUTES]
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let base = appUrl()
@@ -49,13 +53,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // signal Google learns to ignore, and there is no real per-page edit time.
   const staticEntries = (isTenantHost ? TENANT_ROUTES : PLATFORM_ROUTES).map(path => ({
     url: `${base}${path}`,
-    changeFrequency: (path === "/" ? "daily" : "weekly") as "daily" | "weekly",
-    priority: path === "/" ? 1 : 0.7,
+    changeFrequency: (path === "/" ? "daily" : CONTENT_ROUTES.includes(path) ? "monthly" : "weekly") as "daily" | "weekly" | "monthly",
+    priority: path === "/" ? 1 : CONTENT_ROUTES.includes(path) && path !== "/guides" ? 0.4 : 0.7,
   }))
   const tournamentEntries = published.map(tournament => ({
     url: `${base}/tournaments/${tournament.id}`,
     changeFrequency: "daily" as const,
     priority: 0.8,
   }))
-  return [...staticEntries, ...tournamentEntries]
+  const guideEntries = GUIDES.map(guide => ({
+    url: `${base}/guides/${guide.slug}`,
+    lastModified: new Date(`${guide.updatedAt}T00:00:00Z`),
+    changeFrequency: "monthly" as const,
+    priority: 0.8,
+  }))
+  return [...staticEntries, ...guideEntries, ...tournamentEntries]
 }

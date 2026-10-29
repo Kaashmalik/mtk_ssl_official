@@ -105,12 +105,18 @@ describe("SEO routes and metadata (Batches 112-117)", () => {
     const fileForRoute = (route: string): string => {
       const dynamicTournament = route.match(/^\/tournaments\/([0-9a-f-]{36})$/)
       if (dynamicTournament) return path.join("tournaments", "[id]", "page.tsx")
+      if (/^\/guides\/[a-z0-9-]+$/.test(route)) return path.join("guides", "[slug]", "page.tsx")
       const files: Record<string, string> = {
         "/": "page.tsx",
         "/hub": "hub/page.tsx",
         "/leaderboards": "leaderboards/page.tsx",
         "/hall-of-fame": "hall-of-fame/page.tsx",
         "/tournaments": "tournaments/page.tsx",
+        "/guides": "guides/page.tsx",
+        "/about": "about/page.tsx",
+        "/contact": "contact/page.tsx",
+        "/privacy": "privacy/page.tsx",
+        "/terms": "terms/page.tsx",
         "/sign-in": path.join("sign-in", "[[...sign-in]]", "page.tsx"),
       }
       return files[route]

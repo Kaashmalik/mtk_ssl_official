@@ -1,4 +1,5 @@
 import React from "react"
+import { PublicShell } from "@/components/public/public-shell"
 import { Card, CardContent, CardHeader, CardTitle } from "@mtk/ui/components/ui/card"
 import { unstable_noStore as noStore } from "next/cache"
 import { buildPageMetadata } from "@/lib/site-metadata"
@@ -41,6 +42,7 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
   const format = parsed.success ? parsed.data.format : undefined
   const formatLabel = publicLeaderboardFormatLabel(format)
   return (
+    <PublicShell>
     <div className="max-w-4xl mx-auto space-y-6 p-4">
       <h1 className="text-2xl font-bold">Leaderboards</h1>
       <p className="text-sm text-muted-foreground">{formatLabel ? `Published ${formatLabel}-format totals for this league only, aggregated from the per-innings scorecards of matches declared ${formatLabel}.` : "Published competition season totals in this league only. Formats are combined when no format filter is selected."} These are not official records or league awards. A check mark marks a roster entry linked to an active player account; cross-league career views are separate and only shown with the person's own consent.</p>
@@ -169,5 +171,6 @@ export default async function LeaderboardsPage({ searchParams }: { searchParams?
       </Card>
       </>}
     </div>
+    </PublicShell>
   )
 }
