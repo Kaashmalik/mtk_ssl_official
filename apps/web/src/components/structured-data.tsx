@@ -10,13 +10,16 @@ import { safeJsonLd } from "@/components/json-ld"
  * (platform brand as the caller-side fallback) — a branded league's home
  * page must not introduce itself as somebody else's product to crawlers.
  */
-export function StructuredData({ organizationName }: { organizationName: string }): React.ReactElement {
+export function StructuredData({ organizationName, logoUrl }: { organizationName: string; logoUrl?: string }): React.ReactElement {
   const base = appUrl()
   const organization = {
     "@context": "https://schema.org",
     "@type": "Organization",
     name: organizationName,
     url: `${base}/`,
+    // Google's Organization logo for search results: the tenant's own logo
+    // on a branded host, otherwise the platform mark (≥112px, crawlable).
+    logo: logoUrl ?? `${base}/icons/icon-512.png`,
     description:
       "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
   }

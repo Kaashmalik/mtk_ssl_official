@@ -41,7 +41,12 @@ export function buildRootMetadata(): Metadata {
       statusBarStyle: "black-translucent",
     },
     icons: {
+      // Raster/vector icons generated from public/icons/logo.svg by
+      // scripts/generate-brand-icons.mjs; /favicon.ico (48px-inclusive) is
+      // what search engines fetch for their result-page favicon.
       icon: [
+        { url: "/favicon.ico", sizes: "48x48" },
+        { url: "/icons/logo.svg", type: "image/svg+xml" },
         { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
         { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       ],

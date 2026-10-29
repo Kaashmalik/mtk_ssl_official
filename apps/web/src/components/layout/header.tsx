@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { UserButton } from "@clerk/nextjs"
 import { useTenantBrandName } from "@/components/tenant-brand-name"
+import { BrandMark } from "@/components/brand-mark"
 import { Search, Menu, Radio } from "lucide-react"
 import { Button } from "@mtk/ui/components/ui/button"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
@@ -115,7 +116,7 @@ export function Header({ userRole }: { userRole?: UserRole }) {
                 {logoUrl ? (
                   <img src={logoUrl} alt="" aria-hidden="true" className="h-6 w-6 rounded object-contain" />
                 ) : (
-                  <Trophy className="h-6 w-6 text-primary" />
+                  <BrandMark idPrefix="header-mark" className="h-6 w-6" />
                 )}
                 <span>{brandName}</span>
               </Link>

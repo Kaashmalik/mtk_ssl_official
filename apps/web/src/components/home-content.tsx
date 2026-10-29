@@ -25,6 +25,7 @@ import {
 import Link from "next/link"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
+import { BrandMark } from "@/components/brand-mark"
 import type { HomePulse } from "@/lib/home-pulse"
 
 /*
@@ -194,7 +195,7 @@ function ScorerPreview() {
       <div className="space-y-5 p-5 sm:p-6">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-muted-foreground">Falcons batting · 2nd innings</p>
+            <p className="text-sm font-medium text-muted-foreground">Shahmeer United batting · 2nd innings</p>
             <p className="font-display mt-1 text-5xl font-extrabold tabular-nums tracking-tight">
               142<span className="text-muted-foreground">/4</span>
             </p>
@@ -206,13 +207,13 @@ function ScorerPreview() {
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="rounded-xl border border-border p-3">
+          <div className="min-w-0 rounded-xl border border-border p-3">
             <p className="text-xs text-muted-foreground">Striker</p>
-            <p className="mt-0.5 font-semibold">A. Rahman <span className="tabular-nums text-muted-foreground">48 (31)</span></p>
+            <p className="mt-0.5 truncate font-semibold">Shahmeer Shakir <span className="tabular-nums text-muted-foreground">48 (31)</span></p>
           </div>
-          <div className="rounded-xl border border-border p-3">
+          <div className="min-w-0 rounded-xl border border-border p-3">
             <p className="text-xs text-muted-foreground">Bowler</p>
-            <p className="mt-0.5 font-semibold">S. Iqbal <span className="tabular-nums text-muted-foreground">3.3–0–29–2</span></p>
+            <p className="mt-0.5 truncate font-semibold">Hamza Iqbal <span className="tabular-nums text-muted-foreground">3.3–0–29–2</span></p>
           </div>
         </div>
 
@@ -334,7 +335,16 @@ function HubPulse({ pulse }: { pulse: HomePulse | null }) {
   )
 }
 
-export function HomeContent({ brandName, pulse = null }: { brandName: string; pulse?: HomePulse | null }) {
+export function HomeContent({
+  brandName,
+  logoUrl,
+  pulse = null,
+}: {
+  brandName: string
+  /** A branded tenant's HTTPS logo; absent → the platform mark. */
+  logoUrl?: string
+  pulse?: HomePulse | null
+}) {
   const clerkReady = useClerkReady()
   const year = new Date().getFullYear()
 
@@ -348,9 +358,11 @@ export function HomeContent({ brandName, pulse = null }: { brandName: string; pu
 
       <header className="container relative z-10 mx-auto flex items-center justify-between gap-4 px-6 py-5">
         <Link href="/" className="flex min-w-0 items-center gap-2.5 rounded-lg">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Trophy className="h-5 w-5" />
-          </span>
+          {logoUrl ? (
+            <img src={logoUrl} alt="" aria-hidden="true" className="h-9 w-9 shrink-0 rounded-xl object-contain" />
+          ) : (
+            <BrandMark idPrefix="home-header-mark" className="h-9 w-9 shrink-0 drop-shadow-sm" />
+          )}
           <span className="font-display truncate text-base font-bold tracking-tight sm:text-lg">{brandName}</span>
         </Link>
         <nav aria-label="Primary" className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
@@ -497,8 +509,15 @@ export function HomeContent({ brandName, pulse = null }: { brandName: string; pu
 
       <footer className="relative z-10 border-t border-border">
         <div className="container mx-auto flex flex-col gap-6 px-6 py-10 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-          <p>
-            © {year} {brandName}
+          <p className="flex items-center gap-2.5">
+            {logoUrl ? (
+              <img src={logoUrl} alt="" aria-hidden="true" className="h-6 w-6 shrink-0 rounded-md object-contain" />
+            ) : (
+              <BrandMark idPrefix="home-footer-mark" className="h-6 w-6 shrink-0" />
+            )}
+            <span>
+              © {year} {brandName}
+            </span>
           </p>
           <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">
             <Link href="/hub" className="hover:text-foreground">Public hub</Link>

@@ -13,8 +13,8 @@ export default async function HomePage() {
   return (
     <>
       {/* Batch 128: the home JSON-LD names the resolving tenant as well. */}
-      <StructuredData organizationName={resolveBrandName(brand)} />
-      <HomeContent brandName={resolveBrandName(brand)} pulse={pulse} />
+      <StructuredData organizationName={resolveBrandName(brand)} logoUrl={brand?.logoUrl} />
+      <HomeContent brandName={resolveBrandName(brand)} logoUrl={brand?.logoUrl} pulse={pulse} />
     </>
   );
 }

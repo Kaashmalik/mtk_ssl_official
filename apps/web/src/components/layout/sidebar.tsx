@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { cn } from "@mtk/ui/lib/utils"
 import { motion, AnimatePresence } from "framer-motion"
 import { useTenantBrandName } from "@/components/tenant-brand-name"
+import { BrandMark } from "@/components/brand-mark"
 import { PlatformCredit } from "@/components/layout/platform-credit"
 import { useState, useEffect, useMemo } from "react"
 import {
@@ -134,7 +135,7 @@ export function Sidebar({ userRole }: { userRole?: UserRole }) {
               className="h-6 w-6 rounded object-contain shrink-0"
             />
           ) : (
-            <Trophy className="h-6 w-6 text-primary shrink-0" />
+            <BrandMark idPrefix="sidebar-mark" className="h-6 w-6 shrink-0" />
           )}
           <AnimatePresence>
             {!collapsed && (
