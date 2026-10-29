@@ -12,12 +12,14 @@ import {
   CalendarRange,
   ClipboardCheck,
   Compass,
+  Menu,
   MonitorPlay,
   Radio,
   ShieldCheck,
   Trophy,
   Users,
   WifiOff,
+  X,
   Zap,
 } from "lucide-react"
 import Link from "next/link"
@@ -140,6 +142,35 @@ function NavAuth({ clerkReady }: { clerkReady: boolean }) {
         <UserButton />
       </SignedIn>
     </>
+  )
+}
+
+/**
+ * Below md the Primary nav is hidden, so phones need their own way to reach
+ * it. A native <details> disclosure keeps this hook-free (see the rules
+ * above) and works before hydration.
+ */
+function MobileNav() {
+  const close = (e: React.MouseEvent<HTMLElement>) => e.currentTarget.closest("details")?.removeAttribute("open")
+  const itemClass = "block rounded-lg px-3 py-2.5 hover:bg-muted hover:text-foreground"
+  return (
+    <details className="group relative md:hidden">
+      <summary
+        aria-label="Open navigation menu"
+        className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground [&::-webkit-details-marker]:hidden"
+      >
+        <Menu className="h-5 w-5 group-open:hidden" aria-hidden="true" />
+        <X className="hidden h-5 w-5 group-open:block" aria-hidden="true" />
+      </summary>
+      <nav
+        aria-label="Primary mobile"
+        className="absolute right-0 top-12 z-50 w-56 rounded-xl border border-border bg-card p-2 text-sm font-medium text-muted-foreground shadow-xl"
+      >
+        <a href="#features" className={itemClass} onClick={close}>Features</a>
+        <a href="#how-it-works" className={itemClass} onClick={close}>How it works</a>
+        <Link href="/leaderboards" className={itemClass} onClick={close}>Leaderboards</Link>
+      </nav>
+    </details>
   )
 }
 
@@ -330,6 +361,7 @@ export function HomeContent({ brandName, pulse = null }: { brandName: string; pu
         <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <NavAuth clerkReady={clerkReady} />
+          <MobileNav />
         </div>
       </header>
 
