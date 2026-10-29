@@ -19,8 +19,10 @@ import { readPublishedTournaments } from "@/lib/public-visibility"
  * - Any read failure falls back to the platform set; the sitemap never
  *   fabricates entries and never throws.
  */
-const PLATFORM_ROUTES = ["/", "/hub", "/sign-in"]
-const TENANT_ROUTES = ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments", "/sign-in"]
+// /sign-in is deliberately absent: a login form has nothing to rank for and
+// spends crawl budget the public pages should get.
+const PLATFORM_ROUTES = ["/", "/hub"]
+const TENANT_ROUTES = ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments"]
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let base = appUrl()
@@ -43,16 +45,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     published = []
   }
 
-  const now = new Date()
+  // No lastModified: stamping every URL with "now" on each fetch is a
+  // signal Google learns to ignore, and there is no real per-page edit time.
   const staticEntries = (isTenantHost ? TENANT_ROUTES : PLATFORM_ROUTES).map(path => ({
     url: `${base}${path}`,
-    lastModified: now,
     changeFrequency: (path === "/" ? "daily" : "weekly") as "daily" | "weekly",
     priority: path === "/" ? 1 : 0.7,
   }))
   const tournamentEntries = published.map(tournament => ({
     url: `${base}/tournaments/${tournament.id}`,
-    lastModified: now,
     changeFrequency: "daily" as const,
     priority: 0.8,
   }))

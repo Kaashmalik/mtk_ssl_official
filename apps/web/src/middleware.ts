@@ -42,7 +42,11 @@ const isPublicRoute = createRouteMatcher([
   // Bearer-link preview is public; redemption still requires verified session identity.
   "/accept-invite",
   "/matches/(.*)",
+  // The public tournament index and hall of fame are listed in the sitemap;
+  // without these entries crawlers were 307'd to sign-in.
+  "/tournaments",
   "/tournaments/(.*)",
+  "/hall-of-fame",
   "/leaderboards",
   // The cross-league public hub (PUB-02) and the consent-gated career
   // profiles beneath it are anonymous surfaces: the data gates (consent,

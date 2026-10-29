@@ -64,9 +64,11 @@ describe("SEO routes and metadata (Batches 112-117)", () => {
     ])
     const sitemap = (await load("../app/sitemap.ts")).default as () => Promise<Array<{ url: string }>>
     const urls = (await sitemap()).map(entry => entry.url)
-    for (const route of ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments", "/sign-in"]) {
+    for (const route of ["/", "/hub", "/leaderboards", "/hall-of-fame", "/tournaments"]) {
       expect(urls).toContain(`https://falcon.cricketLeague.com${route}`)
     }
+    // A login form has nothing to rank for; it stays out of every sitemap.
+    expect(urls).not.toContain("https://falcon.cricketLeague.com/sign-in")
     expect(urls).toContain("https://falcon.cricketLeague.com/tournaments/00000000-0000-4000-8000-00000000000a")
     expect(urls).toContain("https://falcon.cricketLeague.com/tournaments/00000000-0000-4000-8000-00000000000b")
     expect(urls.every(url => !url.includes("/dashboard") && !url.includes("/api/"))).toBe(true)
@@ -89,7 +91,7 @@ describe("SEO routes and metadata (Batches 112-117)", () => {
     const urls = (await sitemap()).map(entry => entry.url)
     expect(urls).toContain("https://ssl.example.com/")
     expect(urls).toContain("https://ssl.example.com/hub")
-    expect(urls).toContain("https://ssl.example.com/sign-in")
+    expect(urls).not.toContain("https://ssl.example.com/sign-in")
     for (const route of ["/tournaments", "/leaderboards", "/hall-of-fame"]) {
       expect(urls).not.toContain(`https://ssl.example.com${route}`)
     }

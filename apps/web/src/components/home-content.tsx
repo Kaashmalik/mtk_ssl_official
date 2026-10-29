@@ -10,6 +10,7 @@ import {
   ArrowRight,
   BarChart3,
   CalendarRange,
+  ChevronDown,
   ClipboardCheck,
   Compass,
   Menu,
@@ -26,6 +27,7 @@ import Link from "next/link"
 import { ThemeToggle } from "@mtk/ui/components/theme-toggle"
 import { useClerkReady } from "@/components/providers"
 import { BrandMark } from "@/components/brand-mark"
+import { HOME_FAQ } from "@/lib/home-faq"
 import type { HomePulse } from "@/lib/home-pulse"
 
 /*
@@ -386,11 +388,11 @@ export function HomeContent({
             </p>
 
             <h1 className="font-display max-w-3xl text-[clamp(2.5rem,6vw,4.5rem)] font-extrabold leading-[1.02] tracking-tight text-balance">
-              Run every match day with <span className="text-primary">clarity and confidence.</span>
+              Run your cricket league with <span className="text-primary">clarity and confidence.</span>
             </h1>
 
             <p className="max-w-xl text-lg leading-relaxed text-muted-foreground text-pretty">
-              {brandName} brings tournaments, teams, live scoring, and player performance into one dependable workspace built for organizers and scorers.
+              {brandName} is a cricket league management app that brings tournaments, fixtures, ball-by-ball live scoring, points tables and player stats into one dependable workspace built for organizers and scorers.
             </p>
 
             <div className="flex flex-wrap gap-3">
@@ -490,6 +492,33 @@ export function HomeContent({
           </ol>
         </section>
 
+        <section id="faq" aria-labelledby="faq-heading" className="mt-28 scroll-mt-24">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-primary">Questions</p>
+            <h2 id="faq-heading" className="font-display mt-3 text-[clamp(1.875rem,4vw,3rem)] font-extrabold leading-tight tracking-tight">
+              Cricket league app FAQ
+            </h2>
+          </div>
+          <div className="mt-10 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+            {HOME_FAQ.map(({ question, answer }) => (
+              <details key={question} className="group px-6 py-5">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold [&::-webkit-details-marker]:hidden">
+                  <h3 className="text-base">{question}</h3>
+                  <ChevronDown
+                    className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                    aria-hidden="true"
+                  />
+                </summary>
+                <p className="mt-3 max-w-3xl leading-relaxed text-muted-foreground">{answer}</p>
+              </details>
+            ))}
+          </div>
+          <p className="mt-6 text-sm text-muted-foreground">
+            See it in action on the <Link href="/hub" className="font-semibold text-primary underline-offset-4 hover:underline">public cricket hub</Link>, or browse{" "}
+            <Link href="/leaderboards" className="font-semibold text-primary underline-offset-4 hover:underline">player leaderboards</Link>.
+          </p>
+        </section>
+
         <section
           aria-labelledby="cta-heading"
           className="relative mt-28 overflow-hidden rounded-3xl bg-primary px-6 py-14 text-center text-primary-foreground sm:px-12"
@@ -521,6 +550,7 @@ export function HomeContent({
           </p>
           <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">
             <Link href="/hub" className="hover:text-foreground">Public hub</Link>
+            <Link href="/tournaments" className="hover:text-foreground">Tournaments</Link>
             <Link href="/leaderboards" className="hover:text-foreground">Leaderboards</Link>
             <Link href="/hall-of-fame" className="hover:text-foreground">Hall of fame</Link>
             <Link href="/sign-in" className="hover:text-foreground">Sign in</Link>

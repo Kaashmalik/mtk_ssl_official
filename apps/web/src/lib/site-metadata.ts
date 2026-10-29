@@ -7,32 +7,51 @@ import type { Metadata } from "next"
  * test environment because of next/font ESM coupling).
  */
 export function appUrl(): string {
-  return (process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001").replace(/\/$/, "")
+  // trim(): a trailing newline pasted into the deploy env once leaked into
+  // the JSON-LD as "https://www.cricketleague.tech\n/", an invalid URL.
+  return (process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001").trim().replace(/\/$/, "")
 }
+
+// Google shows ~60 title characters: lead with the brand, then the terms
+// people actually search for. (The old "Pakistan's #1" claim was unprovable.)
+export const SITE_TITLE = "Shakir Super League – Cricket League App & Live Scoring"
+
+/** Shared search-facing copy: the root description and the home JSON-LD. */
+export const SITE_DESCRIPTION =
+  "Run your cricket league online: tournaments, fixtures, ball-by-ball live scoring, points tables and player stats. Built for leagues in Pakistan and worldwide."
 
 export function buildRootMetadata(): Metadata {
   return {
     metadataBase: new URL(appUrl()),
     title: {
-      default: "Shakir Super League - Pakistan's #1 Cricket Platform",
+      default: SITE_TITLE,
       template: "%s | Shakir Super League",
     },
-    description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
-    keywords: ["cricket", "tournament", "league", "Pakistan", "scoring"],
+    description: SITE_DESCRIPTION,
+    keywords: [
+      "cricket league",
+      "cricket league management",
+      "cricket tournament app",
+      "live cricket scoring",
+      "cricket scoring app",
+      "cricket points table",
+      "cricket league Pakistan",
+      "Shakir Super League",
+    ],
     robots: { index: true, follow: true },
     alternates: { canonical: "/" },
     openGraph: {
       type: "website",
       siteName: "Shakir Super League",
-      title: "Shakir Super League - Pakistan's #1 Cricket Platform",
-      description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
       url: "/",
       locale: "en_PK",
     },
     twitter: {
       card: "summary_large_image",
-      title: "Shakir Super League - Pakistan's #1 Cricket Platform",
-      description: "Modern cricket tournament management platform for leagues across Pakistan and the global diaspora.",
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
     },
     manifest: "/manifest.webmanifest",
     appleWebApp: {

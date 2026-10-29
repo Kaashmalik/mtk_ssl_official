@@ -35,12 +35,17 @@ export function buildTenantBrandMetadata(base: Metadata, brand: BrandPresentatio
 
   const branded: Metadata = { ...base }
   if (appName) {
+    // Brand first, then the phrases people search for ("cricket league",
+    // "live scoring"); social cards carry the same title so a shared link
+    // never shows the platform's name on a tenant's site.
+    const defaultTitle = `${appName} – Cricket League App & Live Scoring`
     branded.title = {
       ...(typeof base.title === "object" ? base.title : {}),
-      default: `${appName} - Cricket Tournaments, Live Scoring & Standings`,
+      default: defaultTitle,
       template: `%s | ${appName}`,
     }
-    branded.openGraph = { ...(base.openGraph ?? {}), siteName: appName }
+    branded.openGraph = { ...(base.openGraph ?? {}), siteName: appName, title: defaultTitle }
+    branded.twitter = { ...(base.twitter ?? {}), title: defaultTitle }
     // Batch 127: the installed iOS web-app label is visible white-label
     // surface too — same short-label rule as the PWA manifest.
     branded.appleWebApp = { ...(typeof base.appleWebApp === "object" ? base.appleWebApp : {}), title: shortTenantLabel(brand) }
@@ -69,7 +74,7 @@ const PLATFORM_THEME_COLOR = "#22c55e"
 const PLATFORM_MANIFEST = {
   name: PLATFORM_NAME,
   short_name: PLATFORM_SHORT_LABEL,
-  description: "Pakistan's #1 Cricket Tournament & League Management Platform",
+  description: "Cricket league management and live scoring: tournaments, fixtures, points tables and player stats.",
   start_url: "/dashboard",
   scope: "/",
   display: "standalone",
