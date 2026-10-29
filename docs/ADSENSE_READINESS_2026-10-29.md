@@ -1,6 +1,7 @@
 # Google AdSense Readiness — cricketleague.tech
 
 Operator: **MTK Codex**, Lahore, Pakistan · contact `kaash0542@gmail.com`
+See also: [`SEO_GROWTH_GUIDE_2026-10-29.md`](./SEO_GROWTH_GUIDE_2026-10-29.md) for Search Console, keywords and backlinks.
 First audit: 2026-10-29 (live site). Code updated the same day.
 
 ## Status
