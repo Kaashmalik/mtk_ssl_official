@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/*
+ * Tailwind v4 only auto-scans this app. The shared kit lives in
+ * packages/ui, so its unique utilities (ring-offset-background,
+ * min-w-[8rem], [&_svg]:size-4, ...) only exist in the CSS once the
+ * package is registered as a source. See apps/web/src/app/globals.css.
+ */
+@source "../../../../packages/ui/src";
+
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;

@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/*
+ * Tailwind v4 only auto-scans the app's own tree. The shared UI kit lives in a
+ * sibling workspace package, so utilities that appear ONLY there were never
+ * generated: `inset-y-0` (Sheet), `sm:max-w-sm`, `ring-offset-background`,
+ * `min-w-[8rem]` (menus), `file:border-0` (file inputs), `[&_svg]:size-4`.
+ *
+ * The dashboard's phone menu is a Sheet: without `inset-y-0` a `fixed` panel
+ * keeps its static position (below the fold), so tapping the hamburger showed
+ * only the dark overlay — a blank screen. Keep this in sync with packages/ui.
+ */
+@source "../../../../packages/ui/src";
+
 @theme {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
