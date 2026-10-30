@@ -3,6 +3,21 @@
 > Written after the Oct 6 hardening pass. Read before running `supabase db push`,
 > `db reset`, or adding a migration.
 
+> **30 October 2026 (SEO-01 apply session) - `20261029120000_clear_dead_ssl_branding_urls`
+> APPLIED to the LIVE project + ledgered; `--db` drift gate GREEN**
+> The only pending migration after syncing 15 remote commits. Applied to
+> `anxstufkbqnjkxgksfkn` via the repo `postgres` driver (`.env` `DATABASE_URL`), the whole
+> file executed inside one transaction together with its ledger insert, so the file and
+> `supabase_migrations.schema_migrations` can never diverge. Verification-first
+> preflight: `tenant_branding` present (1 row), no ledger rows for the stamp, exactly one
+> row carrying the seeded dead values (`logo_url = 'https://ssl.cricket/logo.png'`,
+> `favicon_url = 'https://ssl.cricket/favicon.ico'`). Post-apply verification, all green:
+> that row now has `logo_url = NULL` / `favicon_url = NULL` (falls back to the platform
+> icon set), zero rows still referencing `ssl.cricket`, and
+> `missingInDb`/`untrackedInDb` both empty. Ledger row carries the folder's original
+> stamp (`created_by seo01-remote-apply`). Idempotent by construction: only the exact
+> seeded URLs are touched, so an owner-uploaded logo is never cleared by a re-run.
+
 > **27 October 2026 (ENH-10 apply session) - all three pending migrations APPLIED to the
 > LIVE project + ledgered; `--db` drift gate GREEN**
 > Applied to `anxstufkbqnjkxgksfkn` via the `DATABASE_URL` fallback (repo `postgres`
