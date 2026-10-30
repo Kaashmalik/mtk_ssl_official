@@ -340,7 +340,10 @@ export function HomeContent({
         className="pointer-events-none absolute inset-x-0 top-0 h-[720px] bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:56px_56px] opacity-40 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]"
       />
 
-      <header className="container relative z-10 mx-auto flex items-center justify-between gap-4 px-6 py-5">
+      {/* z-30 keeps the phone menu (nav z-50 inside this header) above
+       * <main>, which is also relative z-10: with both at z-10 the later
+       * sibling painted over the open dropdown, so taps looked dead. */}
+      <header className="container relative z-30 mx-auto flex items-center justify-between gap-4 px-6 py-5">
         <Link href="/" className="flex min-w-0 items-center gap-2.5 rounded-lg">
           {logoUrl ? (
             <img src={logoUrl} alt="" aria-hidden="true" className="h-9 w-9 shrink-0 rounded-xl object-contain" />
