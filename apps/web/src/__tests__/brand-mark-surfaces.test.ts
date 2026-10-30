@@ -36,4 +36,11 @@ describe("brand mark fallbacks (sign-in + OG card)", () => {
     expect(og).not.toContain("#1e40af")
     expect(og).not.toContain("#0f766e")
   })
+
+  it("Clerk's footer never paints the opaque black panel under dark text", () => {
+    // colorBackground: transparent is resolved to rgb(0,0,0) by Clerk for the
+    // footer's gradient layer; clearing the footer background is the fix.
+    const clerk = readFileSync(join(appDir, "sign-in", "[[...sign-in]]", "clerk-sign-in.tsx"), "utf8")
+    expect(clerk).toContain('footer: "bg-none!"')
+  })
 })

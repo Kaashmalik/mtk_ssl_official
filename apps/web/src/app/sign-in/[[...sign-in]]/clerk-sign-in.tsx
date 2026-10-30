@@ -36,6 +36,12 @@ export function ClerkSignIn({
         elements: {
           rootBox: "mx-auto",
           card: "shadow-xl border border-white/20 bg-white/80 backdrop-blur-md dark:bg-black/50 dark:border-white/10 rounded-xl",
+          // colorBackground is "transparent" so the glass card shows the page
+          // gradient; Clerk resolves that to rgb(0,0,0) for the footer's own
+          // gradient layer, which painted an opaque black panel under dark
+          // text ("Sign up", "Secured by Clerk" were unreadable). Clearing the
+          // footer's background keeps it on the glass card with readable text.
+          footer: "bg-none!",
         },
         variables: {
           colorPrimary: primaryColor || "oklch(0.6 0.16 145)",
