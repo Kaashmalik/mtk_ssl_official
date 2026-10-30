@@ -2,6 +2,7 @@ import Image from "next/image";
 import { getTenantWithBranding } from "@/lib/tenant";
 import { buildPageMetadata } from "@/lib/site-metadata";
 import { resolveBrandName } from "@/lib/white-label-metadata";
+import { BrandMark } from "@/components/brand-mark";
 import { ClerkSignIn } from "./clerk-sign-in";
 
 // Batch 127: the sign-in page is already tenant-styled; its metadata now
@@ -50,8 +51,12 @@ export default async function SignInPage() {
         />
       )}
       <div className="relative z-10 w-full max-w-md">
-        {branding?.logoUrl && (
-          <div className="mb-8 flex justify-center">
+        {/* Same icon-slot rule as the header and sidebar: a published tenant
+         * logo wins; with none (e.g. the seeded tenant's dead asset URLs were
+         * cleared) the platform mark renders instead of an empty or broken
+         * image. resolveBrandName keeps the name honest per host. */}
+        <div className="mb-8 flex items-center justify-center gap-3">
+          {branding?.logoUrl ? (
             <Image
               src={branding.logoUrl}
               alt={branding.appName || "Logo"}
@@ -60,8 +65,15 @@ export default async function SignInPage() {
               height={64}
               unoptimized
             />
-          </div>
-        )}
+          ) : (
+            <>
+              <BrandMark idPrefix="signin-mark" className="h-12 w-12" />
+              <span className="text-xl font-semibold text-foreground">
+                {resolveBrandName(branding ?? null)}
+              </span>
+            </>
+          )}
+        </div>
         <ClerkSignIn primaryColor={customStyles?.primaryColor} />
       </div>
     </div>
