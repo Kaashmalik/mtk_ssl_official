@@ -5,12 +5,12 @@ import { findPublishedMediaDeliveryUrl } from "@/lib/media-records"
 /**
  * GET /api/media/[id]/delivery
  *
- * Resolves a published, verified asset to its Cloudinary delivery locator. The
- * redirect is never cached: unpublish/withdraw must take effect immediately and
- * the asset id alone does not grant access to any other lifecycle state.
- *
- * This is public delivery only. Authenticated/entitled/private delivery needs a
- * separate approved design and is not implied by this route.
+ * Resolves a published, verified asset to a Cloudinary locator. Originals are
+ * stored with the `authenticated` delivery type, so the locator is a signed URL
+ * minted per request that expires within minutes; unpublish/withdraw therefore
+ * takes effect without chasing leaked provider URLs. The redirect is never
+ * cached and the asset id alone does not grant access to any other lifecycle
+ * state.
  */
 export async function GET(
   _request: Request,

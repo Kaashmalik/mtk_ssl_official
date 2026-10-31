@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
 import {
   cloudinaryDeliveryUrl,
@@ -135,6 +135,41 @@ describe("ENH-07-02: public delivery locator", () => {
       metadata: { deliveryUrl: delivery },
     }])
     await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBe(delivery)
+  })
+
+  describe("private originals", () => {
+    const privateRow = (overrides: Record<string, unknown> = {}) => ({
+      state: "ready", publication: "published", tenantActive: true,
+      kind: "image", format: "png", providerPublicId: "ssl_demo",
+      metadata: { deliveryType: "authenticated" },
+      ...overrides,
+    })
+    const env = { ...process.env }
+    afterEach(() => { process.env = { ...env } })
+
+    it("mints a short-lived signed URL only for a published asset", async () => {
+      process.env.CLOUDINARY_CLOUD_NAME = "demo"
+      process.env.CLOUDINARY_API_KEY = "key"
+      process.env.CLOUDINARY_API_SECRET = "secret"
+      selectJoinedRows([privateRow()])
+      const url = new URL((await findPublishedMediaDeliveryUrl(ASSET))!)
+      expect(url.origin + url.pathname).toBe("https://api.cloudinary.com/v1_1/demo/image/download")
+      expect(url.searchParams.get("type")).toBe("authenticated")
+      expect(url.searchParams.get("public_id")).toBe("ssl_demo")
+      expect(Number(url.searchParams.get("expires_at")) - Number(url.searchParams.get("timestamp")))
+        .toBeLessThanOrEqual(300)
+
+      selectJoinedRows([privateRow({ publication: "unpublished" })])
+      await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+      selectJoinedRows([privateRow({ publication: "withdrawn" })])
+      await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+    })
+
+    it("serves nothing when provider credentials are missing", async () => {
+      delete process.env.CLOUDINARY_API_SECRET
+      selectJoinedRows([privateRow()])
+      await expect(findPublishedMediaDeliveryUrl(ASSET)).resolves.toBeNull()
+    })
   })
 
   it("hides unpublished, quarantined and inactive-league assets", async () => {

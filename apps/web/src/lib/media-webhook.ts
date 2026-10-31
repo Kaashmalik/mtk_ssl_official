@@ -224,7 +224,9 @@ async function processNotification(
     if (notification.resource_type !== "image" && notification.resource_type !== "video") {
       return quarantine("unsupported_resource_type")
     }
-    if (notification.type !== "upload") return quarantine("untrusted_delivery_type")
+    if (notification.type !== "authenticated" && notification.type !== "upload") {
+      return quarantine("untrusted_delivery_type")
+    }
 
     const rows = await tx
       .select({

@@ -5,6 +5,7 @@ import {
   cloudinaryResourceType,
   fetchProviderAsset,
   mimeTypeForFormat,
+  privateDeliveryUrl,
   publicDeliveryUrl,
   signCloudinaryParams,
   validateProviderAsset,
@@ -75,7 +76,8 @@ describe("ENH-07-02: Cloudinary request signing", () => {
       public_id: "ssl_abc",
       timestamp: "1792576800",
       overwrite: "false",
-      type: "upload",
+      // Originals are private until the app decides to serve them.
+      type: "authenticated",
       max_file_size: "4000",
       allowed_formats: "png,jpg",
       api_key: "key",
@@ -127,9 +129,23 @@ describe("ENH-07-02: authoritative provider read", () => {
       },
     })
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.cloudinary.com/v1_1/ssl-test/resources/image/upload/ssl_abc",
+      "https://api.cloudinary.com/v1_1/ssl-test/resources/image/authenticated/ssl_abc",
       expect.objectContaining({ cache: "no-store" }),
     )
+  })
+
+  it("falls back to the public delivery type only when no private original exists", async () => {
+    const fetchImpl = vi.fn(async (url: string) => url.includes("/authenticated/")
+      ? new Response("", { status: 404 })
+      : new Response(JSON.stringify({
+        public_id: "ssl_abc", resource_type: "image", type: "upload", format: "png",
+      }), { status: 200 }))
+    const result = await fetchProviderAsset({
+      config: CONFIG, publicId: "ssl_abc", kind: "image", fetchImpl: fetchImpl as any,
+    })
+    expect(result.ok).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(fetchImpl.mock.calls[1][0]).toContain("/resources/image/upload/ssl_abc")
   })
 
   it("distinguishes not-found, outage and malformed answers", async () => {
@@ -176,6 +192,11 @@ describe("ENH-07-02: finalize validation is a ceiling, not a trust fall", () => 
       .toEqual({ ok: false, reason: "resource_type_mismatch" })
     expect(validateProviderAsset({ ...base, asset: asset({ deliveryType: "private" }) }))
       .toEqual({ ok: false, reason: "untrusted_delivery_type" })
+  })
+
+  it("accepts the private delivery type that new uploads are signed with", () => {
+    expect(validateProviderAsset({ ...base, asset: asset({ deliveryType: "authenticated" }) }).ok)
+      .toBe(true)
   })
 
   it("refuses unknown formats and a format different from the declaration", () => {
@@ -228,6 +249,21 @@ describe("ENH-07-02: delivery identity", () => {
     expect(publicDeliveryUrl({
       config: CONFIG, kind: "image", format: "png", publicId: "ssl_abc", version: 17,
     })).toBe("https://res.cloudinary.com/ssl-test/image/upload/v17/ssl_abc.png")
+  })
+
+  it("mints a short-lived signed private download URL from verified identity", () => {
+    const url = new URL(privateDeliveryUrl({
+      config: CONFIG, kind: "image", format: "png", publicId: "ssl_abc",
+      now: new Date("2026-10-21T10:00:00Z"),
+    }))
+    expect(url.origin + url.pathname).toBe("https://api.cloudinary.com/v1_1/ssl-test/image/download")
+    const query = Object.fromEntries(url.searchParams)
+    expect(query).toMatchObject({
+      public_id: "ssl_abc", format: "png", type: "authenticated", api_key: "key",
+      timestamp: "1792576800", expires_at: "1792576920", attachment: "false",
+    })
+    const { signature, api_key: _apiKey, ...signed } = query
+    expect(signature).toBe(signCloudinaryParams(signed, CONFIG.apiSecret))
   })
 
   it("maps known provider formats and refuses unknown ones", () => {

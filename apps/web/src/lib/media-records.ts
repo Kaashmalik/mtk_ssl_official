@@ -1,6 +1,8 @@
 import { db, mediaAssets, tenants, type Media } from "@mtk/database"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
+import { cloudinaryConfig, privateDeliveryUrl } from "./media-provider"
+import type { MediaKind } from "@mtk/database/lib/media-policy"
 import {
   classifyLegacyMedia,
   mediaDeliveryDecision,
@@ -120,8 +122,10 @@ const CLOUDINARY_DELIVERY_HOST = "res.cloudinary.com"
  * state. Provider metadata (public id, version, raw payload) never leaves this
  * function.
  *
- * Private/entitled delivery is deliberately not implemented here; it needs a
- * separate approved authentication/expiry design.
+ * Originals uploaded as `authenticated` have no stored locator: a signed URL
+ * that expires within minutes is minted here, per request, only after the
+ * publication gate passes. Assets created before that change keep the stored
+ * public URL.
  */
 export async function findPublishedMediaDeliveryUrl(assetId: string): Promise<string | null> {
   const id = z.string().uuid().parse(assetId)
@@ -130,6 +134,9 @@ export async function findPublishedMediaDeliveryUrl(assetId: string): Promise<st
       state: mediaAssets.state,
       publication: mediaAssets.publication,
       metadata: mediaAssets.metadata,
+      kind: mediaAssets.kind,
+      format: mediaAssets.format,
+      providerPublicId: mediaAssets.providerPublicId,
       tenantActive: tenants.isActive,
     })
     .from(mediaAssets)
@@ -143,7 +150,19 @@ export async function findPublishedMediaDeliveryUrl(assetId: string): Promise<st
     audience: "public",
   })
   if (!decision.allowed) return null
-  return cloudinaryDeliveryUrl(row.metadata)
+  const stored = cloudinaryDeliveryUrl(row.metadata)
+  if (stored) return stored
+
+  const deliveryType = (row.metadata as { deliveryType?: unknown } | null)?.deliveryType
+  if (deliveryType !== "authenticated" || !row.format || !row.providerPublicId) return null
+  const config = cloudinaryConfig()
+  if (!config) return null
+  return privateDeliveryUrl({
+    config,
+    kind: row.kind as MediaKind,
+    format: row.format,
+    publicId: row.providerPublicId,
+  })
 }
 
 /** Accept only a plain https Cloudinary delivery URL; never a redirector or data URL. */

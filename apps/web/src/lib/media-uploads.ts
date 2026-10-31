@@ -486,13 +486,20 @@ async function settleReady(
       durationSeconds: validation.durationSeconds,
       metadata: {
         source: "provider_admin_api",
-        deliveryUrl: publicDeliveryUrl({
-          config,
-          kind: session.kind as MediaKind,
-          format: validation.format,
-          publicId: session.providerPublicId,
-          version: asset.version,
-        }),
+        deliveryType: asset.deliveryType,
+        // Private originals have no stored URL: a signed, short-lived one is
+        // minted per request only after the publication gate allows it.
+        ...(asset.deliveryType === "authenticated"
+          ? {}
+          : {
+              deliveryUrl: publicDeliveryUrl({
+                config,
+                kind: session.kind as MediaKind,
+                format: validation.format,
+                publicId: session.providerPublicId,
+                version: asset.version,
+              }),
+            }),
         providerCreatedAt: asset.createdAt,
       },
       createdBy: session.userId,

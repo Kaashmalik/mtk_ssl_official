@@ -23,6 +23,13 @@ export type CloudinaryConfig = {
 
 export const CLOUDINARY_SIGNATURE_WINDOW_SECONDS = 3_600
 export const MEDIA_UPLOAD_SESSION_SECONDS = 900
+/**
+ * Originals are uploaded with the `authenticated` delivery type so a provider
+ * URL can never exist before the application decides to serve the asset.
+ * `upload` is still accepted on read for assets created before that change.
+ */
+export const MEDIA_UPLOAD_DELIVERY_TYPE = "authenticated"
+export const MEDIA_PRIVATE_DELIVERY_TTL_SECONDS = 120
 
 export function cloudinaryConfig(env: NodeJS.ProcessEnv = process.env): CloudinaryConfig | null {
   const cloudName = env.CLOUDINARY_CLOUD_NAME?.trim()
@@ -110,7 +117,7 @@ export function buildUploadAuthorization(input: {
     public_id: input.publicId,
     timestamp: String(timestamp),
     overwrite: "false",
-    type: "upload",
+    type: MEDIA_UPLOAD_DELIVERY_TYPE,
     max_file_size: String(input.declaredBytes),
     ...(input.allowedFormats.length > 0
       ? { allowed_formats: input.allowedFormats.join(",") }
@@ -159,21 +166,26 @@ export async function fetchProviderAsset(input: {
 }): Promise<ProviderFetchResult> {
   const fetchImpl = input.fetchImpl ?? fetch
   const resourceType = cloudinaryResourceType(input.kind)
-  const url = `https://api.cloudinary.com/v1_1/${encodeURIComponent(input.config.cloudName)}/resources/${resourceType}/upload/${encodeURIComponent(input.publicId)}`
-  let response: Response
-  try {
-    response = await fetchImpl(url, {
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${input.config.apiKey}:${input.config.apiSecret}`).toString("base64")}`,
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(input.timeoutMs ?? 8_000),
-      cache: "no-store",
-    })
-  } catch {
-    return { ok: false, reason: "provider_unavailable" }
+  let response: Response | null = null
+  // Admin API reads are scoped by delivery type: look for the private
+  // original first, then fall back to assets created as public.
+  for (const deliveryType of [MEDIA_UPLOAD_DELIVERY_TYPE, "upload"]) {
+    const url = `https://api.cloudinary.com/v1_1/${encodeURIComponent(input.config.cloudName)}/resources/${resourceType}/${deliveryType}/${encodeURIComponent(input.publicId)}`
+    try {
+      response = await fetchImpl(url, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${input.config.apiKey}:${input.config.apiSecret}`).toString("base64")}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(input.timeoutMs ?? 8_000),
+        cache: "no-store",
+      })
+    } catch {
+      return { ok: false, reason: "provider_unavailable" }
+    }
+    if (response.status !== 404) break
   }
-  if (response.status === 404) return { ok: false, reason: "provider_not_found" }
+  if (!response || response.status === 404) return { ok: false, reason: "provider_not_found" }
   if (!response.ok) return { ok: false, reason: "provider_unavailable" }
   let body: unknown
   try {
@@ -271,7 +283,9 @@ export function validateProviderAsset(input: {
   if (asset.resourceType !== cloudinaryResourceType(input.kind)) {
     return { ok: false, reason: "resource_type_mismatch" }
   }
-  if (asset.deliveryType !== "upload") return { ok: false, reason: "untrusted_delivery_type" }
+  if (asset.deliveryType !== MEDIA_UPLOAD_DELIVERY_TYPE && asset.deliveryType !== "upload") {
+    return { ok: false, reason: "untrusted_delivery_type" }
+  }
 
   const format = asset.format?.trim().toLowerCase() ?? null
   const mimeType = mimeTypeForFormat(format)
@@ -307,8 +321,37 @@ export function validateProviderAsset(input: {
 }
 
 /**
+ * Time-limited, signed download URL for an `authenticated` original (the
+ * Cloudinary `private_download_url` contract). It is minted per request for an
+ * asset the application has already decided to serve, and expires within
+ * minutes, so unpublishing takes effect without chasing leaked URLs.
+ */
+export function privateDeliveryUrl(input: {
+  config: CloudinaryConfig
+  kind: MediaKind
+  format: string
+  publicId: string
+  now?: Date
+  ttlSeconds?: number
+}): string {
+  const now = input.now ?? new Date()
+  const timestamp = Math.floor(now.getTime() / 1_000)
+  const params: Record<string, string> = {
+    attachment: "false",
+    expires_at: String(timestamp + (input.ttlSeconds ?? MEDIA_PRIVATE_DELIVERY_TTL_SECONDS)),
+    format: input.format,
+    public_id: input.publicId,
+    timestamp: String(timestamp),
+    type: MEDIA_UPLOAD_DELIVERY_TYPE,
+  }
+  const signature = signCloudinaryParams(params, input.config.apiSecret)
+  const query = new URLSearchParams({ ...params, api_key: input.config.apiKey, signature })
+  return `https://api.cloudinary.com/v1_1/${encodeURIComponent(input.config.cloudName)}/${cloudinaryResourceType(input.kind)}/download?${query.toString()}`
+}
+
+/**
  * Public delivery URL is built from verified provider identity, never from a
- * client-supplied URL. Only published assets reach this function.
+ * client-supplied URL. Only legacy `upload`-type assets use this.
  */
 export function publicDeliveryUrl(input: {
   config: CloudinaryConfig

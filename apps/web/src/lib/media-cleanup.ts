@@ -204,8 +204,11 @@ export async function processMediaCleanupJobs(now = new Date()): Promise<MediaCl
   for (const job of jobs) {
     let result: CleanupOutcome
     if (job.action === "invalidate_delivery") {
-      // The tombstone/withdrawal is already committed by the caller. There is
-      // no provider call for local delivery invalidation.
+      // The tombstone/withdrawal is already committed by the caller. Private
+      // (`authenticated`) originals are only reachable through signed URLs that
+      // the application mints after its publication gate and that expire within
+      // MEDIA_PRIVATE_DELIVERY_TTL_SECONDS, so withdrawal needs no provider
+      // call; destruction is the separate `destroy_provider_asset` job.
       result = { outcome: "destroyed" }
     } else if (job.action === "destroy_provider_asset") {
       result = await destroyProviderAsset(config, job)
