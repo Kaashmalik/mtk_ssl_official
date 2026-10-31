@@ -21,8 +21,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-ssl}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-ssl_prod}
+    # Loopback only. Docker publishes ports through its own iptables chain,
+    # which bypasses ufw, so a bare "5432:5432" is reachable from the internet.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
     healthcheck:
@@ -37,13 +39,18 @@ services:
     image: redis:7-alpine
     container_name: ssl-prod-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports:
-      - "6379:6379"
+    # Internal network only (no published port) and password protected, so a
+    # misconfigured firewall or a compromised neighbour container cannot read
+    # sessions, rate-limit state or queues.
+    command: >
+      redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis_prod_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -51,7 +58,7 @@ services:
       - ssl-prod-network
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:24.8
     container_name: ssl-prod-clickhouse
     restart: unless-stopped
     environment:
@@ -59,9 +66,8 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-ssl}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    # No published ports: only analytics-service reaches it, over the
+    # internal network.
     volumes:
       - clickhouse_prod_data:/var/lib/clickhouse
     networks:
@@ -83,8 +89,7 @@ services:
     restart: unless-stopped
     depends_on:
       - zookeeper
-    ports:
-      - "9092:9092"
+    # No published ports: brokers are reachable on the internal listener only.
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -129,7 +134,7 @@ services:
       # @Roles route until a caller presenting API_AUTH_TOKEN is wired up.
       TRUST_ROLE_HEADER: "false"
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://ssl.mtkcodex.site,https://admin.ssl.mtkcodex.site}
       SENTRY_DSN: ${SENTRY_DSN:-}
@@ -157,12 +162,13 @@ services:
       dockerfile: services/api-gateway/Dockerfile
     container_name: ssl-prod-api-gateway
     restart: unless-stopped
+    # Loopback only (host health checks); public traffic enters via nginx.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       AUTH_SERVICE_HOST: auth-service
       AUTH_SERVICE_PORT: 5001
       TOURNAMENT_SERVICE_HOST: tournament-service
@@ -189,7 +195,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5001
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       DATABASE_URL: ${DATABASE_URL}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
     depends_on:
@@ -203,12 +209,13 @@ services:
       dockerfile: services/scoring-service/Dockerfile
     container_name: ssl-prod-scoring-service
     restart: unless-stopped
+    # Loopback only (host health checks); public traffic enters via nginx.
     ports:
-      - "4002:4002"
+      - "127.0.0.1:4002:4002"
     environment:
       NODE_ENV: production
       PORT: 4002
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       KAFKA_BROKERS: kafka:29092
       DATABASE_URL: ${DATABASE_URL}
       SENTRY_DSN: ${SENTRY_DSN}
@@ -286,7 +293,7 @@ services:
       NODE_ENV: production
       PORT: 5006
       KAFKA_BROKERS: kafka:29092
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       - kafka
@@ -348,7 +355,7 @@ services:
     container_name: ssl-prod-web
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -357,7 +364,7 @@ services:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
       # --- server-only ---
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}

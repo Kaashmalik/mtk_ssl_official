@@ -102,6 +102,12 @@ check_secret STRIPE_WEBHOOK_SECRET "payment confirmations fail"
 check_secret SCORING_GATEWAY_TOKEN "scoring-service refuses to boot in production"
 check_secret STREAMING_ACCESS_TOKEN "streaming-service refuses to boot in production"
 check_secret MEDIASOUP_ANNOUNCED_IP "WebRTC clients cannot reach media ports"
+check_secret REDIS_PASSWORD "redis refuses to start without it (use a URL-safe value, e.g. openssl rand -hex 24)"
+
+REDIS_PW="$(env_get REDIS_PASSWORD)"
+if [[ -n "$REDIS_PW" && ! "$REDIS_PW" =~ ^[A-Za-z0-9._~-]{16,}$ ]]; then
+  fail "REDIS_PASSWORD must be >=16 URL-safe characters (A-Z a-z 0-9 . _ ~ -) because it is embedded in REDIS_URL"
+fi
 
 # ─── 4. Database target ─────────────────────────────────────────────────────
 section "Database target"
@@ -158,6 +164,20 @@ if [[ -f "$COMPOSE_FILE" ]]; then
   fi
 else
   fail "$COMPOSE_FILE not found"
+fi
+
+# ─── 7b. Data-store exposure ────────────────────────────────────────────────
+section "Published ports"
+# Docker publishes ports via its own iptables chain, which bypasses ufw. Data
+# stores must never be bound to all interfaces.
+if [[ -f "$COMPOSE_FILE" ]]; then
+  exposed="$(grep -nE '^[[:space:]]*-[[:space:]]*"?(0\.0\.0\.0:)?(5432|6379|8123|9000|9092|2181):' "$COMPOSE_FILE" || true)"
+  if [[ -n "$exposed" ]]; then
+    fail "data-store ports are published on all interfaces:"
+    echo "$exposed" | sed 's/^/      /'
+  else
+    ok "no data-store port is published on a public interface"
+  fi
 fi
 
 # ─── 8. Port availability ───────────────────────────────────────────────────
