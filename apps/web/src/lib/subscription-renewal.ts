@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto"
 import { db, notifications, subscriptions, tenants } from "@mtk/database"
-import { and, eq, gte, inArray, isNotNull, lte } from "drizzle-orm"
+import { and, eq, gte, inArray, isNotNull, lt, lte } from "drizzle-orm"
 import { logger } from "@mtk/observability"
 
 /**
@@ -110,7 +110,15 @@ export async function runRenewalSweep(now: Date): Promise<RenewalSweepResult> {
       await db
         .update(subscriptions)
         .set({ status: "past_due", updatedAt: now })
-        .where(eq(subscriptions.id, sub.id))
+        // Re-check status and period in the write itself: a payment that
+        // settled after the candidate read must not be flipped back.
+        .where(
+          and(
+            eq(subscriptions.id, sub.id),
+            eq(subscriptions.status, "active"),
+            lt(subscriptions.currentPeriodEnd, now),
+          ),
+        )
       markedPastDue++
     }
 
@@ -180,11 +188,14 @@ export async function runRenewalSweep(now: Date): Promise<RenewalSweepResult> {
           and(
             eq(subscriptions.id, sub.id),
             inArray(subscriptions.status, ["active", "past_due", "trialing"]),
+            // A renewal that committed after the candidate read moved the
+            // period end forward; it must not be paused or downgraded.
+            lte(subscriptions.currentPeriodEnd, enforceCutoff),
           ),
         )
         .returning({ id: subscriptions.id })
 
-      // Lost a race with another invocation — do not double-downgrade.
+      // Lost a race with another invocation or a renewal — do not downgrade.
       if (updated.length === 0) return false
 
       await tx

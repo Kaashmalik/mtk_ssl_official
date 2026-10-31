@@ -131,6 +131,8 @@ describe("renewal sweep: notify pass", () => {
 
     const flip = queryRecords().find((r) => r.kind === "update")
     expect(flip?.setValues).toMatchObject({ status: "past_due" })
+    // The write re-checks status and period so a just-settled payment survives.
+    expect(flip?.params).toEqual(["sub-1", "active", NOW.toISOString()])
     // -0.5 days floored to -1 lands in the grace bucket, so a notification goes out too.
     expect(mocks.insert).toHaveBeenCalledTimes(1)
   })
@@ -169,6 +171,16 @@ describe("renewal sweep: grace-window enforcement", () => {
     expect(claim.setValues).toMatchObject({ status: "paused" })
     expect(String(claim.params)).toContain("past_due")
     expect(downgrade.setValues).toEqual({ plan: "free", updatedAt: NOW })
+  })
+
+  it("re-checks the expiry inside the pause claim so a just-renewed subscription is untouched", async () => {
+    mocks.state.selectResults = [[], [sub({ status: "past_due", currentPeriodEnd: atDays(-(GRACE_DAYS + 3)) })]]
+    mocks.state.updateResults = [[{ id: "sub-1" }]]
+    await runRenewalSweep(NOW)
+    const [claim] = queryRecords().filter((r) => r.kind === "update")
+    const cutoff = new Date(NOW.getTime() - GRACE_DAYS * 86_400_000)
+    expect(claim.params).toContain(cutoff.toISOString())
+    expect(claim.sql).toContain("current_period_end")
   })
 
   it("does not downgrade the tenant when the pause claim loses the race", async () => {
