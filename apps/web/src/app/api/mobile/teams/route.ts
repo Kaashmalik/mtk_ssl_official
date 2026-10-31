@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { resolveActiveTenantId } from "@/lib/rbac-server"
+import { resolveMemberTenantId } from "@/lib/rbac-server"
 import {
   parseMemberDirectoryListQuery,
   readMemberTeam,
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
-  const tenantId = await resolveActiveTenantId()
+  const tenantId = await resolveMemberTenantId(userId)
   if (!tenantId) {
     return NextResponse.json({ error: "no_active_league" }, { status: 403 })
   }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PgDialect } from "drizzle-orm/pg-core"
-import { getUserRoleForTenant, hasPermissionServer, requirePermissionServer, resolveActiveTenantId } from "@/lib/rbac-server"
+import { getUserRoleForTenant, hasPermissionServer, requirePermissionServer, resolveActiveTenantId, resolveMemberTenantId } from "@/lib/rbac-server"
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), user: vi.fn(), member: vi.fn(), tenant: vi.fn(), host: vi.fn(), primary: vi.fn() }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
@@ -70,6 +70,24 @@ describe("Fail-closed exact-league RBAC", () => {
   it("uses primary only after a successful absent host result", async () => {
     mocks.host.mockResolvedValue(null)
     expect(await resolveActiveTenantId()).toBe("B")
+  })
+  it("member resolution returns the host league only for an effective member", async () => {
+    expect(await resolveMemberTenantId("clerk-ali")).toBe("A")
+  })
+  it.each([
+    ["no membership", null],
+    ["suspended membership", { ...member, status: "suspended" }],
+    ["expired membership", { ...member, expiresAt: new Date("2020-01-01T00:00:00Z") }],
+    ["platform role", { ...member, role: "super_admin" }],
+  ])("member resolution fails closed for %s on a league host", async (_label, membership) => {
+    mocks.member.mockResolvedValue(membership)
+    expect(await resolveMemberTenantId("clerk-ali")).toBeNull()
+  })
+  it("member resolution fails closed for a deactivated account and for lookup errors", async () => {
+    mocks.user.mockResolvedValue({ ...user, isActive: false })
+    expect(await resolveMemberTenantId("clerk-ali")).toBeNull()
+    mocks.user.mockRejectedValue(new Error("Unavailable"))
+    expect(await resolveMemberTenantId("clerk-ali")).toBeNull()
   })
   it("no league is no authorization, not a global fan/owner grant", async () => {
     mocks.host.mockResolvedValue(null); mocks.primary.mockResolvedValue(null)

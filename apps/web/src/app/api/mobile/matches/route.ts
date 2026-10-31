@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { resolveActiveTenantId } from "@/lib/rbac-server"
+import { resolveMemberTenantId } from "@/lib/rbac-server"
 import { parseMemberMatchListQuery, readMemberMatch, readMemberMatchPage } from "@/lib/mobile-bff"
 import { MOBILE_BFF_ROUTES, MOBILE_BFF_VERSION, isUuid } from "@mtk/contracts"
 
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 
-  const tenantId = await resolveActiveTenantId()
+  const tenantId = await resolveMemberTenantId(userId)
   if (!tenantId) {
     return NextResponse.json({ error: "no_active_league" }, { status: 403 })
   }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { resolveActiveTenantId } from "@/lib/rbac-server"
+import { resolveMemberTenantId } from "@/lib/rbac-server"
 import { eq } from "drizzle-orm"
 import { db, tenants } from "@mtk/database"
 import { parseMemberDirectoryListQuery, readAnnouncements } from "@/lib/mobile-bff"
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   try {
     const { userId } = await auth()
     if (userId) {
-      tenantId = await resolveActiveTenantId()
+      tenantId = await resolveMemberTenantId(userId)
       if (tenantId) {
         const [tenant] = await db
           .select({ plan: tenants.plan })

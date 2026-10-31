@@ -33,6 +33,25 @@ export async function resolveActiveTenantId(): Promise<string | null> {
 }
 
 /**
+ * Resolve the active league ONLY when the signed-in account is an effective,
+ * active member of it. Host resolution alone says which league a request is
+ * addressed to, not whether the caller belongs there, so member-only reads
+ * (the native BFF) must use this instead of `resolveActiveTenantId`.
+ * Any failure resolves to null (fail closed).
+ */
+export async function resolveMemberTenantId(clerkUserId: string): Promise<string | null> {
+  try {
+    const tenantId = await resolveActiveTenantId();
+    if (!tenantId) return null;
+    const role = await getUserRoleForTenant(clerkUserId, tenantId);
+    return role === null ? null : tenantId;
+  } catch (error) {
+    console.error("[rbac] member tenant resolution failed", error);
+    return null;
+  }
+}
+
+/**
  * Get user role for a specific tenant from the junction table.
  * Explicit active membership only. Missing rows and lookup failures never grant
  * legacy/global privileges; deploy the membership backfill before this code.

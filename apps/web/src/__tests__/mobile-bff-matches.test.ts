@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   paged: vi.fn(),
 }))
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }))
-vi.mock("@/lib/rbac-server", () => ({ resolveActiveTenantId: mocks.resolveTenant }))
+vi.mock("@/lib/rbac-server", () => ({ resolveMemberTenantId: mocks.resolveTenant }))
 
 vi.mock("@mtk/database", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@mtk/database")>()
